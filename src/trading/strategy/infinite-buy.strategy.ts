@@ -1,0 +1,279 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  PerStockTradingStrategy,
+  StockStrategyContext,
+  TradingSignal,
+} from './strategy.interface';
+
+/** LOC 지원 거래소 (미국만) */
+const LOC_EXCHANGES = new Set(['NASD', 'NYSE', 'AMEX']);
+
+@Injectable()
+export class InfiniteBuyStrategy implements PerStockTradingStrategy {
+  readonly name = 'infinite-buy';
+  private readonly logger = new Logger(InfiniteBuyStrategy.name);
+
+  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+    const { watchStock, price, position, marketCondition, stockIndicators } = ctx;
+    const signals: TradingSignal[] = [];
+    const details: Record<string, any> = {};
+
+    // 1. 오늘 이미 실행 → skip
+    if (ctx.alreadyExecutedToday) {
+      this.logger.debug(`[${watchStock.stockCode}] Already executed today, skip`);
+      return signals;
+    }
+
+    // 2. quota 미설정 → skip
+    if (!watchStock.quota || watchStock.quota <= 0) {
+      this.logger.debug(`[${watchStock.stockCode}] No quota set, skip`);
+      return signals;
+    }
+
+    const curPrice = price.currentPrice;
+    if (curPrice <= 0) {
+      this.logger.warn(`[${watchStock.stockCode}] Invalid current price: ${curPrice}`);
+      return signals;
+    }
+
+    const market = watchStock.market;
+    const exchangeCode = watchStock.exchangeCode || 'KRX';
+    const isOverseas = market === 'OVERSEAS';
+    const hasPosition = !!position && position.quantity > 0;
+
+    // --- 개선 E: 시장 상황 필터 ---
+    details.marketCondition = marketCondition;
+    const indexBelowMA200 = !marketCondition.referenceIndexAboveMA200;
+
+    if (indexBelowMA200 && !hasPosition) {
+      // 지수가 200일선 아래 + 포지션 없음 → 신규 진입 차단
+      this.logger.log(
+        `[${watchStock.stockCode}] ${marketCondition.referenceIndexName} below MA200, no new entry`,
+      );
+      details.skippedReason = 'index_below_ma200_no_position';
+      return signals;
+    }
+
+    // --- 개선 C: 종목 선별 필터 ---
+    details.stockIndicators = stockIndicators;
+
+    if (!hasPosition && !stockIndicators.currentAboveMA200) {
+      // 신규 진입 + 현재가 < MA200 → 하락 추세, 매수 거부
+      this.logger.log(`[${watchStock.stockCode}] Price below MA200, no new entry`);
+      details.skippedReason = 'price_below_ma200';
+      return signals;
+    }
+
+    // --- 기본 무한매수법 계산 ---
+    const quota = watchStock.quota;
+    const totalInvested = position?.totalInvested || 0;
+    const T = totalInvested > 0 ? totalInvested / quota : 0;
+    const avgPrice = position?.avgPrice || curPrice;
+    const holdQty = position?.quantity || 0;
+
+    details.T = T;
+    details.avgPrice = avgPrice;
+    details.holdQty = holdQty;
+
+    // T >= maxCycles → skip (max cycles 도달)
+    if (T >= watchStock.maxCycles) {
+      this.logger.log(`[${watchStock.stockCode}] Max cycles reached (T=${T.toFixed(1)})`);
+      details.skippedReason = 'max_cycles';
+      return signals;
+    }
+
+    // --- 개선 A: 손절 ---
+    if (hasPosition && curPrice < avgPrice * (1 - watchStock.stopLossRate)) {
+      this.logger.log(
+        `[${watchStock.stockCode}] STOP LOSS triggered: cur=${curPrice}, avg=${avgPrice}, rate=${watchStock.stopLossRate}`,
+      );
+      signals.push({
+        market,
+        exchangeCode: isOverseas ? exchangeCode : undefined,
+        stockCode: watchStock.stockCode,
+        side: 'SELL',
+        quantity: holdQty,
+        price: curPrice,
+        reason: `Stop loss: T=${T.toFixed(1)}, loss=${((1 - curPrice / avgPrice) * 100).toFixed(1)}%`,
+        orderDivision: '00', // 손절은 지정가
+      });
+      return signals;
+    }
+
+    // --- Quota 조정 ---
+    let adjustedQuota = quota;
+
+    // 개선 E: 금리 급등시 절반
+    if (marketCondition.interestRateRising) {
+      adjustedQuota *= 0.5;
+      details.quotaAdjust_interestRate = true;
+    }
+
+    // 개선 C: RSI < 30 과매도시 1.5배
+    if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) {
+      adjustedQuota *= 1.5;
+      details.quotaAdjust_rsi = true;
+    }
+
+    // 개선 D: 가용자금 한도
+    adjustedQuota = Math.min(adjustedQuota, ctx.buyableAmount);
+
+    // 개선 D: 종목당 최대 투자비율 체크
+    if (ctx.totalPortfolioValue > 0 && totalInvested > 0) {
+      const currentRate = totalInvested / ctx.totalPortfolioValue;
+      if (currentRate >= watchStock.maxPortfolioRate) {
+        this.logger.log(
+          `[${watchStock.stockCode}] Portfolio rate exceeded: ${(currentRate * 100).toFixed(1)}% >= ${(watchStock.maxPortfolioRate * 100).toFixed(0)}%`,
+        );
+        details.skippedReason = 'max_portfolio_rate';
+        // 매수 중단하지만 매도는 허용 → adjustedQuota = 0
+        adjustedQuota = 0;
+      }
+    }
+
+    details.adjustedQuota = adjustedQuota;
+
+    // --- 무한매수법 매수/매도 가격 계산 ---
+    const baseRate = (10 - T / 2 + 100) / 100;
+    const pivotPrice = baseRate * avgPrice;
+
+    // 지수 200일선 아래면 매수 중단 (매도만 허용)
+    const buyAllowed = !indexBelowMA200 && adjustedQuota > 0;
+
+    // 가격 반올림 함수
+    const roundPrice = isOverseas
+      ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
+      : (p: number) => Math.round(p);              // 정수
+
+    // LOC 주문 구분
+    const locDivision = isOverseas && LOC_EXCHANGES.has(exchangeCode) ? '34' : '00';
+
+    if (!hasPosition && buyAllowed) {
+      // --- 첫 매수 (포지션 없음) ---
+      const buyQty = Math.floor(adjustedQuota / curPrice);
+      if (buyQty > 0) {
+        signals.push({
+          market,
+          exchangeCode: isOverseas ? exchangeCode : undefined,
+          stockCode: watchStock.stockCode,
+          side: 'BUY',
+          quantity: buyQty,
+          price: roundPrice(curPrice),
+          reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}`,
+          orderDivision: locDivision,
+        });
+      }
+    } else if (hasPosition) {
+      // --- 매수 시그널 ---
+      if (T < 20 && buyAllowed) {
+        // Buy1 + Buy2
+        const buy1Price = roundPrice(Math.min(curPrice * 1.2, avgPrice));
+        const buy2Price = roundPrice(pivotPrice - 0.01);
+
+        // T가 짝수면 buy1 우선, 홀수면 buy2 우선
+        const isEven = Math.floor(T) % 2 === 0;
+        const halfQuota = adjustedQuota / 2;
+
+        const buy1Qty = isEven
+          ? Math.floor(halfQuota / buy1Price)
+          : Math.floor((adjustedQuota - halfQuota) / buy1Price);
+        const buy2Qty = isEven
+          ? Math.floor((adjustedQuota - halfQuota) / buy2Price)
+          : Math.floor(halfQuota / buy2Price);
+
+        if (buy1Qty > 0 && buy1Price > 0) {
+          signals.push({
+            market,
+            exchangeCode: isOverseas ? exchangeCode : undefined,
+            stockCode: watchStock.stockCode,
+            side: 'BUY',
+            quantity: buy1Qty,
+            price: buy1Price,
+            reason: `Buy1: T=${T.toFixed(1)}, ${buy1Qty}주 @ ${buy1Price}`,
+            orderDivision: locDivision,
+          });
+        }
+
+        if (buy2Qty > 0 && buy2Price > 0) {
+          signals.push({
+            market,
+            exchangeCode: isOverseas ? exchangeCode : undefined,
+            stockCode: watchStock.stockCode,
+            side: 'BUY',
+            quantity: buy2Qty,
+            price: buy2Price,
+            reason: `Buy2: T=${T.toFixed(1)}, ${buy2Qty}주 @ ${buy2Price}`,
+            orderDivision: '00', // buy2는 지정가
+          });
+        }
+      } else if (T >= 20 && buyAllowed) {
+        // Buy2만
+        const buy2Price = roundPrice(Math.min(pivotPrice - 0.1, curPrice * 1.2));
+        const buy2Qty = Math.floor(adjustedQuota / buy2Price);
+
+        if (buy2Qty > 0 && buy2Price > 0) {
+          signals.push({
+            market,
+            exchangeCode: isOverseas ? exchangeCode : undefined,
+            stockCode: watchStock.stockCode,
+            side: 'BUY',
+            quantity: buy2Qty,
+            price: buy2Price,
+            reason: `Buy2(T≥20): T=${T.toFixed(1)}, ${buy2Qty}주 @ ${buy2Price}`,
+            orderDivision: '00',
+          });
+        }
+      }
+
+      // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
+      if (holdQty > 0) {
+        // Sell1: pivotPrice, 보유량의 1/4
+        const sell1Qty = Math.max(1, Math.round(holdQty / 4));
+        const sell1Price = roundPrice(pivotPrice);
+
+        if (sell1Price > 0) {
+          signals.push({
+            market,
+            exchangeCode: isOverseas ? exchangeCode : undefined,
+            stockCode: watchStock.stockCode,
+            side: 'SELL',
+            quantity: sell1Qty,
+            price: sell1Price,
+            reason: `Sell1: T=${T.toFixed(1)}, ${sell1Qty}주 @ ${sell1Price}`,
+            orderDivision: locDivision,
+          });
+        }
+
+        // Sell2: 개선 B 동적 목표
+        const sell2Qty = holdQty - sell1Qty;
+        if (sell2Qty > 0) {
+          let targetRate: number;
+          if (T < 10) targetRate = 1.05;
+          else if (T < 20) targetRate = 1.10;
+          else targetRate = 1.15;
+
+          const sell2Price = roundPrice(avgPrice * targetRate);
+
+          if (sell2Price > 0) {
+            signals.push({
+              market,
+              exchangeCode: isOverseas ? exchangeCode : undefined,
+              stockCode: watchStock.stockCode,
+              side: 'SELL',
+              quantity: sell2Qty,
+              price: sell2Price,
+              reason: `Sell2: T=${T.toFixed(1)}, target=${((targetRate - 1) * 100).toFixed(0)}%, ${sell2Qty}주 @ ${sell2Price}`,
+              orderDivision: '00', // sell2는 지정가
+            });
+          }
+        }
+      }
+    }
+
+    this.logger.log(
+      `[${watchStock.stockCode}] T=${T.toFixed(1)}, signals=${signals.length}, quota=${adjustedQuota.toFixed(0)}`,
+    );
+
+    return signals;
+  }
+}

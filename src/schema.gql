@@ -1,0 +1,157 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type TradeRecordType {
+  id: ID!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  side: Side!
+  orderType: OrderType!
+  quantity: Int!
+  price: Float!
+  executedPrice: Float
+  executedQty: Int
+  orderNo: String
+  status: OrderStatus!
+  strategyName: String
+  reason: String
+  createdAt: DateTime!
+}
+
+enum Market {
+  DOMESTIC
+  OVERSEAS
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  LOC
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  PARTIAL
+  CANCELLED
+  FAILED
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type PositionType {
+  id: ID!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  quantity: Int!
+  avgPrice: Float!
+  currentPrice: Float!
+  profitLoss: Float!
+  profitRate: Float!
+  totalInvested: Float!
+}
+
+type StockPriceType {
+  stockCode: String!
+  stockName: String!
+  currentPrice: Float!
+  openPrice: Float
+  highPrice: Float
+  lowPrice: Float
+  volume: Int
+}
+
+type DashboardSummaryType {
+  totalProfitLoss: Float!
+  totalTradeCount: Int!
+  todayTradeCount: Int!
+  winRate: Float!
+}
+
+type StrategyExecutionType {
+  id: ID!
+  market: Market!
+  stockCode: String!
+  strategyName: String!
+  executedDate: String!
+  progress: Float!
+  signalCount: Int!
+  details: String
+  createdAt: DateTime!
+}
+
+type WatchStockType {
+  id: ID!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  isActive: Boolean!
+  strategyName: String
+  quota: Float
+  cycle: Int!
+  maxCycles: Int!
+  stopLossRate: Float!
+  maxPortfolioRate: Float!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type AuthPayload {
+  accessToken: String!
+}
+
+type Query {
+  trades(market: Market, side: Side, limit: Int, offset: Int): [TradeRecordType!]!
+  trade(id: ID!): TradeRecordType
+  positions(market: Market): [PositionType!]!
+  quote(stockCode: String!): StockPriceType
+  overseasQuote(exchangeCode: String!, symbol: String!): StockPriceType
+  dashboardSummary: DashboardSummaryType!
+  strategyExecutions(stockCode: String, strategyName: String, limit: Int): [StrategyExecutionType!]!
+  watchStocks(market: Market): [WatchStockType!]!
+}
+
+type Mutation {
+  createWatchStock(input: CreateWatchStockInput!): WatchStockType!
+  updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
+  deleteWatchStock(id: ID!): Boolean!
+  login(username: String!, password: String!): AuthPayload!
+}
+
+input CreateWatchStockInput {
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  strategyName: String
+  quota: Float
+  maxCycles: Int
+  stopLossRate: Float
+  maxPortfolioRate: Float
+}
+
+input UpdateWatchStockInput {
+  exchangeCode: String
+  stockName: String
+  isActive: Boolean
+  strategyName: String
+  quota: Float
+  cycle: Int
+  maxCycles: Int
+  stopLossRate: Float
+  maxPortfolioRate: Float
+}
