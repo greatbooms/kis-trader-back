@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TradingStrategy, TradingStrategyContext, TradingSignal } from './strategy.interface';
+import { TradingStrategy, TradingStrategyContext, TradingSignal } from '../types';
 
 @Injectable()
 export class NoopStrategy implements TradingStrategy {

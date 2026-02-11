@@ -24,7 +24,7 @@ import { NotificationModule } from './notification/notification.module';
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       playground: true,
       introspection: true,
-      context: ({ req }) => ({ req }),
+      context: ({ req, res }) => ({ req, res }),
     }),
     ScheduleModule.forRoot(),
     KisModule,

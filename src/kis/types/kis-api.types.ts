@@ -16,6 +16,7 @@ export interface DomesticPriceOutput {
   stck_hgpr: string; // 고가
   stck_lwpr: string; // 저가
   acml_vol: string;  // 누적거래량
+  prdy_vrss_vol_rate?: string; // 전일 대비 거래량 비율
   hts_kor_isnm?: string; // 종목명
 }
 
@@ -76,6 +77,7 @@ export interface StockPriceResult {
   highPrice: number;
   lowPrice: number;
   volume: number;
+  prevDayVolumeRate?: number; // 전일 대비 거래량 비율 (%)
 }
 
 /** 주문 결과 */

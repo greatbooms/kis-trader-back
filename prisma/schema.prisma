@@ -60,6 +60,7 @@ model WatchStock {
   maxCycles        Int      @default(40) @map("max_cycles")
   stopLossRate     Decimal  @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
   maxPortfolioRate Decimal  @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
+  strategyParams   Json?    @map("strategy_params")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -91,6 +92,12 @@ enum OrderStatus {
   FAILED
 }
 
+enum MarketRegime {
+  TRENDING_UP
+  SIDEWAYS
+  TRENDING_DOWN
+}
+
 model StrategyExecution {
   id           String   @id @default(uuid())
   market       Market
@@ -104,4 +111,50 @@ model StrategyExecution {
 
   @@unique([market, stockCode, strategyName, executedDate])
   @@map("strategy_executions")
+}
+
+model MarketRegimeSnapshot {
+  id           String       @id @default(uuid())
+  market       Market
+  exchangeCode String       @map("exchange_code")
+  regime       MarketRegime
+  adx          Decimal      @db.Decimal(8, 4)
+  ma20         Decimal      @db.Decimal(16, 4)
+  ma60         Decimal      @db.Decimal(16, 4)
+  indexPrice   Decimal      @map("index_price") @db.Decimal(16, 4)
+  details      String?
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@map("market_regime_snapshots")
+}
+
+model RiskSnapshot {
+  id              String   @id @default(uuid())
+  market          Market
+  snapshotDate    String   @map("snapshot_date")
+  portfolioValue  Decimal  @map("portfolio_value") @db.Decimal(16, 4)
+  cashBalance     Decimal  @map("cash_balance") @db.Decimal(16, 4)
+  dailyPnl        Decimal  @map("daily_pnl") @db.Decimal(16, 4)
+  dailyPnlRate    Decimal  @map("daily_pnl_rate") @db.Decimal(8, 6)
+  drawdown        Decimal  @db.Decimal(8, 6)
+  peakValue       Decimal  @map("peak_value") @db.Decimal(16, 4)
+  positionCount   Int      @map("position_count")
+  investedRate    Decimal  @map("invested_rate") @db.Decimal(8, 6)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([market, snapshotDate])
+  @@map("risk_snapshots")
+}
+
+model StrategyAllocation {
+  id             String   @id @default(uuid())
+  market         Market
+  strategyName   String   @map("strategy_name")
+  allocationRate Decimal  @map("allocation_rate") @db.Decimal(4, 3)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([market, strategyName])
+  @@map("strategy_allocations")
 }

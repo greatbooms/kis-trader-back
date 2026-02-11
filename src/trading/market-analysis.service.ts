@@ -4,7 +4,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
-import { MarketCondition, StockIndicators } from './strategy/strategy.interface';
+import { MarketCondition, StockIndicators } from './types';
 
 interface CacheEntry<T> {
   data: T;
@@ -26,7 +26,7 @@ export class MarketAnalysisService {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
 
-  /** 종목별 기술 지표 (MA200, RSI14) */
+  /** 종목별 기술 지표 (MA200, RSI14 + 하이브리드 전략용 확장 지표) */
   async getStockIndicators(
     market: 'DOMESTIC' | 'OVERSEAS',
     exchangeCode: string,
@@ -45,13 +45,75 @@ export class MarketAnalysisService {
       }
 
       const closes = prices.map((p) => p.close);
+      const highs = prices.map((p) => p.high);
+      const lows = prices.map((p) => p.low);
+      const volumes = prices.map((p) => p.volume);
+
       const ma200 = prices.length >= 200 ? this.calculateMA(closes, 200) : undefined;
+      const ma20 = prices.length >= 20 ? this.calculateMA(closes, 20) : undefined;
+      const ma60 = prices.length >= 60 ? this.calculateMA(closes, 60) : undefined;
       const rsi14 = this.calculateRSI(closes, 14);
+
+      // Bollinger Bands (20, 2)
+      let bollingerUpper: number | undefined;
+      let bollingerMiddle: number | undefined;
+      let bollingerLower: number | undefined;
+      if (prices.length >= 20) {
+        const bb = this.calculateBollingerBands(closes, 20, 2);
+        bollingerUpper = bb.upper;
+        bollingerMiddle = bb.middle;
+        bollingerLower = bb.lower;
+      }
+
+      // MACD (12, 26, 9)
+      let macdLine: number | undefined;
+      let macdSignal: number | undefined;
+      let macdHistogram: number | undefined;
+      let macdPrevHistogram: number | undefined;
+      if (prices.length >= 35) {
+        const macd = this.calculateMACD(closes);
+        macdLine = macd.line;
+        macdSignal = macd.signal;
+        macdHistogram = macd.histogram;
+        macdPrevHistogram = macd.prevHistogram;
+      }
+
+      // ADX (14)
+      let adx14: number | undefined;
+      if (prices.length >= 28) {
+        adx14 = this.calculateADX(highs, lows, closes, 14);
+      }
+
+      // 20일 평균 거래량 및 거래량 비율
+      const avgVolume20 = prices.length >= 20 ? this.calculateAvgVolume(volumes, 20) : undefined;
+      const volumeRatio = avgVolume20 && avgVolume20 > 0 ? volumes[0] / avgVolume20 : undefined;
+
+      // 전일 OHLC / 당일 시가
+      const prevHigh = prices.length >= 2 ? prices[1].high : undefined;
+      const prevLow = prices.length >= 2 ? prices[1].low : undefined;
+      const prevClose = prices.length >= 2 ? prices[1].close : undefined;
+      const todayOpen = prices.length >= 1 ? prices[0].open : undefined;
 
       const result: StockIndicators = {
         ma200,
         rsi14,
         currentAboveMA200: ma200 ? currentPrice > ma200 : true,
+        ma20,
+        ma60,
+        bollingerUpper,
+        bollingerMiddle,
+        bollingerLower,
+        macdLine,
+        macdSignal,
+        macdHistogram,
+        macdPrevHistogram,
+        adx14,
+        avgVolume20,
+        volumeRatio,
+        prevHigh,
+        prevLow,
+        prevClose,
+        todayOpen,
       };
 
       this.setCache(cacheKey, result);
@@ -123,8 +185,8 @@ export class MarketAnalysisService {
     return result;
   }
 
-  /** 일별 시세 조회 (국내/해외 분기) */
-  private async fetchDailyPrices(
+  /** 일별 시세 조회 (국내/해외 분기) - public for MarketRegimeService */
+  async fetchDailyPrices(
     market: 'DOMESTIC' | 'OVERSEAS',
     exchangeCode: string,
     stockCode: string,
@@ -138,8 +200,8 @@ export class MarketAnalysisService {
     }
   }
 
-  /** 지수 일별 시세 조회 (국내지수/해외지수 분기) */
-  private async fetchIndexDailyPrices(
+  /** 지수 일별 시세 조회 (국내지수/해외지수 분기) - public for MarketRegimeService */
+  async fetchIndexDailyPrices(
     type: 'domestic' | 'overseas',
     indexCode: string,
     count: number,
@@ -153,15 +215,17 @@ export class MarketAnalysisService {
     }
   }
 
+  // --- 기술 지표 계산 메서드 ---
+
   /** 이동평균 계산 */
-  private calculateMA(prices: number[], period: number): number {
+  calculateMA(prices: number[], period: number): number {
     if (prices.length < period) return 0;
     const sum = prices.slice(0, period).reduce((a, b) => a + b, 0);
     return sum / period;
   }
 
   /** RSI 계산 (Wilder's smoothing) */
-  private calculateRSI(prices: number[], period: number): number {
+  calculateRSI(prices: number[], period: number): number {
     if (prices.length < period + 1) return 50; // 데이터 부족시 중립
 
     // prices[0]이 최신, 역순으로 변동 계산
@@ -196,6 +260,164 @@ export class MarketAnalysisService {
     return 100 - 100 / (1 + rs);
   }
 
+  /** 지수이동평균(EMA) 계산 - prices[0]이 최신 */
+  calculateEMA(prices: number[], period: number): number[] {
+    if (prices.length < period) return [];
+
+    // 역순으로 변환 (과거→최신)
+    const reversed = [...prices].reverse();
+    const multiplier = 2 / (period + 1);
+    const ema: number[] = [];
+
+    // 첫 EMA = 초기 SMA
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += reversed[i];
+    }
+    ema.push(sum / period);
+
+    // 이후 EMA
+    for (let i = period; i < reversed.length; i++) {
+      const val = (reversed[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
+      ema.push(val);
+    }
+
+    // 다시 역순 (최신이 [0])
+    return ema.reverse();
+  }
+
+  /** 볼린저밴드 계산 (period=20, multiplier=2) */
+  calculateBollingerBands(
+    closes: number[],
+    period: number,
+    multiplier: number,
+  ): { upper: number; middle: number; lower: number } {
+    const middle = this.calculateMA(closes, period);
+    const slice = closes.slice(0, period);
+    const variance = slice.reduce((sum, p) => sum + Math.pow(p - middle, 2), 0) / period;
+    const stdDev = Math.sqrt(variance);
+
+    return {
+      upper: middle + multiplier * stdDev,
+      middle,
+      lower: middle - multiplier * stdDev,
+    };
+  }
+
+  /** MACD 계산 (fast=12, slow=26, signal=9) - prices[0]이 최신 */
+  calculateMACD(closes: number[]): {
+    line: number;
+    signal: number;
+    histogram: number;
+    prevHistogram: number;
+  } {
+    const ema12 = this.calculateEMA(closes, 12);
+    const ema26 = this.calculateEMA(closes, 26);
+
+    if (ema12.length === 0 || ema26.length === 0) {
+      return { line: 0, signal: 0, histogram: 0, prevHistogram: 0 };
+    }
+
+    // MACD Line = EMA12 - EMA26
+    const minLen = Math.min(ema12.length, ema26.length);
+    const macdLine: number[] = [];
+    for (let i = 0; i < minLen; i++) {
+      macdLine.push(ema12[i] - ema26[i]);
+    }
+
+    // Signal Line = EMA9 of MACD Line
+    const signalLine = this.calculateEMA(macdLine, 9);
+
+    if (signalLine.length < 2) {
+      return {
+        line: macdLine[0] || 0,
+        signal: signalLine[0] || 0,
+        histogram: (macdLine[0] || 0) - (signalLine[0] || 0),
+        prevHistogram: 0,
+      };
+    }
+
+    const histogram = macdLine[0] - signalLine[0];
+    const prevHistogram = macdLine[1] - signalLine[1];
+
+    return {
+      line: macdLine[0],
+      signal: signalLine[0],
+      histogram,
+      prevHistogram,
+    };
+  }
+
+  /** ADX 계산 (Wilder 방식, period=14) - prices[0]이 최신 */
+  calculateADX(highs: number[], lows: number[], closes: number[], period: number): number {
+    if (highs.length < period * 2) return 0;
+
+    // 역순으로 (과거→최신)
+    const h = [...highs].reverse();
+    const l = [...lows].reverse();
+    const c = [...closes].reverse();
+
+    const trueRanges: number[] = [];
+    const plusDMs: number[] = [];
+    const minusDMs: number[] = [];
+
+    for (let i = 1; i < h.length; i++) {
+      // True Range
+      const tr = Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
+      trueRanges.push(tr);
+
+      // +DM / -DM
+      const upMove = h[i] - h[i - 1];
+      const downMove = l[i - 1] - l[i];
+      plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+      minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    }
+
+    if (trueRanges.length < period) return 0;
+
+    // 초기 합
+    let atr = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
+    let plusDMSum = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+    let minusDMSum = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+
+    const dxValues: number[] = [];
+
+    // 첫 번째 DX
+    const plusDI0 = atr > 0 ? (plusDMSum / atr) * 100 : 0;
+    const minusDI0 = atr > 0 ? (minusDMSum / atr) * 100 : 0;
+    const diSum0 = plusDI0 + minusDI0;
+    dxValues.push(diSum0 > 0 ? (Math.abs(plusDI0 - minusDI0) / diSum0) * 100 : 0);
+
+    // Wilder's smoothing
+    for (let i = period; i < trueRanges.length; i++) {
+      atr = atr - atr / period + trueRanges[i];
+      plusDMSum = plusDMSum - plusDMSum / period + plusDMs[i];
+      minusDMSum = minusDMSum - minusDMSum / period + minusDMs[i];
+
+      const plusDI = atr > 0 ? (plusDMSum / atr) * 100 : 0;
+      const minusDI = atr > 0 ? (minusDMSum / atr) * 100 : 0;
+      const diSum = plusDI + minusDI;
+      dxValues.push(diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0);
+    }
+
+    if (dxValues.length < period) return dxValues[dxValues.length - 1] || 0;
+
+    // ADX = Wilder's smoothing of DX
+    let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < dxValues.length; i++) {
+      adx = (adx * (period - 1) + dxValues[i]) / period;
+    }
+
+    return adx;
+  }
+
+  /** 평균 거래량 계산 */
+  calculateAvgVolume(volumes: number[], period: number): number {
+    if (volumes.length < period) return 0;
+    const sum = volumes.slice(0, period).reduce((a, b) => a + b, 0);
+    return sum / period;
+  }
+
   /** count 거래일에 대응하는 캘린더 날짜 범위 (여유 포함) */
   private getDateRange(tradingDays: number): { startDate: string; endDate: string } {
     const end = new Date();
@@ -209,7 +431,7 @@ export class MarketAnalysisService {
     return { startDate, endDate };
   }
 
-  private getCache<T>(key: string): T | null {
+  getCache<T>(key: string): T | null {
     const entry = this.cache.get(key);
     if (!entry) return null;
     if (Date.now() > entry.expiry) {
@@ -219,10 +441,10 @@ export class MarketAnalysisService {
     return entry.data as T;
   }
 
-  private setCache<T>(key: string, data: T): void {
+  setCache<T>(key: string, data: T, ttlMs?: number): void {
     this.cache.set(key, {
       data,
-      expiry: Date.now() + MarketAnalysisService.CACHE_TTL_MS,
+      expiry: Date.now() + (ttlMs ?? MarketAnalysisService.CACHE_TTL_MS),
     });
   }
 }

@@ -28,6 +28,7 @@ export class WatchStockService {
     maxCycles?: number;
     stopLossRate?: number;
     maxPortfolioRate?: number;
+    strategyParams?: Record<string, any>;
   }) {
     return this.prisma.watchStock.create({
       data: {
@@ -41,6 +42,7 @@ export class WatchStockService {
         maxCycles: data.maxCycles,
         stopLossRate: data.stopLossRate != null ? new Prisma.Decimal(data.stopLossRate) : undefined,
         maxPortfolioRate: data.maxPortfolioRate != null ? new Prisma.Decimal(data.maxPortfolioRate) : undefined,
+        strategyParams: data.strategyParams ?? undefined,
       },
     });
   }
@@ -57,6 +59,7 @@ export class WatchStockService {
       maxCycles?: number;
       stopLossRate?: number;
       maxPortfolioRate?: number;
+      strategyParams?: Record<string, any>;
     },
   ) {
     const updateData: any = {};
@@ -69,6 +72,7 @@ export class WatchStockService {
     if (data.maxCycles !== undefined) updateData.maxCycles = data.maxCycles;
     if (data.stopLossRate !== undefined) updateData.stopLossRate = new Prisma.Decimal(data.stopLossRate);
     if (data.maxPortfolioRate !== undefined) updateData.maxPortfolioRate = new Prisma.Decimal(data.maxPortfolioRate);
+    if (data.strategyParams !== undefined) updateData.strategyParams = data.strategyParams;
 
     return this.prisma.watchStock.update({ where: { id }, data: updateData });
   }

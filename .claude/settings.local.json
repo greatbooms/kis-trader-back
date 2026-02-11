@@ -1,8 +1,18 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "permissions": {
     "allow": [
       "WebFetch(domain:apiportal.koreainvestment.com)",
-      "WebFetch(domain:www.koyeb.com)"
+      "WebFetch(domain:www.koyeb.com)",
+      "Write(path:/Users/shinsanghoon/workspace/kis-trader-front/*)",
+      "Edit(path:/Users/shinsanghoon/workspace/kis-trader-front/*)",
+      "Write(path:/Users/shinsanghoon/workspace/kis-trader-back/*)",
+      "Edit(path:/Users/shinsanghoon/workspace/kis-trader-back/*)"
+    ],
+    "additionalDirectories": [
+      "/Users/shinsanghoon/workspace/kis-trader-front"
     ]
   }
 }

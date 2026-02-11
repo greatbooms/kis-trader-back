@@ -3,7 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
-} from './strategy.interface';
+} from '../types';
 
 /** LOC 지원 거래소 (미국만) */
 const LOC_EXCHANGES = new Set(['NASD', 'NYSE', 'AMEX']);

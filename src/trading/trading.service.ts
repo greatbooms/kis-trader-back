@@ -8,11 +8,12 @@ import {
   TradingStrategyContext,
   PerStockTradingStrategy,
   StockStrategyContext,
-} from './strategy/strategy.interface';
+} from './types';
 import { NoopStrategy } from './strategy/noop.strategy';
 import { StockPriceResult, BalanceItem } from '../kis/types/kis-api.types';
 import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
-import { SlackService, TradeAlertContext, FilterLogContext } from '../notification/slack.service';
+import { SlackService } from '../notification/slack.service';
+import { TradeAlertContext, FilterLogContext } from '../notification/types/notification.types';
 
 @Injectable()
 export class TradingService {

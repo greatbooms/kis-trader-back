@@ -1,16 +1,19 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Cron, SchedulerRegistry } from '@nestjs/schedule';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { TradingService } from './trading.service';
 import { MarketAnalysisService } from './market-analysis.service';
+import { MarketRegimeService } from './market-regime.service';
+import { RiskManagementService } from './risk-management.service';
+import { StrategyRegistryService } from './strategy/strategy-registry.service';
 import { InfiniteBuyStrategy } from './strategy/infinite-buy.strategy';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
 import { HolidayItem } from '../kis/types/kis-api.types';
-import { StockStrategyContext, WatchStockConfig } from './strategy/strategy.interface';
+import { StockStrategyContext, WatchStockConfig } from './types';
 import { Market } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
@@ -21,6 +24,7 @@ export class TradingScheduler implements OnModuleInit {
   private readonly intervalMs: number;
   private readonly isPaper: boolean;
   private isRunning = false;
+  private isHybridRunning = false;
 
   // 휴장일 캐시 (일 1회)
   private holidayCache: { date: string; domestic: HolidayItem[]; overseas: HolidayItem[] } | null = null;
@@ -28,6 +32,9 @@ export class TradingScheduler implements OnModuleInit {
   constructor(
     private tradingService: TradingService,
     private marketAnalysis: MarketAnalysisService,
+    private marketRegimeService: MarketRegimeService,
+    private riskManagement: RiskManagementService,
+    private strategyRegistry: StrategyRegistryService,
     private infiniteBuyStrategy: InfiniteBuyStrategy,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
@@ -60,6 +67,353 @@ export class TradingScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('infinite-buy-domestic', krJob);
     krJob.start();
     this.logger.log(`Infinite buy domestic cron registered: ${krCron}`);
+
+    // --- 하이브리드 전략 Cron ---
+
+    // 시장 상태 판별 (장전)
+    const regimeKrJob = new CronJob('50 8 * * 1-5', () => this.detectRegimeDomestic(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('regime-detect-kr', regimeKrJob);
+    regimeKrJob.start();
+    this.logger.log('Regime detect KR cron registered: 08:50 KST');
+
+    const regimeUsJob = new CronJob('20 23 * * 1-5', () => this.detectRegimeOverseas(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('regime-detect-us', regimeUsJob);
+    regimeUsJob.start();
+    this.logger.log('Regime detect US cron registered: 23:20 KST');
+
+    // 하이브리드 전략 실행 (매 1분)
+    const hybridKrJob = new CronJob('*/1 9-14 * * 1-5', () => this.executeHybridDomestic(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('hybrid-domestic', hybridKrJob);
+    hybridKrJob.start();
+    this.logger.log('Hybrid domestic cron registered: every 1min 09:00-14:59 KST');
+
+    const hybridUsJob = new CronJob('*/1 23 * * 1-5', () => this.executeHybridOverseas(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('hybrid-overseas-night', hybridUsJob);
+    hybridUsJob.start();
+
+    const hybridUsJob2 = new CronJob('*/1 0-5 * * 2-6', () => this.executeHybridOverseas(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('hybrid-overseas-morning', hybridUsJob2);
+    hybridUsJob2.start();
+    this.logger.log('Hybrid overseas cron registered: every 1min 23:00-05:59 KST');
+  }
+
+  // --- 시장 상태 판별 ---
+
+  private async detectRegimeDomestic(): Promise<void> {
+    this.logger.log('=== Regime Detect KR: triggered ===');
+    try {
+      const regime = await this.marketRegimeService.detectAndSave('DOMESTIC', 'KRX');
+      this.logger.log(`KR Market Regime: ${regime}`);
+    } catch (e) {
+      this.logger.error(`Regime detect KR error: ${e.message}`);
+    }
+  }
+
+  private async detectRegimeOverseas(): Promise<void> {
+    this.logger.log('=== Regime Detect US: triggered ===');
+    try {
+      const regime = await this.marketRegimeService.detectAndSave('OVERSEAS', 'NASD');
+      this.logger.log(`US Market Regime: ${regime}`);
+    } catch (e) {
+      this.logger.error(`Regime detect US error: ${e.message}`);
+    }
+  }
+
+  // --- 하이브리드 전략 실행 ---
+
+  private async executeHybridDomestic(): Promise<void> {
+    if (!this.isMarketOpen('KRX')) return;
+    if (this.isHybridRunning) return;
+    this.isHybridRunning = true;
+
+    try {
+      if (await this.isHoliday('DOMESTIC')) return;
+
+      // 하이브리드 전략 대상 종목 (infinite-buy 제외)
+      const watchStocks = await this.prisma.watchStock.findMany({
+        where: {
+          market: Market.DOMESTIC,
+          isActive: true,
+          strategyName: { notIn: ['infinite-buy', null as any].filter(Boolean) },
+          NOT: { strategyName: null },
+        },
+      });
+
+      if (watchStocks.length === 0) return;
+
+      const regime = await this.marketRegimeService.getRegime('DOMESTIC', 'KRX');
+      const riskState = await this.riskManagement.evaluateRisk('DOMESTIC');
+
+      // 잔고 동기화
+      const balance = await this.kisDomestic.getBalance();
+      await this.tradingService.syncPositions('DOMESTIC', balance);
+
+      const positions = await this.prisma.position.findMany({
+        where: { market: Market.DOMESTIC },
+      });
+
+      const totalPortfolioValue = positions.reduce(
+        (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
+        0,
+      );
+
+      const marketCondition = await this.marketAnalysis.getMarketCondition('KRX');
+
+      let cashAvailable = 0;
+      try {
+        const buyable = await this.kisDomestic.getBuyableAmount();
+        cashAvailable = buyable.cashAvailable;
+      } catch (e) {
+        this.logger.warn(`Failed to get domestic buyable amount: ${e.message}`);
+      }
+
+      // 리스크 스냅샷 저장
+      await this.riskManagement.saveRiskSnapshot('DOMESTIC', totalPortfolioValue, cashAvailable);
+
+      // 전략별 그룹핑
+      const byStrategy = new Map<string, typeof watchStocks>();
+      for (const ws of watchStocks) {
+        const name = ws.strategyName!;
+        if (!byStrategy.has(name)) byStrategy.set(name, []);
+        byStrategy.get(name)!.push(ws);
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const [strategyName, stocks] of byStrategy) {
+        const strategy = this.strategyRegistry.getStrategy(strategyName);
+        if (!strategy) {
+          this.logger.warn(`Unknown strategy: ${strategyName}`);
+          continue;
+        }
+
+        const contexts: StockStrategyContext[] = [];
+
+        for (const ws of stocks) {
+          try {
+            const price = await this.kisDomestic.getPrice(ws.stockCode);
+            const pos = positions.find((p) => p.stockCode === ws.stockCode);
+            const stockIndicators = await this.marketAnalysis.getStockIndicators(
+              'DOMESTIC', 'KRX', ws.stockCode, price.currentPrice,
+            );
+
+            const existing = await this.prisma.strategyExecution.findUnique({
+              where: {
+                market_stockCode_strategyName_executedDate: {
+                  market: Market.DOMESTIC,
+                  stockCode: ws.stockCode,
+                  strategyName,
+                  executedDate: today,
+                },
+              },
+            });
+
+            const watchStockConfig: WatchStockConfig = {
+              id: ws.id,
+              market: 'DOMESTIC',
+              exchangeCode: 'KRX',
+              stockCode: ws.stockCode,
+              stockName: ws.stockName,
+              strategyName: ws.strategyName || undefined,
+              quota: ws.quota ? Number(ws.quota) : undefined,
+              cycle: ws.cycle,
+              maxCycles: ws.maxCycles,
+              stopLossRate: Number(ws.stopLossRate),
+              maxPortfolioRate: Number(ws.maxPortfolioRate),
+              strategyParams: ws.strategyParams as Record<string, any> | undefined,
+            };
+
+            contexts.push({
+              watchStock: watchStockConfig,
+              price,
+              position: pos ? {
+                stockCode: pos.stockCode,
+                quantity: pos.quantity,
+                avgPrice: Number(pos.avgPrice),
+                currentPrice: Number(pos.currentPrice),
+                totalInvested: Number(pos.totalInvested),
+              } : undefined,
+              alreadyExecutedToday: !!existing,
+              marketCondition,
+              stockIndicators,
+              buyableAmount: cashAvailable,
+              totalPortfolioValue,
+              marketRegime: regime,
+              riskState,
+            });
+          } catch (e) {
+            this.logger.error(`Error building hybrid context for ${ws.stockCode}: ${e.message}`);
+          }
+        }
+
+        if (contexts.length > 0) {
+          await this.tradingService.executePerStockStrategy(strategy, contexts);
+        }
+      }
+    } catch (e) {
+      this.logger.error(`Hybrid domestic error: ${e.message}`);
+    } finally {
+      this.isHybridRunning = false;
+    }
+  }
+
+  private async executeHybridOverseas(): Promise<void> {
+    if (this.isHybridRunning) return;
+    this.isHybridRunning = true;
+
+    try {
+      if (await this.isHoliday('OVERSEAS')) return;
+
+      const watchStocks = await this.prisma.watchStock.findMany({
+        where: {
+          market: Market.OVERSEAS,
+          isActive: true,
+          strategyName: { notIn: ['infinite-buy', null as any].filter(Boolean) },
+          NOT: { strategyName: null },
+        },
+      });
+
+      if (watchStocks.length === 0) return;
+
+      // 거래소별 그룹
+      const byExchange = new Map<string, typeof watchStocks>();
+      for (const w of watchStocks) {
+        const ex = w.exchangeCode || 'NASD';
+        if (!byExchange.has(ex)) byExchange.set(ex, []);
+        byExchange.get(ex)!.push(w);
+      }
+
+      for (const [exchangeCode, exchangeStocks] of byExchange) {
+        if (!this.isMarketOpen(exchangeCode)) continue;
+
+        const regime = await this.marketRegimeService.getRegime('OVERSEAS', exchangeCode);
+        const riskState = await this.riskManagement.evaluateRisk('OVERSEAS');
+
+        const balance = await this.kisOverseas.getBalance();
+        await this.tradingService.syncPositions('OVERSEAS', balance);
+
+        const positions = await this.prisma.position.findMany({
+          where: { market: Market.OVERSEAS },
+        });
+
+        const totalPortfolioValue = positions.reduce(
+          (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
+          0,
+        );
+
+        const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
+
+        // 전략별 그룹핑
+        const byStrategy = new Map<string, typeof exchangeStocks>();
+        for (const ws of exchangeStocks) {
+          const name = ws.strategyName!;
+          if (!byStrategy.has(name)) byStrategy.set(name, []);
+          byStrategy.get(name)!.push(ws);
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        for (const [strategyName, stocks] of byStrategy) {
+          const strategy = this.strategyRegistry.getStrategy(strategyName);
+          if (!strategy) {
+            this.logger.warn(`Unknown strategy: ${strategyName}`);
+            continue;
+          }
+
+          const contexts: StockStrategyContext[] = [];
+
+          for (const ws of stocks) {
+            try {
+              const price = await this.kisOverseas.getPrice(ws.exchangeCode || exchangeCode, ws.stockCode);
+              const pos = positions.find((p) => p.stockCode === ws.stockCode);
+              const stockIndicators = await this.marketAnalysis.getStockIndicators(
+                'OVERSEAS', ws.exchangeCode || exchangeCode, ws.stockCode, price.currentPrice,
+              );
+
+              let buyableAmount = 0;
+              try {
+                const buyable = await this.kisOverseas.getBuyableAmount(
+                  ws.exchangeCode || exchangeCode, ws.stockCode, price.currentPrice,
+                );
+                buyableAmount = buyable.foreignCurrencyAvailable;
+              } catch (e) {
+                this.logger.warn(`Failed to get buyable amount for ${ws.stockCode}: ${e.message}`);
+              }
+
+              const existing = await this.prisma.strategyExecution.findUnique({
+                where: {
+                  market_stockCode_strategyName_executedDate: {
+                    market: Market.OVERSEAS,
+                    stockCode: ws.stockCode,
+                    strategyName,
+                    executedDate: today,
+                  },
+                },
+              });
+
+              const watchStockConfig: WatchStockConfig = {
+                id: ws.id,
+                market: 'OVERSEAS',
+                exchangeCode: ws.exchangeCode || exchangeCode,
+                stockCode: ws.stockCode,
+                stockName: ws.stockName,
+                strategyName: ws.strategyName || undefined,
+                quota: ws.quota ? Number(ws.quota) : undefined,
+                cycle: ws.cycle,
+                maxCycles: ws.maxCycles,
+                stopLossRate: Number(ws.stopLossRate),
+                maxPortfolioRate: Number(ws.maxPortfolioRate),
+                strategyParams: ws.strategyParams as Record<string, any> | undefined,
+              };
+
+              contexts.push({
+                watchStock: watchStockConfig,
+                price,
+                position: pos ? {
+                  stockCode: pos.stockCode,
+                  quantity: pos.quantity,
+                  avgPrice: Number(pos.avgPrice),
+                  currentPrice: Number(pos.currentPrice),
+                  totalInvested: Number(pos.totalInvested),
+                } : undefined,
+                alreadyExecutedToday: !!existing,
+                marketCondition,
+                stockIndicators,
+                buyableAmount,
+                totalPortfolioValue,
+                marketRegime: regime,
+                riskState,
+              });
+            } catch (e) {
+              this.logger.error(`Error building hybrid context for ${ws.stockCode}: ${e.message}`);
+            }
+          }
+
+          if (contexts.length > 0) {
+            await this.tradingService.executePerStockStrategy(strategy, contexts);
+          }
+        }
+
+        // 리스크 스냅샷 저장
+        let cashAvailable = 0;
+        try {
+          // 아무 종목이나 이용해서 매수 가능 금액 조회
+          const firstStock = exchangeStocks[0];
+          const buyable = await this.kisOverseas.getBuyableAmount(
+            firstStock.exchangeCode || exchangeCode,
+            firstStock.stockCode,
+            1,
+          );
+          cashAvailable = buyable.foreignCurrencyAvailable;
+        } catch { /* ignore */ }
+
+        await this.riskManagement.saveRiskSnapshot('OVERSEAS', totalPortfolioValue, cashAvailable);
+      }
+    } catch (e) {
+      this.logger.error(`Hybrid overseas error: ${e.message}`);
+    } finally {
+      this.isHybridRunning = false;
+    }
   }
 
   // --- 기존 interval 루프 (범용 전략용, 유지) ---

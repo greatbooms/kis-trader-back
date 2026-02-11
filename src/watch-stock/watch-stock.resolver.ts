@@ -44,6 +44,9 @@ export class WatchStockType {
   @Field(() => Float)
   maxPortfolioRate: number;
 
+  @Field({ nullable: true })
+  strategyParams?: string;
+
   @Field()
   createdAt: Date;
 
@@ -79,6 +82,9 @@ export class CreateWatchStockInput {
 
   @Field(() => Float, { nullable: true })
   maxPortfolioRate?: number;
+
+  @Field({ nullable: true })
+  strategyParams?: string;
 }
 
 @InputType()
@@ -109,6 +115,9 @@ export class UpdateWatchStockInput {
 
   @Field(() => Float, { nullable: true })
   maxPortfolioRate?: number;
+
+  @Field({ nullable: true })
+  strategyParams?: string;
 }
 
 @Resolver(() => WatchStockType)
@@ -117,21 +126,39 @@ export class WatchStockResolver {
   constructor(private watchStockService: WatchStockService) {}
 
   @Query(() => [WatchStockType], { name: 'watchStocks' })
-  findAll(@Args('market', { type: () => Market, nullable: true }) market?: Market) {
-    return this.watchStockService.findAll(market);
+  async findAll(@Args('market', { type: () => Market, nullable: true }) market?: Market) {
+    const items = await this.watchStockService.findAll(market);
+    return items.map((item) => ({
+      ...item,
+      strategyParams: item.strategyParams ? JSON.stringify(item.strategyParams) : undefined,
+    }));
   }
 
   @Mutation(() => WatchStockType)
-  createWatchStock(@Args('input') input: CreateWatchStockInput) {
-    return this.watchStockService.create(input);
+  async createWatchStock(@Args('input') input: CreateWatchStockInput) {
+    const result = await this.watchStockService.create({
+      ...input,
+      strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
+    });
+    return {
+      ...result,
+      strategyParams: result.strategyParams ? JSON.stringify(result.strategyParams) : undefined,
+    };
   }
 
   @Mutation(() => WatchStockType)
-  updateWatchStock(
+  async updateWatchStock(
     @Args('id', { type: () => ID }) id: string,
     @Args('input') input: UpdateWatchStockInput,
   ) {
-    return this.watchStockService.update(id, input);
+    const result = await this.watchStockService.update(id, {
+      ...input,
+      strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
+    });
+    return {
+      ...result,
+      strategyParams: result.strategyParams ? JSON.stringify(result.strategyParams) : undefined,
+    };
   }
 
   @Mutation(() => Boolean)

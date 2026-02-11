@@ -1,0 +1,134 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  PerStockTradingStrategy,
+  StockStrategyContext,
+  TradingSignal,
+} from '../types';
+
+const DEFAULT_PARAMS = {
+  cashRate: 0.7,
+  rsiThreshold: 25,
+  volumeThreshold: 2.0,
+  stopLossRate: 0.05,
+  takeProfitRate: 0.03,
+};
+
+@Injectable()
+export class ConservativeStrategy implements PerStockTradingStrategy {
+  readonly name = 'conservative';
+  private readonly logger = new Logger(ConservativeStrategy.name);
+
+  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+    const { watchStock, price, position, stockIndicators, riskState } = ctx;
+    const signals: TradingSignal[] = [];
+    const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
+
+    const curPrice = price.currentPrice;
+    if (curPrice <= 0) return signals;
+
+    const market = watchStock.market;
+    const exchangeCode = watchStock.exchangeCode || 'KRX';
+    const isOverseas = market === 'OVERSEAS';
+    const hasPosition = !!position && position.quantity > 0;
+
+    const roundPrice = isOverseas
+      ? (p: number) => Math.round(p * 100) / 100
+      : (p: number) => Math.round(p);
+
+    // 리스크 체크: 전량 청산 시그널
+    if (riskState?.liquidateAll && hasPosition) {
+      signals.push({
+        market,
+        exchangeCode: isOverseas ? exchangeCode : undefined,
+        stockCode: watchStock.stockCode,
+        side: 'SELL',
+        quantity: position!.quantity,
+        price: roundPrice(curPrice),
+        reason: `리스크 전량청산: MDD ${(riskState.drawdown * 100).toFixed(1)}%`,
+      });
+      return signals;
+    }
+
+    if (hasPosition) {
+      // --- 포지션 보유 중: 익절/손절 ---
+      const avgPrice = position!.avgPrice;
+      const profitRate = (curPrice - avgPrice) / avgPrice;
+      const holdQty = position!.quantity;
+
+      // 손절: -5%
+      if (profitRate <= -params.stopLossRate) {
+        this.logger.log(
+          `[${watchStock.stockCode}] STOP LOSS: ${(profitRate * 100).toFixed(1)}%`,
+        );
+        signals.push({
+          market,
+          exchangeCode: isOverseas ? exchangeCode : undefined,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: holdQty,
+          price: roundPrice(curPrice),
+          reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
+        });
+        return signals;
+      }
+
+      // 익절: +3%
+      if (profitRate >= params.takeProfitRate) {
+        this.logger.log(
+          `[${watchStock.stockCode}] TAKE PROFIT: ${(profitRate * 100).toFixed(1)}%`,
+        );
+        signals.push({
+          market,
+          exchangeCode: isOverseas ? exchangeCode : undefined,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: holdQty,
+          price: roundPrice(curPrice),
+          reason: `익절: +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitRate * 100).toFixed(0)}%`,
+        });
+        return signals;
+      }
+    } else {
+      // --- 포지션 없음: 진입 조건 ---
+
+      // 리스크 체크
+      if (riskState?.buyBlocked) {
+        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState.reasons.join(', ')}`);
+        return signals;
+      }
+
+      const { rsi14, volumeRatio } = stockIndicators;
+
+      if (rsi14 === undefined || volumeRatio === undefined) return signals;
+
+      // RSI < 25
+      if (rsi14 >= params.rsiThreshold) return signals;
+
+      // 거래량 >= 2배
+      if (volumeRatio < params.volumeThreshold) return signals;
+
+      // 보수적 모드: 자금의 30%만 사용
+      const quota = watchStock.quota || 0;
+      const availableRate = 1 - params.cashRate; // 0.3
+      const buyAmount = Math.min(quota * availableRate, ctx.buyableAmount);
+      const buyQty = Math.floor(buyAmount / curPrice);
+
+      if (buyQty > 0) {
+        this.logger.log(
+          `[${watchStock.stockCode}] CONSERVATIVE BUY: price=${curPrice}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x`,
+        );
+        signals.push({
+          market,
+          exchangeCode: isOverseas ? exchangeCode : undefined,
+          stockCode: watchStock.stockCode,
+          side: 'BUY',
+          quantity: buyQty,
+          price: roundPrice(curPrice),
+          reason: `보수적매수: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, 자금 ${(availableRate * 100).toFixed(0)}%`,
+        });
+      }
+    }
+
+    return signals;
+  }
+}

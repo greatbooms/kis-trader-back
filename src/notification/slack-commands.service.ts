@@ -1,7 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { TradeRecordService } from '../trade-record/trade-record.service';
-import { SlackService, PositionInfo, DailySummaryContext } from './slack.service';
+import { SlackService } from './slack.service';
+import { PositionInfo, DailySummaryContext } from './types/notification.types';
 import { Market } from '@prisma/client';
 
 @Injectable()

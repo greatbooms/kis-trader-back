@@ -50,6 +50,7 @@ export class KisDomesticService {
       highPrice: parseFloat(o.stck_hgpr) || 0,
       lowPrice: parseFloat(o.stck_lwpr) || 0,
       volume: parseInt(o.acml_vol, 10) || 0,
+      prevDayVolumeRate: o.prdy_vrss_vol_rate ? parseFloat(o.prdy_vrss_vol_rate) : undefined,
     };
   }
 
