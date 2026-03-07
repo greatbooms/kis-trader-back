@@ -78,10 +78,13 @@ export class MarketAnalysisService {
         macdPrevHistogram = macd.prevHistogram;
       }
 
-      // ADX (14)
+      // ADX (14) + ATR (14)
       let adx14: number | undefined;
+      let atr14: number | undefined;
       if (prices.length >= 28) {
-        adx14 = this.calculateADX(highs, lows, closes, 14);
+        const adxResult = this.calculateADXWithATR(highs, lows, closes, 14);
+        adx14 = adxResult.adx;
+        atr14 = adxResult.atr;
       }
 
       // 20일 평균 거래량 및 거래량 비율
@@ -108,6 +111,7 @@ export class MarketAnalysisService {
         macdHistogram,
         macdPrevHistogram,
         adx14,
+        atr14,
         avgVolume20,
         volumeRatio,
         prevHigh,
@@ -350,7 +354,17 @@ export class MarketAnalysisService {
 
   /** ADX 계산 (Wilder 방식, period=14) - prices[0]이 최신 */
   calculateADX(highs: number[], lows: number[], closes: number[], period: number): number {
-    if (highs.length < period * 2) return 0;
+    return this.calculateADXWithATR(highs, lows, closes, period).adx;
+  }
+
+  /** ADX + ATR 동시 계산 (TR 재사용) */
+  calculateADXWithATR(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number,
+  ): { adx: number; atr: number } {
+    if (highs.length < period * 2) return { adx: 0, atr: 0 };
 
     // 역순으로 (과거→최신)
     const h = [...highs].reverse();
@@ -373,34 +387,39 @@ export class MarketAnalysisService {
       minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
     }
 
-    if (trueRanges.length < period) return 0;
+    if (trueRanges.length < period) return { adx: 0, atr: 0 };
 
     // 초기 합
-    let atr = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
+    let atrSum = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
     let plusDMSum = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
     let minusDMSum = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
 
     const dxValues: number[] = [];
 
     // 첫 번째 DX
-    const plusDI0 = atr > 0 ? (plusDMSum / atr) * 100 : 0;
-    const minusDI0 = atr > 0 ? (minusDMSum / atr) * 100 : 0;
+    const plusDI0 = atrSum > 0 ? (plusDMSum / atrSum) * 100 : 0;
+    const minusDI0 = atrSum > 0 ? (minusDMSum / atrSum) * 100 : 0;
     const diSum0 = plusDI0 + minusDI0;
     dxValues.push(diSum0 > 0 ? (Math.abs(plusDI0 - minusDI0) / diSum0) * 100 : 0);
 
     // Wilder's smoothing
     for (let i = period; i < trueRanges.length; i++) {
-      atr = atr - atr / period + trueRanges[i];
+      atrSum = atrSum - atrSum / period + trueRanges[i];
       plusDMSum = plusDMSum - plusDMSum / period + plusDMs[i];
       minusDMSum = minusDMSum - minusDMSum / period + minusDMs[i];
 
-      const plusDI = atr > 0 ? (plusDMSum / atr) * 100 : 0;
-      const minusDI = atr > 0 ? (minusDMSum / atr) * 100 : 0;
+      const plusDI = atrSum > 0 ? (plusDMSum / atrSum) * 100 : 0;
+      const minusDI = atrSum > 0 ? (minusDMSum / atrSum) * 100 : 0;
       const diSum = plusDI + minusDI;
       dxValues.push(diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0);
     }
 
-    if (dxValues.length < period) return dxValues[dxValues.length - 1] || 0;
+    // ATR = Wilder's smoothed ATR (최종 값을 period로 나눔)
+    const atr = atrSum / period;
+
+    if (dxValues.length < period) {
+      return { adx: dxValues[dxValues.length - 1] || 0, atr };
+    }
 
     // ADX = Wilder's smoothing of DX
     let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
@@ -408,7 +427,7 @@ export class MarketAnalysisService {
       adx = (adx * (period - 1) + dxValues[i]) / period;
     }
 
-    return adx;
+    return { adx, atr };
   }
 
   /** 평균 거래량 계산 */

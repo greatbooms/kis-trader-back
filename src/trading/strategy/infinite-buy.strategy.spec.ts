@@ -154,7 +154,7 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('max cycles check', () => {
-    it('should skip when max cycles reached', async () => {
+    it('should stop buying but still generate sell signals when max cycles reached', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -165,7 +165,12 @@ describe('InfiniteBuyStrategy', () => {
         },
       });
       const signals = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(0);
+      // 매수 없음
+      const buys = signals.filter((s) => s.side === 'BUY');
+      expect(buys).toHaveLength(0);
+      // 매도 시그널은 생성됨 (Sell1/Sell2)
+      const sells = signals.filter((s) => s.side === 'SELL');
+      expect(sells.length).toBeGreaterThanOrEqual(1);
     });
   });
 

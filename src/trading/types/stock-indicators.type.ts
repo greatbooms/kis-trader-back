@@ -13,6 +13,7 @@ export interface StockIndicators {
   macdHistogram?: number;
   macdPrevHistogram?: number;
   adx14?: number;
+  atr14?: number;
   avgVolume20?: number;
   volumeRatio?: number;
   prevHigh?: number;
