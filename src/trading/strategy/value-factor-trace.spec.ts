@@ -83,7 +83,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
   it('once-daily 실행 모드', () => {
     expect(strategy.executionMode).toEqual({
       type: 'once-daily',
-      hours: { domestic: 15, overseas: 5 },
+      hours: { domestic: 15, overseas: { basis: 'beforeClose', offsetHours: 1 } },
     });
   });
 

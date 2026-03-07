@@ -4615,6 +4615,22 @@
             "deprecationReason": null
           },
           {
+            "name": "lastExecutionDate",
+            "description": "마지막 전략 실행 날짜",
+            "args": [],
+            "type": { "kind": "SCALAR", "name": "String", "ofType": null },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "lastExecutionStatus",
+            "description": "마지막 전략 실행 상태 (예: \"3 시그널 생성\", \"지수 MA200 아래 — 매수 중단\")",
+            "args": [],
+            "type": { "kind": "SCALAR", "name": "String", "ofType": null },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "market",
             "description": null,
             "args": [],

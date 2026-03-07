@@ -378,6 +378,8 @@ interface WatchStockItem {
   cycle: number
   maxCycles: number
   stopLossRate: number
+  lastExecutionStatus?: string | null
+  lastExecutionDate?: string | null
 }
 
 function WatchStockRow({
@@ -413,6 +415,16 @@ function WatchStockRow({
             {stock.strategyName === 'infinite-buy' && <span>사이클: {stock.cycle}/{stock.maxCycles}</span>}
             <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>
           </div>
+          {stock.lastExecutionStatus && (
+            <div className="flex items-center gap-2 mt-1.5">
+              <Badge variant={stock.lastExecutionStatus.includes('시그널 생성') ? 'success' : 'outline'} className="text-[11px]">
+                {stock.lastExecutionStatus}
+              </Badge>
+              {stock.lastExecutionDate && (
+                <span className="text-[11px] text-muted-foreground">{stock.lastExecutionDate}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1">

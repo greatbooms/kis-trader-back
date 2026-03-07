@@ -162,13 +162,27 @@ export class StockMasterService implements OnModuleInit {
     const extractPath = path.join(TEMP_DIR, extractName);
 
     const response = await axios.get(zipUrl, { responseType: 'arraybuffer', timeout: 30000 });
-    fs.writeFileSync(zipPath, response.data);
+    const data = Buffer.from(response.data);
+
+    if (data.length < 100) {
+      throw new Error(`Downloaded file too small (${data.length} bytes): ${zipUrl}`);
+    }
+
+    fs.writeFileSync(zipPath, data);
 
     const { execSync } = require('child_process');
     try {
       execSync(`unzip -o -q "${zipPath}" -d "${TEMP_DIR}"`, { timeout: 10000 });
-    } catch {
-      throw new Error(`Failed to extract ${zipPath}`);
+    } catch (e) {
+      // 실패 시 재시도 1회
+      this.logger.warn(`First unzip attempt failed for ${zipUrl}, retrying...`);
+      const retry = await axios.get(zipUrl, { responseType: 'arraybuffer', timeout: 30000 });
+      fs.writeFileSync(zipPath, Buffer.from(retry.data));
+      try {
+        execSync(`unzip -o -q "${zipPath}" -d "${TEMP_DIR}"`, { timeout: 10000 });
+      } catch {
+        throw new Error(`Failed to extract ${zipPath} after retry`);
+      }
     }
 
     if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);

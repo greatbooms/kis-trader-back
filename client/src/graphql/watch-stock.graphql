@@ -13,6 +13,8 @@ query GetWatchStocks($market: Market) {
     stopLossRate
     maxPortfolioRate
     strategyParams
+    lastExecutionStatus
+    lastExecutionDate
     createdAt
     updatedAt
   }

@@ -71,16 +71,32 @@ export class TradingService {
         });
 
         if (signals.length === 0) {
+          let reason = '시그널 없음';
+          if (!ctx.marketCondition.referenceIndexAboveMA200 && !ctx.position) {
+            reason = `${ctx.marketCondition.referenceIndexName} 200일선 아래 — 신규 매수 중단`;
+          } else if (!ctx.stockIndicators.currentAboveMA200 && !ctx.position) {
+            reason = '종목 현재가 MA200 아래 — 신규 진입 차단';
+          } else if (ctx.alreadyExecutedToday) {
+            reason = '오늘 이미 실행됨';
+          }
+
+          // 차단 이유를 StrategyExecution details에 저장
+          await this.prisma.strategyExecution.update({
+            where: {
+              market_stockCode_strategyName_executedDate: {
+                market: ctx.watchStock.market as Market,
+                stockCode: ctx.watchStock.stockCode,
+                strategyName: strategy.name,
+                executedDate: today,
+              },
+            },
+            data: {
+              details: JSON.stringify({ ...execDetails, skipReason: reason }),
+            },
+          });
+
           // Send filter skip log to Slack
           if (this.slackService?.isEnabled()) {
-            let reason = '시그널 없음';
-            if (!ctx.marketCondition.referenceIndexAboveMA200 && !ctx.position) {
-              reason = `${ctx.marketCondition.referenceIndexName} 200일선 아래 — 신규 매수 중단`;
-            } else if (!ctx.stockIndicators.currentAboveMA200 && !ctx.position) {
-              reason = '종목 현재가 MA200 아래 — 신규 진입 차단';
-            } else if (ctx.alreadyExecutedToday) {
-              reason = '오늘 이미 실행됨';
-            }
             this.slackService.sendFilterLog({
               stockCode: ctx.watchStock.stockCode,
               exchangeCode: ctx.watchStock.exchangeCode,

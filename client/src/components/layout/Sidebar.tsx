@@ -15,10 +15,10 @@ import type { SidebarProps } from '@/components/types'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
+  { to: '/screening', icon: Search, label: '종목 추천' },
+  { to: '/strategy-guide', icon: BookOpen, label: '전략 가이드' },
   { to: '/watchlist', icon: Eye, label: '관심종목' },
   { to: '/portfolio', icon: TrendingUp, label: '포트폴리오' },
-  { to: '/strategy-guide', icon: BookOpen, label: '전략 가이드' },
-  { to: '/screening', icon: Search, label: '종목 추천' },
   { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
   { to: '/settings', icon: Settings, label: '설정' },
 ]

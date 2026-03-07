@@ -10,6 +10,16 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          apollo: ['@apollo/client', 'graphql'],
+        },
+      },
+    },
+  },
   server: {
     port: Number(process.env.CLIENT_PORT || 5173),
     proxy: {

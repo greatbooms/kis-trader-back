@@ -27,7 +27,7 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
   readonly displayName = '밸류 팩터';
   readonly executionMode: ExecutionMode = {
     type: 'once-daily',
-    hours: { domestic: 15, overseas: 5 },
+    hours: { domestic: 15, overseas: { basis: 'beforeClose', offsetHours: 1 } }, // 장 마감 1시간 전
   };
   readonly description = [
     '저평가 종목을 재무 지표로 선별하여 매수하고, 목표 수익률 도달 시 매도하는 가치투자 전략입니다.',

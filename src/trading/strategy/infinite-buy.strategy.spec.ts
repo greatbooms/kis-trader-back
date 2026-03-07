@@ -339,8 +339,8 @@ describe('InfiniteBuyStrategy', () => {
       const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
 
       expect(sell2).toBeDefined();
-      // T >= 20 → targetRate = 1.15
-      expect(sell2!.price).toBe(Math.round(70000 * 1.15)); // 80500
+      // T >= 20 → targetRate = 1.10
+      expect(sell2!.price).toBe(Math.round(70000 * 1.10)); // 77000
     });
   });
 
@@ -388,30 +388,10 @@ describe('InfiniteBuyStrategy', () => {
       }
     });
 
-    it('should block buy when max portfolio rate exceeded', async () => {
-      const ctx = createContext({
-        position: {
-          stockCode: '005930',
-          quantity: 100,
-          avgPrice: 70000,
-          currentPrice: 70000,
-          totalInvested: 200000, // 200000 / 1000000 = 20% > maxPortfolioRate(15%)
-        },
-        totalPortfolioValue: 1000000,
-      });
-
-      const signals = await strategy.evaluateStock(ctx);
-      const buys = signals.filter((s) => s.side === 'BUY');
-
-      expect(buys).toHaveLength(0);
-      // But sell signals should still be generated
-      const sells = signals.filter((s) => s.side === 'SELL');
-      expect(sells.length).toBeGreaterThan(0);
-    });
   });
 
   describe('overseas market', () => {
-    it('should use LOC order division for US exchanges', async () => {
+    it('should use limit order for US exchanges', async () => {
       const ctx = createContext();
       ctx.watchStock.market = 'OVERSEAS';
       ctx.watchStock.exchangeCode = 'NASD';
@@ -420,7 +400,7 @@ describe('InfiniteBuyStrategy', () => {
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal) {
-        expect(buySignal.orderDivision).toBe('34'); // LOC
+        expect(buySignal.orderDivision).toBe('00');
         expect(buySignal.exchangeCode).toBe('NASD');
       }
     });

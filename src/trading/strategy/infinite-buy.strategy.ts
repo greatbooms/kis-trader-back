@@ -7,8 +7,6 @@ import {
   StrategyMeta,
 } from '../types';
 
-/** LOC 지원 거래소 (미국만) */
-const LOC_EXCHANGES = new Set(['NASD', 'NYSE', 'AMEX']);
 
 @Injectable()
 export class InfiniteBuyStrategy implements PerStockTradingStrategy {
@@ -16,39 +14,48 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   readonly displayName = '무한매수법';
   readonly executionMode: ExecutionMode = {
     type: 'once-daily',
-    hours: { domestic: 15, overseas: 5 }, // KST 15시(국내), 05시(해외)
+    hours: { domestic: 11, overseas: { basis: 'afterOpen', offsetHours: 2 } }, // 국내 11시, 해외 장 시작 2시간 후
   };
   readonly description = [
-    '설정한 투자금(quota)을 최대 40회(사이클)에 걸쳐 분할 매수하는 전략입니다.',
+    '설정한 투자금(quota)을 분할 매수하는 전략입니다.',
+    '',
+    '【사이클(T) 계산 방식】',
+    '- T = 누적 투자금액 / 1회 매수금액 (실제 체결 기준)',
+    '- 40회는 "최대 횟수"가 아니라 "quota를 다 쓰는 기준"',
+    '- Buy1만 체결되고 Buy2 미체결 시 T가 0.5만 증가',
+    '- 둘 다 미체결 시 T 변동 없음, 다음 날 재시도',
+    '- quota를 모두 소진하면(T >= maxCycles) 매수 중단',
     '',
     '【매수 조건】',
-    '- 하루 1회만 실행 (중복 매수 방지)',
+    '- 하루 1회, 장중 실행 (국내 11시, 해외 장 시작 2시간 후)',
     '- 지수(S&P500/KOSPI)가 200일 이동평균선 위일 때만 신규 진입',
     '- 종목 가격이 200일 이동평균선 위일 때만 신규 진입',
     '- RSI < 30 과매도 구간에서는 매수금액 1.5배 증가',
     '- 금리 급등 시 매수금액 절반으로 축소',
     '',
     '【매수 방식】',
-    '- T(사이클) < 20: Buy1(현재가) + Buy2(현재가 아래 지정가) 두 건 분할',
+    '- T < 20: Buy1(현재가 지정가) + Buy2(현재가 아래 지정가) 두 건 분할',
     '- T >= 20: Buy2(현재가 아래 지정가)만 실행',
-    '- Buy2 지정가: T<10 -3%, T<20 -5%, T>=20 -7% (T가 높을수록 보수적)',
-    '- 종목당 최대 포트폴리오 비중 초과 시 매수 중단',
+    '- Buy2 지정가: T<10 -1%, T<20 -2%, T>=20 -3% (일중 변동 내 체결 가능)',
+    '- Buy1은 즉시 체결, Buy2는 장중 가격 하락 시 체결',
+    '- 미체결 시 장 마감 후 자동 취소, 다음 날 새 가격으로 재주문',
     '',
     '【매도 조건】',
-    '- Sell1: 피봇가격에 보유량의 25% 매도',
-    '- Sell2: 목표수익률 도달 시 나머지 매도 (T<10: +5%, T<20: +10%, T>=20: +15%)',
+    '- Sell1: 평균단가 +3%에 보유량의 1/3 매도 (1차 익절)',
+    '- Sell2: 평균단가 +5~10%에 나머지 전량 매도 (T<10: +5%, T<20: +7%, T>=20: +10%)',
     '- 손절: 평균단가 대비 설정 손절률(기본 30%) 하회 시 전량 매도',
     '',
     '【특징】',
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
-    '- 해외 주식은 LOC(장마감지정가) 주문 지원',
+    '- 시초가 변동 안정 후 주문하여 적정 가격에 진입',
+    '- Buy2 지정가는 장 마감까지 체결 기회를 가짐',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
-    expectedReturn: '연 10~25%',
+    expectedReturn: '사이클당 +3~10%',
     maxLoss: '-30% (손절 기본값)',
     investmentPeriod: '3개월~1년',
-    tradingFrequency: '하루 1회 자동 매수',
+    tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 02시)',
     suitableFor: ['장기 분할매수 선호 투자자', '하락장 대응', '적립식 투자'],
     tags: ['분할매수', 'DCA', '장기투자', '국내/해외'],
   };
@@ -164,30 +171,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     // 개선 D: 가용자금 한도
     adjustedQuota = Math.min(adjustedQuota, ctx.buyableAmount);
 
-    // 개선 D: 종목당 최대 투자비율 체크
-    if (ctx.totalPortfolioValue > 0 && totalInvested > 0) {
-      const currentRate = totalInvested / ctx.totalPortfolioValue;
-      if (currentRate >= watchStock.maxPortfolioRate) {
-        this.logger.log(
-          `[${watchStock.stockCode}] Portfolio rate exceeded: ${(currentRate * 100).toFixed(1)}% >= ${(watchStock.maxPortfolioRate * 100).toFixed(0)}%`,
-        );
-        details.skippedReason = 'max_portfolio_rate';
-        // 매수 중단하지만 매도는 허용 → adjustedQuota = 0
-        adjustedQuota = 0;
-      }
-    }
-
     details.adjustedQuota = adjustedQuota;
-
-    // --- 무한매수법 매수/매도 가격 계산 ---
-    const baseRate = (10 - T / 2 + 100) / 100;
-    const pivotPrice = baseRate * avgPrice;
 
     // 지수 200일선 아래면 매수 중단 (매도만 허용)
     const buyAllowed = !indexBelowMA200 && adjustedQuota > 0;
-
-    // LOC 주문 구분
-    const locDivision = isOverseas && LOC_EXCHANGES.has(exchangeCode) ? '34' : '00';
 
     if (!hasPosition && buyAllowed) {
       // --- 첫 매수 (포지션 없음) ---
@@ -201,13 +188,13 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           quantity: buyQty,
           price: roundPrice(curPrice),
           reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}`,
-          orderDivision: locDivision,
+          orderDivision: '00',
         });
       }
     } else if (hasPosition) {
       // --- 매수 시그널 ---
       // Buy2 dipRate: T가 높을수록 더 낮은 가격에 지정가 (보수적)
-      const dipRate = T < 10 ? 0.03 : T < 20 ? 0.05 : 0.07;
+      const dipRate = T < 10 ? 0.01 : T < 20 ? 0.02 : 0.03;
 
       if (T < 20 && buyAllowed) {
         // Buy1 + Buy2 분할 매수
@@ -234,7 +221,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             quantity: buy1Qty,
             price: buy1Price,
             reason: `Buy1: T=${T.toFixed(1)}, ${buy1Qty}주 @ ${buy1Price}`,
-            orderDivision: locDivision,
+            orderDivision: '00',
           });
         }
 
@@ -271,9 +258,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
       if (holdQty > 0) {
-        // Sell1: pivotPrice, 보유량의 1/4
-        const sell1Qty = Math.max(1, Math.round(holdQty / 4));
-        const sell1Price = roundPrice(pivotPrice);
+        // Sell1: 평균단가 +3%에 보유량의 1/3 매도 (1차 익절)
+        const sell1Qty = Math.max(1, Math.round(holdQty / 3));
+        const sell1Price = roundPrice(avgPrice * 1.03);
 
         if (sell1Price > 0) {
           signals.push({
@@ -283,18 +270,19 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             side: 'SELL',
             quantity: sell1Qty,
             price: sell1Price,
-            reason: `Sell1: T=${T.toFixed(1)}, ${sell1Qty}주 @ ${sell1Price}`,
-            orderDivision: locDivision,
+            reason: `Sell1: T=${T.toFixed(1)}, +3%, ${sell1Qty}주 @ ${sell1Price}`,
+            orderDivision: '00',
           });
         }
 
-        // Sell2: 개선 B 동적 목표
+        // Sell2: 평균단가 +5~10%에 나머지 전량 매도 (2차 익절)
         const sell2Qty = holdQty - sell1Qty;
         if (sell2Qty > 0) {
+          // T가 낮을수록 빠르게 익절, T가 높을수록 더 기다림
           let targetRate: number;
           if (T < 10) targetRate = 1.05;
-          else if (T < 20) targetRate = 1.10;
-          else targetRate = 1.15;
+          else if (T < 20) targetRate = 1.07;
+          else targetRate = 1.10;
 
           const sell2Price = roundPrice(avgPrice * targetRate);
 

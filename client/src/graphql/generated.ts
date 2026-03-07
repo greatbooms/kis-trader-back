@@ -587,6 +587,10 @@ export type WatchStockType = {
   exchangeCode?: Maybe<Scalars["String"]["output"]>;
   id: Scalars["ID"]["output"];
   isActive: Scalars["Boolean"]["output"];
+  /** 마지막 전략 실행 날짜 */
+  lastExecutionDate?: Maybe<Scalars["String"]["output"]>;
+  /** 마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단") */
+  lastExecutionStatus?: Maybe<Scalars["String"]["output"]>;
   market: Market;
   maxCycles: Scalars["Int"]["output"];
   maxPortfolioRate: Scalars["Float"]["output"];
@@ -1196,6 +1200,8 @@ export type GetWatchStocksQuery = {
     stopLossRate: number;
     maxPortfolioRate: number;
     strategyParams?: string | null;
+    lastExecutionStatus?: string | null;
+    lastExecutionDate?: string | null;
     createdAt: any;
     updatedAt: any;
   }>;
@@ -3816,6 +3822,8 @@ export const GetWatchStocksDocument = gql`
       stopLossRate
       maxPortfolioRate
       strategyParams
+      lastExecutionStatus
+      lastExecutionDate
       createdAt
       updatedAt
     }

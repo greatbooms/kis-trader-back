@@ -148,6 +148,12 @@ type WatchStockType {
   stopLossRate: Float!
   maxPortfolioRate: Float!
   strategyParams: String
+
+  """마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단")"""
+  lastExecutionStatus: String
+
+  """마지막 전략 실행 날짜"""
+  lastExecutionDate: String
   createdAt: DateTime!
   updatedAt: DateTime!
 }

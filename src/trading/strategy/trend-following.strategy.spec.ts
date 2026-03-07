@@ -80,7 +80,7 @@ describe('TrendFollowingStrategy', () => {
     it('should have once-daily execution mode', () => {
       expect(strategy.executionMode).toEqual({
         type: 'once-daily',
-        hours: { domestic: 15, overseas: 5 },
+        hours: { domestic: 15, overseas: { basis: 'beforeClose', offsetHours: 1 } },
       });
     });
   });

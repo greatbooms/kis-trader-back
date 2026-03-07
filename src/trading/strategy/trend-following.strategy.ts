@@ -21,7 +21,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
   readonly displayName = '추세 추종';
   readonly executionMode: ExecutionMode = {
     type: 'once-daily',
-    hours: { domestic: 15, overseas: 5 },
+    hours: { domestic: 15, overseas: { basis: 'beforeClose', offsetHours: 1 } }, // 장 마감 1시간 전
   };
   readonly description = [
     'MA 골든크로스와 ADX를 활용하여 강한 추세에 진입하고, 추세가 소멸할 때 청산하는 중장기 전략입니다.',

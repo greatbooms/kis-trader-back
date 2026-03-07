@@ -189,7 +189,7 @@ export class TradingScheduler implements OnModuleInit {
     const hasOnceDailyNow = this.strategyRegistry.getAllStrategies().some((s) => {
       if (s.executionMode.type !== 'once-daily') return false;
       if (market === 'DOMESTIC') return kstHour === s.executionMode.hours.domestic;
-      return kstHour === this.getOnceDailyHour(exchangeCode);
+      return kstHour === this.getOverseasExecutionHour(exchangeCode, s.executionMode.hours.overseas);
     });
 
     if (hasOnceDailyNow) {
@@ -364,20 +364,25 @@ export class TradingScheduler implements OnModuleInit {
     // once-daily: 해당 시각(KST hour)에만 실행
     const kstHour = this.getKSTHour();
     if (market === 'DOMESTIC') return kstHour === mode.hours.domestic;
-    // 해외: 거래소별 장마감 1시간 전에 실행
-    return kstHour === this.getOnceDailyHour(exchangeCode);
+    // 해외: 거래소 장 시간 기준으로 실행 시각 계산
+    return kstHour === this.getOverseasExecutionHour(exchangeCode, mode.hours.overseas);
   }
 
-  /** 거래소별 once-daily 실행 시각 (장마감 1시간 전) */
-  private getOnceDailyHour(exchangeCode: string): number {
+  /** 거래소 장 시간 기준으로 KST 실행 시각 계산 */
+  private getOverseasExecutionHour(
+    exchangeCode: string,
+    overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
+  ): number {
     const hours = MARKET_HOURS[exchangeCode];
-    if (!hours) return 5; // fallback (US default)
-    if (hours.overnight) {
-      // 미국: close 06:00 → execute 05:00
-      return (hours.close.hour - 1 + 24) % 24;
+    if (!hours) return (0 + overseas.offsetHours) % 24;
+    if (overseas.basis === 'afterOpen') {
+      return (hours.open.hour + overseas.offsetHours) % 24;
     }
-    // 아시아: close hour - 1
-    return hours.close.hour - 1;
+    // beforeClose: 장 마감 시각에서 offset만큼 빼기
+    const closeHour = hours.overnight
+      ? hours.close.hour + 24 // 미국: 06 → 30
+      : hours.close.hour;
+    return (closeHour - overseas.offsetHours) % 24;
   }
 
   private getKSTHour(): number {
