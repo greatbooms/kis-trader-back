@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 /** LOC 지원 거래소 (미국만) */
@@ -42,6 +43,15 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
     '- 해외 주식은 LOC(장마감지정가) 주문 지원',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'medium',
+    expectedReturn: '연 10~25%',
+    maxLoss: '-30% (손절 기본값)',
+    investmentPeriod: '3개월~1년',
+    tradingFrequency: '하루 1회 자동 매수',
+    suitableFor: ['장기 분할매수 선호 투자자', '하락장 대응', '적립식 투자'],
+    tags: ['분할매수', 'DCA', '장기투자', '국내/해외'],
+  };
   private readonly logger = new Logger(InfiniteBuyStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

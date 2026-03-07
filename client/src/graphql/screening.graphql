@@ -13,6 +13,12 @@ query GetStockRecommendations($date: String, $market: String, $limit: Float) {
     rank
     reasons
     indicators
+    suggestedStrategies {
+      name
+      displayName
+      matchScore
+      reason
+    }
     currentPrice
     changeRate
     volume
@@ -23,4 +29,24 @@ query GetStockRecommendations($date: String, $market: String, $limit: Float) {
 
 query GetScreeningDates($limit: Float) {
   screeningDates(limit: $limit)
+}
+
+query GetScreeningSettings {
+  screeningSettings {
+    countries {
+      country
+      label
+      enabled
+    }
+  }
+}
+
+mutation UpdateScreeningSettings($input: UpdateScreeningSettingsInput!) {
+  updateScreeningSettings(input: $input) {
+    countries {
+      country
+      label
+      enabled
+    }
+  }
 }

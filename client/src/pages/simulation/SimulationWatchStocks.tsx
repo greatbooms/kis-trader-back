@@ -15,23 +15,8 @@ import {
 import { StockSearchInput } from '@/components/StockSearchInput'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatCurrency } from '@/lib/utils'
+import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import type { SimulationWatchStocksProps } from '@/pages/simulation/types'
-
-const EXCHANGE_LABELS: Record<string, string> = {
-  KRX: '한국',
-  NASD: '나스닥', NYSE: '뉴욕', AMEX: '아멕스',
-  SEHK: '홍콩', SHAA: '상해', SZAA: '심천',
-  TKSE: '일본', HASE: '하노이', VNSE: '호치민',
-}
-
-const COUNTRY_OPTIONS = [
-  { value: 'KR', label: '한국', market: 'DOMESTIC' as Market, exchanges: ['KRX'] },
-  { value: 'US', label: '미국', market: 'OVERSEAS' as Market, exchanges: ['NASD', 'NYSE', 'AMEX'] },
-  { value: 'HK', label: '홍콩', market: 'OVERSEAS' as Market, exchanges: ['SEHK'] },
-  { value: 'CN', label: '중국', market: 'OVERSEAS' as Market, exchanges: ['SHAA', 'SZAA'] },
-  { value: 'JP', label: '일본', market: 'OVERSEAS' as Market, exchanges: ['TKSE'] },
-  { value: 'VN', label: '베트남', market: 'OVERSEAS' as Market, exchanges: ['HASE', 'VNSE'] },
-]
 
 export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps) {
   const [expanded, setExpanded] = useState(false)

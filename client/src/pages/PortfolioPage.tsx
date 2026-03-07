@@ -15,10 +15,12 @@ import {
   type Side,
 } from '@/graphql/generated'
 import { formatCurrency, formatPercent, formatNumber, formatDate } from '@/lib/utils'
-import type { MarketFilterProps } from '@/pages/types'
+import { COUNTRY_OPTIONS, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 
 export function PortfolioPage() {
-  const [market, setMarket] = useState<Market | null>(null)
+  const [countryFilter, setCountryFilter] = useState<string | null>(null)
+  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === countryFilter)
+  const marketFilter: Market | null = selectedCountry?.market ?? null
 
   return (
     <div className="space-y-6">
@@ -27,25 +29,38 @@ export function PortfolioPage() {
         <p className="text-sm text-muted-foreground mt-1">보유 종목, 매매 기록, 전략 실행 이력을 확인하세요</p>
       </div>
 
-      <div className="flex gap-2">
-        {([null, 'DOMESTIC', 'OVERSEAS'] as const).map((m) => (
-          <Button key={m ?? 'all'} variant={market === m ? 'default' : 'outline'} size="sm" onClick={() => setMarket(m)}>
-            {m === null ? '전체' : m === 'DOMESTIC' ? '국내' : '해외'}
+      <div className="flex gap-2 flex-wrap">
+        <Button
+          variant={countryFilter === null ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setCountryFilter(null)}
+        >
+          전체
+        </Button>
+        {COUNTRY_OPTIONS.map((c) => (
+          <Button
+            key={c.value}
+            variant={countryFilter === c.value ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCountryFilter(c.value)}
+          >
+            {c.label}
           </Button>
         ))}
       </div>
 
-      <PositionsCard market={market} />
+      <PositionsCard market={marketFilter} countryFilter={countryFilter} />
       <StrategyExecutionsCard />
-      <TradesCard market={market} />
+      <TradesCard market={marketFilter} countryFilter={countryFilter} />
       <QuoteLookup />
     </div>
   )
 }
 
-function PositionsCard({ market }: MarketFilterProps) {
+function PositionsCard({ market, countryFilter }: { market: Market | null; countryFilter: string | null }) {
   const { data, loading } = useGetPositionsQuery({ variables: { market } })
-  const positions = data?.positions ?? []
+  const allPositions = data?.positions ?? []
+  const positions = filterByCountry(allPositions, countryFilter)
   const totalInvested = positions.reduce((sum, p) => sum + p.totalInvested, 0)
   const totalPnl = positions.reduce((sum, p) => sum + p.profitLoss, 0)
 
@@ -92,7 +107,7 @@ function PositionsCard({ market }: MarketFilterProps) {
                   </TableCell>
                   <TableCell>
                     <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
-                      {pos.market === 'DOMESTIC' ? '국내' : '해외'}
+                      {pos.exchangeCode ? (EXCHANGE_LABELS[pos.exchangeCode] ?? pos.exchangeCode) : (pos.market === 'DOMESTIC' ? '한국' : '해외')}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
@@ -159,7 +174,8 @@ function StrategyExecutionsCard() {
 }
 
 function QuoteLookup() {
-  const [quoteMarket, setQuoteMarket] = useState<Market>('DOMESTIC')
+  const [quoteCountry, setQuoteCountry] = useState('KR')
+  const quoteMarket = COUNTRY_OPTIONS.find((c) => c.value === quoteCountry)?.market ?? ('DOMESTIC' as Market)
   const [stockCode, setStockCode] = useState('')
   const [searchCode, setSearchCode] = useState('')
 
@@ -177,12 +193,13 @@ function QuoteLookup() {
       <CardContent>
         <div className="flex gap-2 mb-4">
           <Select
-            value={quoteMarket}
-            onChange={(e) => setQuoteMarket(e.target.value as Market)}
+            value={quoteCountry}
+            onChange={(e) => setQuoteCountry(e.target.value)}
             className="w-auto"
           >
-            <option value="DOMESTIC">국내</option>
-            <option value="OVERSEAS">해외</option>
+            {COUNTRY_OPTIONS.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
           </Select>
           <Input
             placeholder="종목코드 입력 (예: 005930)"
@@ -232,7 +249,7 @@ function QuoteLookup() {
   )
 }
 
-function TradesCard({ market }: MarketFilterProps) {
+function TradesCard({ market, countryFilter }: { market: Market | null; countryFilter: string | null }) {
   const [sideFilter, setSideFilter] = useState<Side | null>(null)
   const [page, setPage] = useState(0)
   const limit = 20
@@ -240,7 +257,8 @@ function TradesCard({ market }: MarketFilterProps) {
   const { data, loading } = useGetTradesQuery({
     variables: { market, side: sideFilter, limit, offset: page * limit },
   })
-  const trades = data?.trades ?? []
+  const allTrades = data?.trades ?? []
+  const trades = filterByCountry(allTrades, countryFilter)
 
   return (
     <Card>

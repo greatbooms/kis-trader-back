@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -41,6 +42,15 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
     '- 급락 시 분할 매수로 평균단가를 효과적으로 낮춤',
     '- 추세가 강한 하락장에서는 손절 주의',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'medium',
+    expectedReturn: '건당 +3~10%',
+    maxLoss: '-8% (손절)',
+    investmentPeriod: '수일~수주',
+    tradingFrequency: '실시간 감시, 과매도 시 분할 진입',
+    suitableFor: ['횡보장/박스권 종목', '분할매수 선호', '중급 투자자'],
+    tags: ['평균회귀', '볼린저밴드', '분할매수', '국내/해외'],
+  };
   private readonly logger = new Logger(GridMeanReversionStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

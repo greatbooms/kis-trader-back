@@ -5,4 +5,4 @@ export { MarketCondition } from './market-condition.type';
 export { StockIndicators } from './stock-indicators.type';
 export { MarketRegimeLabel, RiskState } from './risk-state.type';
 export { StockFundamentals } from './stock-fundamentals.type';
-export { StockStrategyContext, PerStockTradingStrategy, ExecutionMode } from './stock-strategy-context.type';
+export { StockStrategyContext, PerStockTradingStrategy, ExecutionMode, StrategyMeta, RiskLevel } from './stock-strategy-context.type';

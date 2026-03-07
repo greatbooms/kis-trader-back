@@ -4,7 +4,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP } from '../kis/types/kis-config.types';
-import { ScreeningCandidate, StockScore, StockIndicatorDetail } from './types';
+import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy } from './types';
 
 @Injectable()
 export class ScreeningService {
@@ -87,6 +87,7 @@ export class ScreeningService {
           rank: i + 1,
           reasons: s.reasons as any,
           indicators: s.indicators as any,
+          suggestedStrategies: s.suggestedStrategies as any,
           currentPrice: s.currentPrice,
           changeRate: s.changeRate,
           volume: s.volume,
@@ -107,6 +108,7 @@ export class ScreeningService {
           rank: i + 1,
           reasons: s.reasons as any,
           indicators: s.indicators as any,
+          suggestedStrategies: s.suggestedStrategies as any,
           currentPrice: s.currentPrice,
           changeRate: s.changeRate,
           volume: s.volume,
@@ -285,6 +287,7 @@ export class ScreeningService {
     const { momentumScore, momentumReasons } = this.scoreMomentum(indicators, candidate);
 
     const totalScore = technicalScore + fundamentalScore + momentumScore;
+    const suggestedStrategies = this.suggestStrategies(indicators, candidate, false);
 
     return {
       ...candidate,
@@ -294,6 +297,7 @@ export class ScreeningService {
       momentumScore,
       reasons: [...techReasons, ...fundReasons, ...momentumReasons],
       indicators,
+      suggestedStrategies,
     };
   }
 
@@ -316,6 +320,8 @@ export class ScreeningService {
     const rawTotal = technicalScore + fundamentalScore + momentumScore;
     const normalizedTotal = Math.round((rawTotal / 85) * 100 * 10) / 10;
 
+    const suggestedStrategies = this.suggestStrategies(indicators, candidate, true);
+
     return {
       ...candidate,
       totalScore: normalizedTotal,
@@ -324,6 +330,7 @@ export class ScreeningService {
       momentumScore: Math.round((momentumScore / 30) * 30 * 10) / 10, // 모멘텀은 동일 배점
       reasons: [...techReasons, ...fundReasons, ...momentumReasons],
       indicators,
+      suggestedStrategies,
     };
   }
 
@@ -563,6 +570,199 @@ export class ScreeningService {
     }
 
     return { momentumScore: Math.min(score, 30), momentumReasons: reasons };
+  }
+
+  // ── 전략 추천 ──
+
+  private suggestStrategies(
+    ind: StockIndicatorDetail,
+    cand: ScreeningCandidate,
+    isOverseas: boolean,
+  ): SuggestedStrategy[] {
+    const strategies: SuggestedStrategy[] = [];
+
+    // 1. 밸류 팩터: PER 저평가 + ROE 양호
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (ind.per !== undefined && ind.per > 0 && ind.per <= 10) {
+        score += 40;
+        parts.push(`PER ${ind.per.toFixed(1)}`);
+      } else if (ind.per !== undefined && ind.per > 0 && ind.per <= 15) {
+        score += 20;
+        parts.push(`PER ${ind.per.toFixed(1)}`);
+      }
+      if (!isOverseas && ind.roe !== undefined && ind.roe >= 10) {
+        score += 30;
+        parts.push(`ROE ${ind.roe.toFixed(0)}%`);
+      }
+      if (!isOverseas && ind.debtRatio !== undefined && ind.debtRatio < 150) {
+        score += 15;
+        parts.push(`부채${ind.debtRatio.toFixed(0)}%`);
+      }
+      if (ind.pbr !== undefined && ind.pbr < 1.0) {
+        score += 15;
+        parts.push(`PBR ${ind.pbr.toFixed(1)}`);
+      }
+      if (score >= 40) {
+        strategies.push({
+          name: 'value-factor',
+          displayName: '밸류 팩터',
+          matchScore: Math.min(score, 100),
+          reason: `저평가 재무지표: ${parts.join(', ')}`,
+        });
+      }
+    }
+
+    // 2. 추세 추종: MA20 > MA60, 가격 > MA200
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (ind.ma20 && ind.ma60 && ind.ma20 > ind.ma60) {
+        score += 40;
+        parts.push('골든크로스 형성');
+      }
+      if (ind.priceAboveMa200) {
+        score += 30;
+        parts.push('MA200 위 장기 상승');
+      }
+      if (ind.rsi14 !== undefined && ind.rsi14 >= 40 && ind.rsi14 <= 65) {
+        score += 20;
+        parts.push(`RSI ${ind.rsi14.toFixed(0)} 안정적`);
+      }
+      if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 20) {
+        score += 10;
+        parts.push('거래량 증가');
+      }
+      if (score >= 40) {
+        strategies.push({
+          name: 'trend-following',
+          displayName: '추세 추종',
+          matchScore: Math.min(score, 100),
+          reason: parts.join(', '),
+        });
+      }
+    }
+
+    // 3. 모멘텀 돌파: 단기 급등, RSI 50~70, 거래량 급증
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (cand.changeRate >= 1 && cand.changeRate <= 8) {
+        score += 30;
+        parts.push(`등락률 +${cand.changeRate.toFixed(1)}%`);
+      }
+      if (ind.rsi14 !== undefined && ind.rsi14 >= 50 && ind.rsi14 <= 70) {
+        score += 30;
+        parts.push(`RSI ${ind.rsi14.toFixed(0)}`);
+      }
+      if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 50) {
+        score += 25;
+        parts.push(`거래량 +${ind.volumeSurgeRate.toFixed(0)}%`);
+      }
+      if (ind.ma20 && cand.currentPrice > ind.ma20) {
+        score += 15;
+        parts.push('MA20 위');
+      }
+      if (score >= 50) {
+        strategies.push({
+          name: 'momentum-breakout',
+          displayName: '모멘텀 돌파',
+          matchScore: Math.min(score, 100),
+          reason: parts.join(', '),
+        });
+      }
+    }
+
+    // 4. 그리드 평균회귀: RSI 과매도, 가격 < MA20 (횡보/하락 후 반등 기대)
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (ind.rsi14 !== undefined && ind.rsi14 < 35) {
+        score += 40;
+        parts.push(`RSI ${ind.rsi14.toFixed(0)} 과매도`);
+      }
+      if (ind.ma20 && cand.currentPrice < ind.ma20) {
+        score += 25;
+        parts.push('MA20 아래 (평균 회귀 기대)');
+      }
+      if (cand.changeRate < -2) {
+        score += 20;
+        parts.push(`등락률 ${cand.changeRate.toFixed(1)}%`);
+      }
+      if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 30) {
+        score += 15;
+        parts.push('거래량 증가 (반등 신호)');
+      }
+      if (score >= 40) {
+        strategies.push({
+          name: 'grid-mean-reversion',
+          displayName: '그리드 평균회귀',
+          matchScore: Math.min(score, 100),
+          reason: parts.join(', '),
+        });
+      }
+    }
+
+    // 5. 보수적 매매: 극단적 과매도
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (ind.rsi14 !== undefined && ind.rsi14 < 25) {
+        score += 50;
+        parts.push(`RSI ${ind.rsi14.toFixed(0)} 극단적 과매도`);
+      }
+      if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 100) {
+        score += 30;
+        parts.push(`거래량 폭증 +${ind.volumeSurgeRate.toFixed(0)}%`);
+      }
+      if (cand.changeRate < -5) {
+        score += 20;
+        parts.push(`급락 ${cand.changeRate.toFixed(1)}%`);
+      }
+      if (score >= 50) {
+        strategies.push({
+          name: 'conservative',
+          displayName: '보수적 매매',
+          matchScore: Math.min(score, 100),
+          reason: parts.join(', '),
+        });
+      }
+    }
+
+    // 6. 무한매수법: MA200 위 + 장기 상승 추세 (DCA 적합)
+    {
+      let score = 0;
+      const parts: string[] = [];
+      if (ind.priceAboveMa200) {
+        score += 40;
+        parts.push('MA200 위 장기 상승 추세');
+      }
+      if (ind.rsi14 !== undefined && ind.rsi14 >= 30 && ind.rsi14 <= 55) {
+        score += 25;
+        parts.push(`RSI ${ind.rsi14.toFixed(0)} 적정 구간`);
+      }
+      if (ind.per !== undefined && ind.per > 0 && ind.per <= 20) {
+        score += 20;
+        parts.push(`PER ${ind.per.toFixed(1)} 합리적`);
+      }
+      if (!isOverseas && ind.foreignNetBuy) {
+        score += 15;
+        parts.push('외국인 순매수');
+      }
+      if (score >= 40) {
+        strategies.push({
+          name: 'infinite-buy',
+          displayName: '무한매수법',
+          matchScore: Math.min(score, 100),
+          reason: parts.join(', '),
+        });
+      }
+    }
+
+    // matchScore 기준 내림차순 정렬, 상위 3개만
+    strategies.sort((a, b) => b.matchScore - a.matchScore);
+    return strategies.slice(0, 3);
   }
 
   // ── 유틸 ──

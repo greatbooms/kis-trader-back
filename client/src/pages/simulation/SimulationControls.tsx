@@ -7,19 +7,13 @@ import {
   useDeleteSimulationMutation,
 } from '@/graphql/generated'
 import type { SimulationControlsProps } from '@/pages/simulation/types'
+import { EXCHANGE_LABELS } from '@/lib/market-constants'
 
 const statusConfig: Record<string, { label: string; variant: 'success' | 'warning' | 'info' | 'outline' }> = {
   RUNNING: { label: '실행중', variant: 'success' },
   PAUSED: { label: '일시정지', variant: 'warning' },
   COMPLETED: { label: '완료', variant: 'info' },
   CREATED: { label: '생성됨', variant: 'outline' },
-}
-
-const EXCHANGE_LABELS: Record<string, string> = {
-  KRX: '한국',
-  NASD: '미국(나스닥)', NYSE: '미국(뉴욕)', AMEX: '미국(아멕스)',
-  SEHK: '홍콩', SHAA: '중국(상해)', SZAA: '중국(심천)',
-  TKSE: '일본', HASE: '베트남(하노이)', VNSE: '베트남(호치민)',
 }
 
 export function SimulationControls({ sessionId, status, sessionName, strategyDisplayName, market, exchangeCodes, onBack, onStatusChange }: SimulationControlsProps) {

@@ -3,6 +3,23 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { ScreeningService } from './screening.service';
 import { SlackService } from '../notification/slack.service';
+import { PrismaService } from '../prisma.service';
+
+const SCREENING_SETTINGS_KEY = 'screening-countries';
+
+interface CountryConfig {
+  country: string;
+  exchanges: string[];
+}
+
+const COUNTRY_EXCHANGE_MAP: CountryConfig[] = [
+  { country: 'KR', exchanges: ['KRX'] },
+  { country: 'US', exchanges: ['NASD', 'NYSE', 'AMEX'] },
+  { country: 'HK', exchanges: ['SEHK'] },
+  { country: 'CN', exchanges: ['SHAA', 'SZAA'] },
+  { country: 'JP', exchanges: ['TKSE'] },
+  { country: 'VN', exchanges: ['HASE', 'VNSE'] },
+];
 
 @Injectable()
 export class ScreeningScheduler implements OnModuleInit {
@@ -13,6 +30,7 @@ export class ScreeningScheduler implements OnModuleInit {
     private screeningService: ScreeningService,
     private schedulerRegistry: SchedulerRegistry,
     private slackService: SlackService,
+    private prisma: PrismaService,
   ) {}
 
   onModuleInit() {
@@ -48,8 +66,14 @@ export class ScreeningScheduler implements OnModuleInit {
 
   async runDomesticScreening(): Promise<void> {
     if (this.isRunning) return;
-    this.isRunning = true;
 
+    const enabled = await this.getEnabledCountries();
+    if (!enabled.has('KR')) {
+      this.logger.log('KR screening disabled, skipping');
+      return;
+    }
+
+    this.isRunning = true;
     try {
       const date = this.todayStr();
       const scores = await this.screeningService.screenDomestic();
@@ -67,11 +91,22 @@ export class ScreeningScheduler implements OnModuleInit {
 
   async runOverseasScreening(exchanges: string[]): Promise<void> {
     if (this.isRunning) return;
-    this.isRunning = true;
 
+    const enabled = await this.getEnabledCountries();
+    const filteredExchanges = exchanges.filter((ex) => {
+      const country = COUNTRY_EXCHANGE_MAP.find((c) => c.exchanges.includes(ex));
+      return country && enabled.has(country.country);
+    });
+
+    if (filteredExchanges.length === 0) {
+      this.logger.log(`Overseas screening skipped (no enabled countries for exchanges: ${exchanges.join(', ')})`);
+      return;
+    }
+
+    this.isRunning = true;
     try {
       const date = this.todayStr();
-      for (const exchange of exchanges) {
+      for (const exchange of filteredExchanges) {
         try {
           const scores = await this.screeningService.screenOverseas(exchange);
           if (scores.length > 0) {
@@ -87,6 +122,25 @@ export class ScreeningScheduler implements OnModuleInit {
       this.logger.error(`Overseas screening error: ${e.message}`);
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  private async getEnabledCountries(): Promise<Set<string>> {
+    const defaults: Record<string, boolean> = {
+      KR: true, US: true, HK: false, CN: false, JP: false, VN: false,
+    };
+    try {
+      const saved = await this.prisma.appSetting.findUnique({
+        where: { key: SCREENING_SETTINGS_KEY },
+      });
+      const settings = (saved?.value as Record<string, { enabled: boolean }>) ?? {};
+      const merged = { ...defaults };
+      for (const [k, v] of Object.entries(settings)) {
+        if (k in merged) merged[k] = v.enabled;
+      }
+      return new Set(Object.entries(merged).filter(([, v]) => v).map(([k]) => k));
+    } catch {
+      return new Set(Object.entries(defaults).filter(([, v]) => v).map(([k]) => k));
     }
   }
 

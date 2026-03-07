@@ -11,6 +11,13 @@ export interface ScreeningCandidate {
   eps?: number; // 해외 조건검색 API에서 제공
 }
 
+export interface SuggestedStrategy {
+  name: string;
+  displayName: string;
+  matchScore: number; // 0~100
+  reason: string;
+}
+
 export interface StockScore {
   stockCode: string;
   stockName: string;
@@ -22,6 +29,7 @@ export interface StockScore {
   momentumScore: number;
   reasons: string[];
   indicators: StockIndicatorDetail;
+  suggestedStrategies: SuggestedStrategy[];
   currentPrice: number;
   changeRate: number;
   volume: number;

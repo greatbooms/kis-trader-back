@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -45,6 +46,15 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     '- 강한 추세를 따라가며 수익을 극대화',
     '- 모멘텀 돌파와 달리 추세 소멸 시점까지 보유',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'medium',
+    expectedReturn: '연 15~40%',
+    maxLoss: '-7% (손절)',
+    investmentPeriod: '수주~수개월',
+    tradingFrequency: '하루 1회 추세 확인',
+    suitableFor: ['중장기 투자자', '추세장 활용', '피라미딩 전략'],
+    tags: ['추세추종', '골든크로스', 'ADX', '국내/해외'],
+  };
   private readonly logger = new Logger(TrendFollowingStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

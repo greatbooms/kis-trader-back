@@ -103,6 +103,7 @@ export type Mutation = {
   removeSimulationWatchStock: Scalars["Boolean"]["output"];
   resetSimulation: SimulationSessionType;
   setStrategyAllocation: StrategyAllocationType;
+  updateScreeningSettings: ScreeningSettingsType;
   updateSimulationStatus: SimulationSessionType;
   updateWatchStock: WatchStockType;
 };
@@ -142,6 +143,10 @@ export type MutationResetSimulationArgs = {
 
 export type MutationSetStrategyAllocationArgs = {
   input: SetStrategyAllocationInput;
+};
+
+export type MutationUpdateScreeningSettingsArgs = {
+  input: UpdateScreeningSettingsInput;
 };
 
 export type MutationUpdateSimulationStatusArgs = {
@@ -189,6 +194,7 @@ export type Query = {
   riskState: RiskStateType;
   runScreeningNow: Scalars["Boolean"]["output"];
   screeningDates: Array<Scalars["String"]["output"]>;
+  screeningSettings: ScreeningSettingsType;
   searchStocks: Array<StockSearchResult>;
   simulationMetrics: SimulationMetricsType;
   simulationPositions: Array<SimulationPositionType>;
@@ -308,6 +314,18 @@ export type RiskStateType = {
   liquidateAll: Scalars["Boolean"]["output"];
   positionCount: Scalars["Float"]["output"];
   reasons: Array<Scalars["String"]["output"]>;
+};
+
+export type ScreeningCountrySetting = {
+  __typename?: "ScreeningCountrySetting";
+  country: Scalars["String"]["output"];
+  enabled: Scalars["Boolean"]["output"];
+  label: Scalars["String"]["output"];
+};
+
+export type ScreeningSettingsType = {
+  __typename?: "ScreeningSettingsType";
+  countries: Array<ScreeningCountrySetting>;
 };
 
 export type SetStrategyAllocationInput = {
@@ -449,6 +467,7 @@ export type StockRecommendationType = {
   screeningDate: Scalars["String"]["output"];
   stockCode: Scalars["String"]["output"];
   stockName: Scalars["String"]["output"];
+  suggestedStrategies: Array<SuggestedStrategyType>;
   technicalScore: Scalars["Float"]["output"];
   totalScore: Scalars["Float"]["output"];
   volume: Scalars["Float"]["output"];
@@ -489,7 +508,27 @@ export type StrategyInfo = {
   __typename?: "StrategyInfo";
   description: Scalars["String"]["output"];
   displayName: Scalars["String"]["output"];
+  meta: StrategyMetaType;
   name: Scalars["String"]["output"];
+};
+
+export type StrategyMetaType = {
+  __typename?: "StrategyMetaType";
+  expectedReturn: Scalars["String"]["output"];
+  investmentPeriod: Scalars["String"]["output"];
+  maxLoss: Scalars["String"]["output"];
+  riskLevel: Scalars["String"]["output"];
+  suitableFor: Array<Scalars["String"]["output"]>;
+  tags: Array<Scalars["String"]["output"]>;
+  tradingFrequency: Scalars["String"]["output"];
+};
+
+export type SuggestedStrategyType = {
+  __typename?: "SuggestedStrategyType";
+  displayName: Scalars["String"]["output"];
+  matchScore: Scalars["Int"]["output"];
+  name: Scalars["String"]["output"];
+  reason: Scalars["String"]["output"];
 };
 
 export type TradeRecordType = {
@@ -510,6 +549,11 @@ export type TradeRecordType = {
   stockCode: Scalars["String"]["output"];
   stockName: Scalars["String"]["output"];
   strategyName?: Maybe<Scalars["String"]["output"]>;
+};
+
+export type UpdateScreeningSettingsInput = {
+  country: Scalars["String"]["input"];
+  enabled: Scalars["Boolean"]["input"];
 };
 
 export type UpdateWatchStockInput = {
@@ -600,6 +644,13 @@ export type GetStockRecommendationsQuery = {
     volume: number;
     marketCap: number;
     createdAt: any;
+    suggestedStrategies: Array<{
+      __typename?: "SuggestedStrategyType";
+      name: string;
+      displayName: string;
+      matchScore: number;
+      reason: string;
+    }>;
   }>;
 };
 
@@ -610,6 +661,40 @@ export type GetScreeningDatesQueryVariables = Exact<{
 export type GetScreeningDatesQuery = {
   __typename?: "Query";
   screeningDates: Array<string>;
+};
+
+export type GetScreeningSettingsQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GetScreeningSettingsQuery = {
+  __typename?: "Query";
+  screeningSettings: {
+    __typename?: "ScreeningSettingsType";
+    countries: Array<{
+      __typename?: "ScreeningCountrySetting";
+      country: string;
+      label: string;
+      enabled: boolean;
+    }>;
+  };
+};
+
+export type UpdateScreeningSettingsMutationVariables = Exact<{
+  input: UpdateScreeningSettingsInput;
+}>;
+
+export type UpdateScreeningSettingsMutation = {
+  __typename?: "Mutation";
+  updateScreeningSettings: {
+    __typename?: "ScreeningSettingsType";
+    countries: Array<{
+      __typename?: "ScreeningCountrySetting";
+      country: string;
+      label: string;
+      enabled: boolean;
+    }>;
+  };
 };
 
 export type GetSimulationSessionsQueryVariables = Exact<{
@@ -1044,6 +1129,16 @@ export type GetAvailableStrategiesQuery = {
     name: string;
     displayName: string;
     description: string;
+    meta: {
+      __typename?: "StrategyMetaType";
+      riskLevel: string;
+      expectedReturn: string;
+      maxLoss: string;
+      investmentPeriod: string;
+      tradingFrequency: string;
+      suitableFor: Array<string>;
+      tags: Array<string>;
+    };
   }>;
 };
 
@@ -1260,6 +1355,12 @@ export const GetStockRecommendationsDocument = gql`
       rank
       reasons
       indicators
+      suggestedStrategies {
+        name
+        displayName
+        matchScore
+        reason
+      }
       currentPrice
       changeRate
       volume
@@ -1450,6 +1551,148 @@ export type GetScreeningDatesLazyQueryHookResult = ReturnType<
 >;
 export type GetScreeningDatesSuspenseQueryHookResult = ReturnType<
   typeof useGetScreeningDatesSuspenseQuery
+>;
+export const GetScreeningSettingsDocument = gql`
+  query GetScreeningSettings {
+    screeningSettings {
+      countries {
+        country
+        label
+        enabled
+      }
+    }
+  }
+`;
+
+/**
+ * __useGetScreeningSettingsQuery__
+ *
+ * To run a query within a React component, call `useGetScreeningSettingsQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetScreeningSettingsQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetScreeningSettingsQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGetScreeningSettingsQuery(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >(GetScreeningSettingsDocument, options);
+}
+export function useGetScreeningSettingsLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >(GetScreeningSettingsDocument, options);
+}
+// @ts-ignore
+export function useGetScreeningSettingsSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningSettingsQuery,
+  GetScreeningSettingsQueryVariables
+>;
+export function useGetScreeningSettingsSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningSettingsQuery,
+        GetScreeningSettingsQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningSettingsQuery | undefined,
+  GetScreeningSettingsQueryVariables
+>;
+export function useGetScreeningSettingsSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningSettingsQuery,
+        GetScreeningSettingsQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetScreeningSettingsQuery,
+    GetScreeningSettingsQueryVariables
+  >(GetScreeningSettingsDocument, options);
+}
+export type GetScreeningSettingsQueryHookResult = ReturnType<
+  typeof useGetScreeningSettingsQuery
+>;
+export type GetScreeningSettingsLazyQueryHookResult = ReturnType<
+  typeof useGetScreeningSettingsLazyQuery
+>;
+export type GetScreeningSettingsSuspenseQueryHookResult = ReturnType<
+  typeof useGetScreeningSettingsSuspenseQuery
+>;
+export const UpdateScreeningSettingsDocument = gql`
+  mutation UpdateScreeningSettings($input: UpdateScreeningSettingsInput!) {
+    updateScreeningSettings(input: $input) {
+      countries {
+        country
+        label
+        enabled
+      }
+    }
+  }
+`;
+
+/**
+ * __useUpdateScreeningSettingsMutation__
+ *
+ * To run a mutation, you first call `useUpdateScreeningSettingsMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useUpdateScreeningSettingsMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [updateScreeningSettingsMutation, { data, loading, error }] = useUpdateScreeningSettingsMutation({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useUpdateScreeningSettingsMutation(
+  baseOptions?: ApolloReactHooks.MutationHookOptions<
+    UpdateScreeningSettingsMutation,
+    UpdateScreeningSettingsMutationVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useMutation<
+    UpdateScreeningSettingsMutation,
+    UpdateScreeningSettingsMutationVariables
+  >(UpdateScreeningSettingsDocument, options);
+}
+export type UpdateScreeningSettingsMutationHookResult = ReturnType<
+  typeof useUpdateScreeningSettingsMutation
 >;
 export const GetSimulationSessionsDocument = gql`
   query GetSimulationSessions($status: SimulationStatus) {
@@ -3251,6 +3494,15 @@ export const GetAvailableStrategiesDocument = gql`
       name
       displayName
       description
+      meta {
+        riskLevel
+        expectedReturn
+        maxLoss
+        investmentPeriod
+        tradingFrequency
+        suitableFor
+        tags
+      }
     }
   }
 `;

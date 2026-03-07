@@ -3,6 +3,15 @@ query GetAvailableStrategies {
     name
     displayName
     description
+    meta {
+      riskLevel
+      expectedReturn
+      maxLoss
+      investmentPeriod
+      tradingFrequency
+      suitableFor
+      tags
+    }
   }
 }
 

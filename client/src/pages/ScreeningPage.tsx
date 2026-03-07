@@ -3,25 +3,13 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, Target } from 'lucide-react'
 import {
   useGetStockRecommendationsQuery,
   useGetScreeningDatesQuery,
 } from '@/graphql/generated'
 import { formatNumber } from '@/lib/utils'
-
-const MARKET_OPTIONS = [
-  { value: '', label: '전체' },
-  { value: 'DOMESTIC', label: '국내' },
-  { value: 'OVERSEAS', label: '해외' },
-]
-
-const EXCHANGE_LABELS: Record<string, string> = {
-  KRX: '한국',
-  NASD: '나스닥', NYSE: '뉴욕', AMEX: '아멕스',
-  SEHK: '홍콩', SHAA: '상해', SZAA: '심천',
-  TKSE: '일본', HASE: '하노이', VNSE: '호치민',
-}
+import { COUNTRY_OPTIONS, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 
 function scoreColor(score: number): string {
   if (score >= 70) return 'text-emerald-600'
@@ -43,7 +31,10 @@ function formatScreeningDate(date: string): string {
 }
 
 export function ScreeningPage() {
-  const [market, setMarket] = useState('')
+  const [countryFilter, setCountryFilter] = useState<string | null>(null)
+  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === countryFilter)
+  const marketFilter = selectedCountry?.market ?? undefined
+
   const [selectedDate, setSelectedDate] = useState<string | undefined>()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -53,11 +44,12 @@ export function ScreeningPage() {
   const { data, loading } = useGetStockRecommendationsQuery({
     variables: {
       date: selectedDate || undefined,
-      market: market || undefined,
+      market: marketFilter,
       limit: 50,
     },
   })
-  const recommendations = data?.stockRecommendations ?? []
+  const allRecommendations = data?.stockRecommendations ?? []
+  const recommendations = filterByCountry(allRecommendations, countryFilter)
 
   return (
     <div className="space-y-6">
@@ -81,15 +73,22 @@ export function ScreeningPage() {
           ))}
         </Select>
 
-        <div className="flex gap-1">
-          {MARKET_OPTIONS.map((opt) => (
+        <div className="flex gap-1 flex-wrap">
+          <Button
+            variant={countryFilter === null ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCountryFilter(null)}
+          >
+            전체
+          </Button>
+          {COUNTRY_OPTIONS.map((c) => (
             <Button
-              key={opt.value}
-              variant={market === opt.value ? 'default' : 'outline'}
+              key={c.value}
+              variant={countryFilter === c.value ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setMarket(opt.value)}
+              onClick={() => setCountryFilter(c.value)}
             >
-              {opt.label}
+              {c.label}
             </Button>
           ))}
         </div>
@@ -126,6 +125,13 @@ export function ScreeningPage() {
   )
 }
 
+interface SuggestedStrategy {
+  name: string
+  displayName: string
+  matchScore: number
+  reason: string
+}
+
 interface RecommendationCardProps {
   rec: {
     id: string
@@ -144,6 +150,7 @@ interface RecommendationCardProps {
     marketCap: number
     reasons: string
     indicators: string
+    suggestedStrategies: SuggestedStrategy[]
   }
   expanded: boolean
   onToggle: () => void
@@ -280,6 +287,29 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
                     <p className="font-medium">+{Number(indicators.volumeSurgeRate).toFixed(0)}%</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Suggested Strategies */}
+          {rec.suggestedStrategies.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">적합 전략</p>
+              <div className="space-y-2">
+                {rec.suggestedStrategies.map((s) => (
+                  <div key={s.name} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
+                    <Target className="h-4 w-4 text-primary-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{s.displayName}</span>
+                        <Badge variant={s.matchScore >= 70 ? 'success' : s.matchScore >= 50 ? 'warning' : 'outline'} className="text-[10px] px-1.5">
+                          {s.matchScore}점
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.reason}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

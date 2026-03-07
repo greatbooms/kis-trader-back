@@ -30,10 +30,23 @@ export type ExecutionMode =
   | { type: 'continuous' }
   | { type: 'once-daily'; hours: { domestic: number; overseas: number } };
 
+export type RiskLevel = 'very-low' | 'low' | 'medium' | 'high' | 'very-high';
+
+export interface StrategyMeta {
+  riskLevel: RiskLevel;
+  expectedReturn: string;
+  maxLoss: string;
+  investmentPeriod: string;
+  tradingFrequency: string;
+  suitableFor: string[];
+  tags: string[];
+}
+
 export interface PerStockTradingStrategy {
   name: string;
   displayName: string;
   description: string;
   executionMode: ExecutionMode;
+  meta: StrategyMeta;
   evaluateStock(context: StockStrategyContext): Promise<TradingSignal[]>;
 }

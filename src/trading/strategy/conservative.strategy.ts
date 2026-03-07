@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -38,6 +39,15 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
     '- 작은 수익을 자주 실현하는 스타일',
     '- 큰 손실 위험이 적어 초보자에게 적합',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'very-low',
+    expectedReturn: '건당 +3%',
+    maxLoss: '-5% (손절)',
+    investmentPeriod: '수시간~수일',
+    tradingFrequency: '실시간 감시, 극단적 과매도 시에만 진입',
+    suitableFor: ['초보 투자자', '원금 보전 중시', '소액 투자'],
+    tags: ['저위험', '과매도반등', '소액', '국내/해외'],
+  };
   private readonly logger = new Logger(ConservativeStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

@@ -17,29 +17,8 @@ import {
 } from '@/graphql/generated'
 import { StockSearchInput } from '@/components/StockSearchInput'
 import { formatCurrency } from '@/lib/utils'
+import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import type { WatchStockUpdateInput } from '@/pages/types'
-
-const COUNTRY_OPTIONS = [
-  { value: 'KR', label: '한국', market: 'DOMESTIC' as Market, exchanges: ['KRX'] },
-  { value: 'US', label: '미국', market: 'OVERSEAS' as Market, exchanges: ['NASD', 'NYSE', 'AMEX'] },
-  { value: 'HK', label: '홍콩', market: 'OVERSEAS' as Market, exchanges: ['SEHK'] },
-  { value: 'CN', label: '중국', market: 'OVERSEAS' as Market, exchanges: ['SHAA', 'SZAA'] },
-  { value: 'JP', label: '일본', market: 'OVERSEAS' as Market, exchanges: ['TKSE'] },
-  { value: 'VN', label: '베트남', market: 'OVERSEAS' as Market, exchanges: ['HASE', 'VNSE'] },
-]
-
-const EXCHANGE_LABELS: Record<string, string> = {
-  KRX: '한국',
-  NASD: '나스닥', NYSE: '뉴욕', AMEX: '아멕스',
-  SEHK: '홍콩', SHAA: '상해', SZAA: '심천',
-  TKSE: '일본', HASE: '하노이', VNSE: '호치민',
-}
-
-function exchangeToCountry(exchangeCode?: string | null): string {
-  if (!exchangeCode) return 'KR'
-  const found = COUNTRY_OPTIONS.find((c) => c.exchanges.includes(exchangeCode))
-  return found?.value ?? 'KR'
-}
 
 export function WatchlistPage() {
   const [countryFilter, setCountryFilter] = useState<string | null>(null)
@@ -523,7 +502,7 @@ function EditWatchStockModal({
   onSave: (input: WatchStockUpdateInput) => Promise<void>
   onClose: () => void
 }) {
-  const [strategyName, setStrategyName] = useState(stock.strategyName ?? '')
+  const [strategyName] = useState(stock.strategyName ?? '')
   const [quota, setQuota] = useState(String(stock.quota ?? ''))
   const [maxCycles, setMaxCycles] = useState(String(stock.maxCycles))
   const [stopLossRate, setStopLossRate] = useState(String(Math.round(stock.stopLossRate * 100)))
@@ -538,7 +517,6 @@ function EditWatchStockModal({
     try {
       await onSave({
         quota: quota ? Number(quota) : undefined,
-        maxCycles: maxCycles ? Number(maxCycles) : undefined,
         stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
       })
     } catch (e: unknown) {

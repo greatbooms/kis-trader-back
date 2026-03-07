@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -59,6 +60,15 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '- 재무 건전성을 기반으로 종목 필터링',
     '- 하루 1회 실행 (국내 15시, 해외 05시)',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'low',
+    expectedReturn: '연 10~20%',
+    maxLoss: '-10% (손절)',
+    investmentPeriod: '수주~수개월',
+    tradingFrequency: '하루 1회 재무지표 확인',
+    suitableFor: ['가치투자 선호', '저평가 우량주', '중장기 투자자'],
+    tags: ['가치투자', 'PER', 'PBR', 'ROE', '국내/해외'],
+  };
   private readonly logger = new Logger(ValueFactorStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

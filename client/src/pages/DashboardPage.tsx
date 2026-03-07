@@ -11,10 +11,10 @@ import {
   type Market,
 } from '@/graphql/generated'
 import { formatCurrency, formatPercent, formatNumber } from '@/lib/utils'
-import type { MarketSelectProps } from '@/pages/types'
+import { COUNTRY_OPTIONS, type CountryOption } from '@/lib/market-constants'
 
 export function DashboardPage() {
-  const [market, setMarket] = useState<Market>('DOMESTIC')
+  const [selectedCountry, setSelectedCountry] = useState<CountryOption>(COUNTRY_OPTIONS[0])
   const { data: summaryData, loading: summaryLoading } = useGetDashboardSummaryQuery()
   const { data: positionsData, loading: positionsLoading } = useGetPositionsQuery()
 
@@ -100,25 +100,31 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <div className="flex gap-2">
-        {(['DOMESTIC', 'OVERSEAS'] as const).map((m) => (
-          <Button key={m} variant={market === m ? 'default' : 'outline'} size="sm" onClick={() => setMarket(m)}>
-            {m === 'DOMESTIC' ? '국내' : '해외'}
+      <div className="flex gap-2 flex-wrap">
+        {COUNTRY_OPTIONS.map((c) => (
+          <Button
+            key={c.value}
+            variant={selectedCountry.value === c.value ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCountry(c)}
+          >
+            {c.label}
           </Button>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MarketRegimeCard market={market} />
-        <RiskStateCard market={market} />
+        <MarketRegimeCard country={selectedCountry} />
+        <RiskStateCard market={selectedCountry.market} />
       </div>
     </div>
   )
 }
 
-function MarketRegimeCard({ market }: MarketSelectProps) {
-  const exchangeCode = market === 'DOMESTIC' ? '0001' : 'NAS'
-  const { data, loading } = useGetMarketRegimeQuery({ variables: { market, exchangeCode } })
+function MarketRegimeCard({ country }: { country: CountryOption }) {
+  const { data, loading } = useGetMarketRegimeQuery({
+    variables: { market: country.market, exchangeCode: country.regimeExchangeCode },
+  })
   const regime = data?.marketRegime
   const regimeColor = regime?.regime === 'TRENDING_UP' ? 'success' : regime?.regime === 'TRENDING_DOWN' ? 'danger' : 'warning'
   const regimeLabel = regime?.regime === 'TRENDING_UP' ? '상승 추세' : regime?.regime === 'TRENDING_DOWN' ? '하락 추세' : '횡보'
@@ -130,7 +136,7 @@ function MarketRegimeCard({ market }: MarketSelectProps) {
           <TrendingUp className="h-5 w-5 text-primary-500" />
           <CardTitle>시장 상태</CardTitle>
         </div>
-        <CardDescription>{market === 'DOMESTIC' ? '국내 시장' : '해외 시장'} 체제 분석</CardDescription>
+        <CardDescription>{country.label} 시장 체제 분석</CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -148,7 +154,7 @@ function MarketRegimeCard({ market }: MarketSelectProps) {
   )
 }
 
-function RiskStateCard({ market }: MarketSelectProps) {
+function RiskStateCard({ market }: { market: Market }) {
   const { data, loading } = useGetRiskStateQuery({ variables: { market } })
   const risk = data?.riskState
 

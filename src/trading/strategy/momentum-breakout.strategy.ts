@@ -4,6 +4,7 @@ import {
   StockStrategyContext,
   TradingSignal,
   ExecutionMode,
+  StrategyMeta,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -44,6 +45,15 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     '- 손절 폭이 작아 리스크 관리에 유리',
     '- 강한 추세가 있는 종목에서 효과적',
   ].join('\n');
+  readonly meta: StrategyMeta = {
+    riskLevel: 'high',
+    expectedReturn: '건당 +5~8%',
+    maxLoss: '-3% (손절) / -2% (트레일링)',
+    investmentPeriod: '1~3일',
+    tradingFrequency: '실시간 감시, 조건 충족 시 즉시 매매',
+    suitableFor: ['단기 트레이딩 선호', '변동성 높은 종목', '적극적 투자자'],
+    tags: ['단기매매', '변동성돌파', '모멘텀', '국내/해외'],
+  };
   private readonly logger = new Logger(MomentumBreakoutStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

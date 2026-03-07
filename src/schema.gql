@@ -2,10 +2,21 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type StrategyMetaType {
+  riskLevel: String!
+  expectedReturn: String!
+  maxLoss: String!
+  investmentPeriod: String!
+  tradingFrequency: String!
+  suitableFor: [String!]!
+  tags: [String!]!
+}
+
 type StrategyInfo {
   name: String!
   displayName: String!
   description: String!
+  meta: StrategyMetaType!
 }
 
 type StrategyAllocationType {
@@ -253,6 +264,13 @@ type StockSearchResult {
   exchangeCode: String!
 }
 
+type SuggestedStrategyType {
+  name: String!
+  displayName: String!
+  matchScore: Int!
+  reason: String!
+}
+
 type StockRecommendationType {
   id: String!
   screeningDate: String!
@@ -267,11 +285,22 @@ type StockRecommendationType {
   rank: Int!
   reasons: String!
   indicators: String!
+  suggestedStrategies: [SuggestedStrategyType!]!
   currentPrice: Float!
   changeRate: Float!
   volume: Float!
   marketCap: Float!
   createdAt: DateTime!
+}
+
+type ScreeningCountrySetting {
+  country: String!
+  label: String!
+  enabled: Boolean!
+}
+
+type ScreeningSettingsType {
+  countries: [ScreeningCountrySetting!]!
 }
 
 type Query {
@@ -297,6 +326,7 @@ type Query {
   stockRecommendations(date: String, market: String, limit: Float = 20): [StockRecommendationType!]!
   screeningDates(limit: Float = 10): [String!]!
   runScreeningNow(market: String!, exchangeCode: String): Boolean!
+  screeningSettings: ScreeningSettingsType!
 }
 
 type Mutation {
@@ -312,6 +342,7 @@ type Mutation {
   updateSimulationStatus(id: String!, status: SimulationStatus!): SimulationSessionType!
   resetSimulation(id: String!): SimulationSessionType!
   deleteSimulation(id: String!): Boolean!
+  updateScreeningSettings(input: UpdateScreeningSettingsInput!): ScreeningSettingsType!
 }
 
 input SetStrategyAllocationInput {
@@ -378,4 +409,9 @@ input AddSimulationWatchStockInput {
   stopLossRate: Float
   maxPortfolioRate: Float
   strategyParams: String
+}
+
+input UpdateScreeningSettingsInput {
+  country: String!
+  enabled: Boolean!
 }

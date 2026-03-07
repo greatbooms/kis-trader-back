@@ -33,6 +33,7 @@ export class TradingResolver {
       name: s.name,
       displayName: s.displayName,
       description: s.description,
+      meta: s.meta,
     }));
   }
 

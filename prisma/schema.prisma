@@ -188,6 +188,7 @@ model StockRecommendation {
   rank           Int
   reasons        Json
   indicators     Json
+  suggestedStrategies Json? @map("suggested_strategies")
   currentPrice   Decimal  @map("current_price") @db.Decimal(16, 4)
   changeRate     Decimal  @map("change_rate") @db.Decimal(8, 4)
   volume         BigInt   @default(0)
@@ -197,6 +198,14 @@ model StockRecommendation {
   @@unique([screeningDate, market, stockCode])
   @@index([screeningDate, market])
   @@map("stock_recommendations")
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
 }
 
 model SimulationSession {
