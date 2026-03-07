@@ -11,7 +11,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
-import { HolidayItem } from '../kis/types/kis-api.types';
+import { HolidayItem, StockPriceResult } from '../kis/types/kis-api.types';
 import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy } from './types';
 import { Market } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
@@ -231,6 +231,15 @@ export class TradingScheduler implements OnModuleInit {
             market, ws.exchangeCode || exchangeCode, ws.stockCode, price.currentPrice,
           );
 
+          // 현재가 API에서 직접 제공되는 추가 지표를 stockIndicators에 병합
+          stockIndicators.foreignHoldRate = price.foreignHoldRate;
+          stockIndicators.foreignNetBuyQty = price.foreignNetBuyQty;
+          stockIndicators.w52High = price.w52High;
+          stockIndicators.w52Low = price.w52Low;
+          stockIndicators.investCautionYn = price.investCautionYn;
+          stockIndicators.marketWarnCode = price.marketWarnCode;
+          stockIndicators.shortOverheatYn = price.shortOverheatYn;
+
           let buyableAmount = 0;
           if (market === 'DOMESTIC') {
             try {
@@ -279,7 +288,7 @@ export class TradingScheduler implements OnModuleInit {
           // 밸류 팩터 전략일 때만 재무 데이터 조회 (API 호출 최소화)
           let fundamentals: StockFundamentals | undefined;
           if (strategyName === 'value-factor') {
-            fundamentals = await this.fetchFundamentals(market, ws.exchangeCode || exchangeCode, ws.stockCode);
+            fundamentals = await this.fetchFundamentals(market, ws.exchangeCode || exchangeCode, ws.stockCode, price);
           }
 
           contexts.push({
@@ -522,21 +531,54 @@ export class TradingScheduler implements OnModuleInit {
     market: string,
     exchangeCode: string,
     stockCode: string,
+    price: StockPriceResult,
   ): Promise<StockFundamentals | undefined> {
     try {
       if (market === 'DOMESTIC') {
+        // PER/PBR: 현재가 시세 API에서 제공 (재무비율 API에는 없음)
+        const fundamentals: StockFundamentals = {
+          per: price.per,
+          pbr: price.pbr,
+        };
+
+        // ROE, 부채비율, EPS, 매출액증가율, 영업이익증가율: 재무비율 API에서 제공
         const rows = await this.kisDomestic.getFinancialRatio(stockCode);
         if (rows.length > 0) {
           const latest = rows[0];
-          return {
-            per: parseFloat(latest.per) || undefined,
-            pbr: parseFloat(latest.pbr) || undefined,
-            roe: parseFloat(latest.roe_val) || undefined,
-            debtRatio: parseFloat(latest.lblt_rate) || undefined,
-          };
+          fundamentals.roe = parseFloat(latest.roe_val) || undefined;
+          fundamentals.debtRatio = parseFloat(latest.lblt_rate) || undefined;
+          const eps = parseFloat(latest.eps);
+          fundamentals.eps = isNaN(eps) ? undefined : eps;
+          const grs = parseFloat(latest.grs);
+          fundamentals.salesGrowthRate = isNaN(grs) ? undefined : grs;
+          const bsopInrt = parseFloat(latest.bsop_prfi_inrt);
+          fundamentals.operatingProfitGrowthRate = isNaN(bsopInrt) ? undefined : bsopInrt;
         }
+
+        // EV/EBITDA, 배당성향: 기타주요비율 API에서 제공
+        try {
+          const otherRows = await this.kisDomestic.getOtherMajorRatios(stockCode);
+          if (otherRows.length > 0) {
+            const latest = otherRows[0];
+            const evEbitda = parseFloat(latest.ev_ebitda);
+            fundamentals.evEbitda = isNaN(evEbitda) || evEbitda === 0 ? undefined : evEbitda;
+            const payout = parseFloat(latest.payout_rate);
+            fundamentals.dividendPayoutRate = isNaN(payout) ? undefined : payout;
+          }
+        } catch (e) {
+          this.logger.debug(`Failed to fetch other-major-ratios for ${stockCode}: ${e.message}`);
+        }
+
+        return fundamentals;
       }
-      // 해외: 개별 종목 재무비율 API 없음 → undefined 반환
+      // 해외: 현재가상세 API에서 PER/PBR/EPS 제공 (재무비율 API는 없음)
+      if (price.per || price.pbr || price.eps) {
+        return {
+          per: price.per,
+          pbr: price.pbr,
+          eps: price.eps,
+        };
+      }
       return undefined;
     } catch (e) {
       this.logger.warn(`Failed to fetch fundamentals for ${stockCode}: ${e.message}`);

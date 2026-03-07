@@ -33,13 +33,13 @@ export class KisOverseasService {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
 
-  /** 해외 현재가 조회 */
+  /** 해외 현재가상세 조회 (PER/PBR/EPS/BPS 포함) */
   async getPrice(exchangeCode: string, symbol: string): Promise<StockPriceResult> {
     const excd = EXCHANGE_CODE_MAP[exchangeCode] || exchangeCode;
 
     const res = await this.kisBase.get<OverseasPriceOutput>(
-      '/uapi/overseas-price/v1/quotations/price',
-      'HHDFS00000300',
+      '/uapi/overseas-price/v1/quotations/price-detail',
+      'HHDFS76200200',
       {
         AUTH: '',
         EXCD: excd,
@@ -48,6 +48,9 @@ export class KisOverseasService {
     );
 
     const o = res.output!;
+    const perx = o.perx ? parseFloat(o.perx) : undefined;
+    const pbrx = o.pbrx ? parseFloat(o.pbrx) : undefined;
+    const epsx = o.epsx ? parseFloat(o.epsx) : undefined;
     return {
       stockCode: symbol,
       stockName: o.name || symbol,
@@ -56,6 +59,11 @@ export class KisOverseasService {
       highPrice: parseFloat(o.high) || 0,
       lowPrice: parseFloat(o.low) || 0,
       volume: parseInt(o.tvol, 10) || 0,
+      per: perx && !isNaN(perx) ? perx : undefined,
+      pbr: pbrx && !isNaN(pbrx) ? pbrx : undefined,
+      eps: epsx && !isNaN(epsx) ? epsx : undefined,
+      w52High: o.h52p ? parseFloat(o.h52p) || undefined : undefined,
+      w52Low: o.l52p ? parseFloat(o.l52p) || undefined : undefined,
     };
   }
 

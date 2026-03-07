@@ -18,6 +18,17 @@ export interface DomesticPriceOutput {
   acml_vol: string;  // 누적거래량
   prdy_vrss_vol_rate?: string; // 전일 대비 거래량 비율
   hts_kor_isnm?: string; // 종목명
+  per?: string; // PER
+  pbr?: string; // PBR
+  hts_frgn_ehrt?: string; // 외국인 소진율
+  frgn_ntby_qty?: string; // 외국인 순매수 수량
+  pgtr_ntby_qty?: string; // 프로그램매매 순매수 수량
+  acml_tr_pbmn?: string; // 누적 거래대금
+  w52_hgpr?: string; // 52주 최고가
+  w52_lwpr?: string; // 52주 최저가
+  invt_caful_yn?: string; // 투자유의여부
+  mrkt_warn_cls_code?: string; // 시장경고코드 (00:없음, 01:투자주의, 02:투자경고, 03:투자위험)
+  short_over_yn?: string; // 단기과열여부
 }
 
 /** 국내 주문 응답 */
@@ -38,14 +49,24 @@ export interface DomesticBalanceItem {
   evlu_pfls_rt: string;   // 평가손익률
 }
 
-/** 해외 현재가 응답 */
+/** 해외 현재가상세 응답 (HHDFS76200200) */
 export interface OverseasPriceOutput {
   last: string;   // 현재가
   open: string;   // 시가
   high: string;   // 고가
   low: string;    // 저가
   tvol: string;   // 거래량
-  name?: string;  // 종목명
+  name?: string;  // 종목명 (현재체결가 API용)
+  rsym?: string;  // 실시간조회종목코드 (현재가상세 API용)
+  perx?: string;  // PER
+  pbrx?: string;  // PBR
+  epsx?: string;  // EPS
+  bpsx?: string;  // BPS
+  h52p?: string;  // 52주 최고가
+  l52p?: string;  // 52주 최저가
+  pvol?: string;  // 전일거래량
+  tomv?: string;  // 시가총액
+  e_icod?: string; // 업종(섹터)
 }
 
 /** 해외 주문 응답 */
@@ -78,6 +99,18 @@ export interface StockPriceResult {
   lowPrice: number;
   volume: number;
   prevDayVolumeRate?: number; // 전일 대비 거래량 비율 (%)
+  per?: number; // PER
+  pbr?: number; // PBR
+  eps?: number; // EPS — 해외 현재가상세 API에서만 제공 (국내는 재무비율 API 사용)
+  foreignHoldRate?: number; // 외국인 소진율 (%) — 국내만
+  foreignNetBuyQty?: number; // 외국인 순매수 수량 — 국내만
+  programNetBuyQty?: number; // 프로그램매매 순매수 수량 — 국내만
+  tradingValue?: number; // 누적 거래대금 — 국내만
+  w52High?: number; // 52주 최고가
+  w52Low?: number; // 52주 최저가
+  investCautionYn?: boolean; // 투자유의여부 — 국내만
+  marketWarnCode?: string; // 시장경고코드 — 국내만
+  shortOverheatYn?: boolean; // 단기과열여부 — 국내만
 }
 
 /** 주문 결과 */

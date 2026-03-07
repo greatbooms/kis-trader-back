@@ -173,6 +173,10 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         return signals;
       }
 
+      // 투자유의/시장경고 종목 진입 차단
+      if (stockIndicators.investCautionYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+
       // 진입: 골든크로스 + 강한 추세 + 현재가 > MA20
       if (!goldenCross || !strongTrend || curPrice <= ma20) {
         return signals;

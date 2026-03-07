@@ -167,6 +167,10 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
 
       const { ma20, rsi14, volumeRatio, prevHigh, prevLow, todayOpen } = stockIndicators;
 
+      // 투자유의/시장경고/단기과열 종목 진입 차단
+      if (stockIndicators.investCautionYn || stockIndicators.shortOverheatYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+
       // 진입 조건 체크
       if (ma20 === undefined || rsi14 === undefined || volumeRatio === undefined) {
         return signals;

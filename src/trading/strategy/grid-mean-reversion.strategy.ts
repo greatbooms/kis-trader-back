@@ -172,6 +172,10 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
 
       const { bollingerLower, rsi14, macdHistogram, macdPrevHistogram } = stockIndicators;
 
+      // 투자유의/시장경고 종목 진입 차단
+      if (stockIndicators.investCautionYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+
       // 진입 조건: BB 하단 터치
       if (bollingerLower === undefined || rsi14 === undefined) return signals;
       if (macdHistogram === undefined || macdPrevHistogram === undefined) return signals;

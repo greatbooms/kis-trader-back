@@ -53,6 +53,8 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
       pbr: 0.8,
       roe: 15,
       debtRatio: 80,
+      eps: 5000,
+      salesGrowthRate: 5.0,
     };
 
     return {
@@ -99,6 +101,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     expect(signals[0].reason).toContain('PER=7.5');
     expect(signals[0].reason).toContain('PBR=0.8');
     expect(signals[0].reason).toContain('ROE=15%');
+    expect(signals[0].reason).toContain('EPS=5000');
   });
 
   // ============================================================
@@ -199,6 +202,97 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
   });
 
   // ============================================================
+  // 5-1. EPS 필터 (국내만)
+  // ============================================================
+
+  it('EPS=0 (적자기업) → 매수 안함', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 0, salesGrowthRate: 5 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('EPS=-500 (적자기업) → 매수 안함', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: -500, salesGrowthRate: 5 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('EPS=100 (흑자기업) → 매수', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 100, salesGrowthRate: 5 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  it('EPS=undefined → EPS 체크 스킵', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: undefined, salesGrowthRate: 5 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  // ============================================================
+  // 5-2. 매출액증가율 필터 (국내만)
+  // ============================================================
+
+  it('매출액증가율=-25% (심한 역성장) → 매수 안함', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -25 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('매출액증가율=-20% (경계값) → 매수', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -20 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  it('매출액증가율=-19% → 매수', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -19 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  it('해외: 매출액증가율/ROE/부채비율/EV-EBITDA 필터 적용 안함 (EPS는 공통 적용)', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 8, pbr: 0.5, eps: 100, salesGrowthRate: -50, roe: 1, debtRatio: 300, evEbitda: 50 }, // 국내면 실패하는 값이지만 해외는 ROE/부채/매출증가율/EV-EBITDA 미적용
+      stockIndicators: { currentAboveMA200: true, rsi14: 35 },
+    });
+    ctx.watchStock.market = 'OVERSEAS';
+    ctx.watchStock.exchangeCode = 'NASD';
+    ctx.price.currentPrice = 25.50;
+
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].side).toBe('BUY');
+  });
+
+  it('해외: EPS 음수 → 매수 차단 (EPS 공통 필터)', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 8, pbr: 0.5, eps: -500 },
+      stockIndicators: { currentAboveMA200: true, rsi14: 35 },
+    });
+    ctx.watchStock.market = 'OVERSEAS';
+    ctx.watchStock.exchangeCode = 'NASD';
+    ctx.price.currentPrice = 25.50;
+
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  // ============================================================
   // 6. RSI 필터
   // ============================================================
 
@@ -222,9 +316,9 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
   // 7. 해외 종목 — PER + RSI만 사용
   // ============================================================
 
-  it('해외: PER<10, RSI<40 → 매수 (PBR/ROE/부채비율 무시)', async () => {
+  it('해외: PER<10, PBR<1, RSI<40 → 매수', async () => {
     const ctx = createContext({
-      fundamentals: { per: 8.5 }, // PBR, ROE, debtRatio 없음
+      fundamentals: { per: 8.5, pbr: 0.7 },
       stockIndicators: { currentAboveMA200: true, rsi14: 35 },
     });
     ctx.watchStock.market = 'OVERSEAS';
@@ -238,12 +332,40 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     expect(signals[0].side).toBe('BUY');
     expect(signals[0].price).toBe(25.50);
     expect(signals[0].exchangeCode).toBe('NASD');
-    expect(signals[0].reason).toContain('해외: PER만 사용');
+    expect(signals[0].reason).toContain('해외');
+    expect(signals[0].reason).toContain('PBR=0.7');
+  });
+
+  it('해외: PER<10, PBR 없음 → PBR 스킵, 매수', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 8.5 }, // PBR 없음
+      stockIndicators: { currentAboveMA200: true, rsi14: 35 },
+    });
+    ctx.watchStock.market = 'OVERSEAS';
+    ctx.watchStock.exchangeCode = 'NASD';
+    ctx.price.currentPrice = 25.50;
+
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].side).toBe('BUY');
+  });
+
+  it('해외: PBR=1.5 (>=1.0) → 매수 안함', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 8, pbr: 1.5 },
+      stockIndicators: { currentAboveMA200: true, rsi14: 35 },
+    });
+    ctx.watchStock.market = 'OVERSEAS';
+    ctx.watchStock.exchangeCode = 'NASD';
+    ctx.price.currentPrice = 25.50;
+
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
   });
 
   it('해외: PER=12 (>10) → 매수 안함', async () => {
     const ctx = createContext({
-      fundamentals: { per: 12 },
+      fundamentals: { per: 12, pbr: 0.8 },
       stockIndicators: { currentAboveMA200: true, rsi14: 35 },
     });
     ctx.watchStock.market = 'OVERSEAS';
@@ -548,5 +670,82 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
 
     const signals = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
+  });
+
+  // ============================================================
+  // 19. 투자유의/시장경고 진입 차단
+  // ============================================================
+
+  it('투자유의 종목 → 매수 차단', async () => {
+    const ctx = createContext({
+      stockIndicators: { currentAboveMA200: true, rsi14: 35, investCautionYn: true },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('시장경고 종목 (경고) → 매수 차단', async () => {
+    const ctx = createContext({
+      stockIndicators: { currentAboveMA200: true, rsi14: 35, marketWarnCode: '01' },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('시장경고 코드 00 (정상) → 매수 허용', async () => {
+    const ctx = createContext({
+      stockIndicators: { currentAboveMA200: true, rsi14: 35, marketWarnCode: '00' },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].side).toBe('BUY');
+  });
+
+  // ============================================================
+  // 20. 영업이익증가율 필터 (국내 전용)
+  // ============================================================
+
+  it('영업이익증가율=-31% (<-30%) → 매수 차단', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, operatingProfitGrowthRate: -31 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('영업이익증가율=-30% (경계값) → 매수 허용', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, operatingProfitGrowthRate: -30 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  // ============================================================
+  // 21. EV/EBITDA 필터 (국내 전용)
+  // ============================================================
+
+  it('EV/EBITDA=16 (>15) → 매수 차단', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, evEbitda: 16 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('EV/EBITDA=15 (경계값) → 매수 허용', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, evEbitda: 15 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+  });
+
+  it('EV/EBITDA=undefined → 체크 스킵, 매수 허용', async () => {
+    const ctx = createContext({
+      fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5 },
+    });
+    const signals = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
   });
 });

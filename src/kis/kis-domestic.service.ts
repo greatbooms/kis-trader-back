@@ -51,6 +51,17 @@ export class KisDomesticService {
       lowPrice: parseFloat(o.stck_lwpr) || 0,
       volume: parseInt(o.acml_vol, 10) || 0,
       prevDayVolumeRate: o.prdy_vrss_vol_rate ? parseFloat(o.prdy_vrss_vol_rate) : undefined,
+      per: o.per ? parseFloat(o.per) || undefined : undefined,
+      pbr: o.pbr ? parseFloat(o.pbr) || undefined : undefined,
+      foreignHoldRate: o.hts_frgn_ehrt ? parseFloat(o.hts_frgn_ehrt) : undefined,
+      foreignNetBuyQty: o.frgn_ntby_qty ? parseInt(o.frgn_ntby_qty, 10) : undefined,
+      programNetBuyQty: o.pgtr_ntby_qty ? parseInt(o.pgtr_ntby_qty, 10) : undefined,
+      tradingValue: o.acml_tr_pbmn ? parseFloat(o.acml_tr_pbmn) : undefined,
+      w52High: o.w52_hgpr ? parseFloat(o.w52_hgpr) || undefined : undefined,
+      w52Low: o.w52_lwpr ? parseFloat(o.w52_lwpr) || undefined : undefined,
+      investCautionYn: o.invt_caful_yn === 'Y',
+      marketWarnCode: o.mrkt_warn_cls_code,
+      shortOverheatYn: o.short_over_yn === 'Y',
     };
   }
 
@@ -394,6 +405,20 @@ export class KisDomesticService {
     const res = await this.kisBase.get(
       '/uapi/domestic-stock/v1/finance/financial-ratio',
       'FHKST66430300',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
+  /** 국내 기타주요비율 조회 (EV/EBITDA, 배당성향 등) */
+  async getOtherMajorRatios(stockCode: string): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/finance/other-major-ratios',
+      'FHKST66430500',
       {
         FID_DIV_CLS_CODE: '0',
         fid_cond_mrkt_div_code: 'J',

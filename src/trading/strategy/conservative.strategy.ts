@@ -121,6 +121,10 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
 
       const { rsi14, volumeRatio } = stockIndicators;
 
+      // 투자유의/시장경고 종목 진입 차단
+      if (stockIndicators.investCautionYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+
       if (rsi14 === undefined || volumeRatio === undefined) return signals;
 
       // RSI < 25

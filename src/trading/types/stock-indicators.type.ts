@@ -20,4 +20,12 @@ export interface StockIndicators {
   prevLow?: number;
   prevClose?: number;
   todayOpen?: number;
+  // 현재가 API에서 직접 제공되는 추가 지표
+  foreignHoldRate?: number; // 외국인 소진율 (%)
+  foreignNetBuyQty?: number; // 외국인 순매수 수량
+  w52High?: number; // 52주 최고가
+  w52Low?: number; // 52주 최저가
+  investCautionYn?: boolean; // 투자유의여부
+  marketWarnCode?: string; // 시장경고코드
+  shortOverheatYn?: boolean; // 단기과열여부
 }

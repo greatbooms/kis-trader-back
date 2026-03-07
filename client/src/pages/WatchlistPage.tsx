@@ -498,7 +498,7 @@ const STRATEGY_META: Record<string, {
   'value-factor': {
     defaultStopLoss: 10,
     hasMaxCycles: false,
-    quotaDesc: '이 종목에 배정할 투자 금액입니다. 재무 지표(PER, PBR, ROE, 부채비율) 조건 충족 시 매수합니다. 해외 종목은 KIS API 제약으로 PER만 사용 가능하며, PBR/ROE/부채비율은 국내 종목에서만 확인됩니다.',
+    quotaDesc: '이 종목에 배정할 투자 금액입니다. 재무 지표(PER, PBR, EPS, ROE, 부채비율, EV/EBITDA 등) 조건 충족 시 매수합니다. 해외 종목은 PER+PBR+EPS+RSI로 판단하며, ROE/부채비율/EV/EBITDA/증가율 지표는 국내 전용입니다. 투자유의/시장경고 종목은 자동 차단됩니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절합니다. +15% 수익 또는 RSI > 70 과열 시에도 자동 청산됩니다.',
   },
 }

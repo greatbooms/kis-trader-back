@@ -14,6 +14,10 @@ const DEFAULT_PARAMS = {
   rsiThreshold: 40,
   stopLossRate: 0.10,
   takeProfitRate: 0.15,
+  requirePositiveEps: true,
+  minSalesGrowthRate: -20, // 매출액 증가율 하한 (%, -20% 이하 역성장 제외)
+  minOperatingProfitGrowthRate: -30, // 영업이익 증가율 하한 (%)
+  maxEvEbitda: 15, // EV/EBITDA 상한 (배). 높으면 고평가
 };
 
 @Injectable()
@@ -29,9 +33,13 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '',
     '【진입 조건 (모두 충족 시 매수)】',
     '- PER < 10 (저평가)',
-    '- PBR < 1.0 (자산 대비 저평가) — 국내 전용',
+    '- PBR < 1.0 (자산 대비 저평가) — 국내/해외',
+    '- EPS > 0 (흑자기업만) — 국내/해외',
     '- ROE > 10% (수익성 양호) — 국내 전용',
     '- 부채비율 < 150% (재무 안정성) — 국내 전용',
+    '- 매출액증가율 > -20% (심한 역성장 제외) — 국내 전용',
+    '- 영업이익증가율 > -30% (수익성 악화 제외) — 국내 전용',
+    '- EV/EBITDA < 15 (기업가치 대비 저평가) — 국내 전용',
     '- RSI < 40 (과열되지 않은 구간)',
     '',
     '【매도 조건】',
@@ -41,9 +49,9 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '- 리스크 전량청산 시그널 시 즉시 매도',
     '',
     '【해외 종목 제한사항】',
-    '- KIS API 제약으로 해외 종목은 PER만 사용 가능',
-    '- PBR, ROE, 부채비율은 국내 종목에서만 확인됩니다',
-    '- 해외 종목은 PER + RSI 조건만으로 진입 판단',
+    '- 해외 종목은 현재가상세 API에서 PER, PBR, EPS 제공',
+    '- ROE, 부채비율, 매출액/영업이익 증가율, EV/EBITDA는 국내만',
+    '- 해외 종목은 PER + PBR + EPS + RSI 조건으로 진입 판단',
     '',
     '【특징】',
     '- 중장기 보유 전략 (수주~수개월)',
@@ -154,6 +162,10 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         return signals;
       }
 
+      // 투자유의/시장경고 종목 진입 차단
+      if (stockIndicators.investCautionYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+
       // 재무 데이터 필수 (없으면 skip)
       if (!fundamentals) {
         this.logger.debug(`[${watchStock.stockCode}] No fundamentals data, skip`);
@@ -168,18 +180,38 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         return signals;
       }
 
-      // 국내 전용 필터: PBR, ROE, 부채비율
+      // PBR 체크 (국내/해외 공통 — 해외도 현재가상세 API에서 제공)
+      if (fundamentals.pbr !== undefined && fundamentals.pbr >= params.maxPbr) {
+        this.logger.debug(`[${watchStock.stockCode}] PBR filter failed: ${fundamentals.pbr}`);
+        return signals;
+      }
+
+      // EPS 양수 체크 (국내/해외 공통 — 해외도 현재가상세 API에서 EPS 제공)
+      if (params.requirePositiveEps && fundamentals.eps !== undefined && fundamentals.eps <= 0) {
+        this.logger.debug(`[${watchStock.stockCode}] EPS filter failed: ${fundamentals.eps} (적자기업)`);
+        return signals;
+      }
+
+      // 국내 전용 필터: ROE, 부채비율, 매출액증가율, 영업이익증가율, EV/EBITDA
       if (!isOverseas) {
-        if (fundamentals.pbr !== undefined && fundamentals.pbr >= params.maxPbr) {
-          this.logger.debug(`[${watchStock.stockCode}] PBR filter failed: ${fundamentals.pbr}`);
-          return signals;
-        }
         if (fundamentals.roe !== undefined && fundamentals.roe < params.minRoe) {
           this.logger.debug(`[${watchStock.stockCode}] ROE filter failed: ${fundamentals.roe}`);
           return signals;
         }
         if (fundamentals.debtRatio !== undefined && fundamentals.debtRatio >= params.maxDebtRatio) {
           this.logger.debug(`[${watchStock.stockCode}] DebtRatio filter failed: ${fundamentals.debtRatio}`);
+          return signals;
+        }
+        if (fundamentals.salesGrowthRate !== undefined && fundamentals.salesGrowthRate < params.minSalesGrowthRate) {
+          this.logger.debug(`[${watchStock.stockCode}] SalesGrowth filter failed: ${fundamentals.salesGrowthRate}% < ${params.minSalesGrowthRate}%`);
+          return signals;
+        }
+        if (fundamentals.operatingProfitGrowthRate !== undefined && fundamentals.operatingProfitGrowthRate < params.minOperatingProfitGrowthRate) {
+          this.logger.debug(`[${watchStock.stockCode}] OpProfitGrowth filter failed: ${fundamentals.operatingProfitGrowthRate}% < ${params.minOperatingProfitGrowthRate}%`);
+          return signals;
+        }
+        if (fundamentals.evEbitda !== undefined && fundamentals.evEbitda > params.maxEvEbitda) {
+          this.logger.debug(`[${watchStock.stockCode}] EV/EBITDA filter failed: ${fundamentals.evEbitda} > ${params.maxEvEbitda}`);
           return signals;
         }
       }
@@ -198,9 +230,10 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
 
       if (buyQty > 0) {
         const perInfo = `PER=${fundamentals.per.toFixed(1)}`;
+        const pbrInfo = fundamentals.pbr !== undefined ? `, PBR=${fundamentals.pbr.toFixed(1)}` : '';
         const extraInfo = !isOverseas
-          ? `, PBR=${fundamentals.pbr?.toFixed(1) ?? 'N/A'}, ROE=${fundamentals.roe?.toFixed(0) ?? 'N/A'}%`
-          : ' (해외: PER만 사용)';
+          ? `${pbrInfo}, ROE=${fundamentals.roe?.toFixed(0) ?? 'N/A'}%, EPS=${fundamentals.eps?.toFixed(0) ?? 'N/A'}`
+          : `${pbrInfo} (해외)`;
 
         this.logger.log(
           `[${watchStock.stockCode}] VALUE ENTRY: ${perInfo}${extraInfo}, RSI=${rsi14?.toFixed(0) ?? 'N/A'}`,
