@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  ExecutionMode,
 } from '../types';
 
 /** LOC 지원 거래소 (미국만) */
@@ -11,6 +12,35 @@ const LOC_EXCHANGES = new Set(['NASD', 'NYSE', 'AMEX']);
 @Injectable()
 export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   readonly name = 'infinite-buy';
+  readonly displayName = '무한매수법';
+  readonly executionMode: ExecutionMode = {
+    type: 'once-daily',
+    hours: { domestic: 15, overseas: 5 }, // KST 15시(국내), 05시(해외)
+  };
+  readonly description = [
+    '설정한 투자금(quota)을 최대 40회(사이클)에 걸쳐 분할 매수하는 전략입니다.',
+    '',
+    '【매수 조건】',
+    '- 하루 1회만 실행 (중복 매수 방지)',
+    '- 지수(S&P500/KOSPI)가 200일 이동평균선 위일 때만 신규 진입',
+    '- 종목 가격이 200일 이동평균선 위일 때만 신규 진입',
+    '- RSI < 30 과매도 구간에서는 매수금액 1.5배 증가',
+    '- 금리 급등 시 매수금액 절반으로 축소',
+    '',
+    '【매수 방식】',
+    '- T(사이클) < 20: Buy1(시장가 근처) + Buy2(지정가) 두 건 분할',
+    '- T >= 20: Buy2(지정가)만 실행',
+    '- 종목당 최대 포트폴리오 비중 초과 시 매수 중단',
+    '',
+    '【매도 조건】',
+    '- Sell1: 피봇가격에 보유량의 25% 매도',
+    '- Sell2: 목표수익률 도달 시 나머지 매도 (T<10: +5%, T<20: +10%, T>=20: +15%)',
+    '- 손절: 평균단가 대비 설정 손절률(기본 30%) 하회 시 전량 매도',
+    '',
+    '【특징】',
+    '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
+    '- 해외 주식은 LOC(장마감지정가) 주문 지원',
+  ].join('\n');
   private readonly logger = new Logger(InfiniteBuyStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
@@ -67,7 +97,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     // --- 기본 무한매수법 계산 ---
     const quota = watchStock.quota;
     const totalInvested = position?.totalInvested || 0;
-    const T = totalInvested > 0 ? totalInvested / quota : 0;
+    const perCycleQuota = quota / watchStock.maxCycles;
+    const T = totalInvested > 0 ? totalInvested / perCycleQuota : 0; // T = 완료 사이클 수
     const avgPrice = position?.avgPrice || curPrice;
     const holdQty = position?.quantity || 0;
 
@@ -100,8 +131,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       return signals;
     }
 
-    // --- Quota 조정 ---
-    let adjustedQuota = quota;
+    // --- 1회 매수금액 ---
+    let adjustedQuota = perCycleQuota;
 
     // 개선 E: 금리 급등시 절반
     if (marketCondition.interestRateRising) {
@@ -166,20 +197,18 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     } else if (hasPosition) {
       // --- 매수 시그널 ---
       if (T < 20 && buyAllowed) {
-        // Buy1 + Buy2
+        // Buy1 + Buy2 분할 매수
         const buy1Price = roundPrice(Math.min(curPrice * 1.2, avgPrice));
         const buy2Price = roundPrice(pivotPrice - 0.01);
 
-        // T가 짝수면 buy1 우선, 홀수면 buy2 우선
-        const isEven = Math.floor(T) % 2 === 0;
         const halfQuota = adjustedQuota / 2;
+        let buy1Qty = Math.floor(halfQuota / buy1Price);
+        let buy2Qty = Math.floor(halfQuota / buy2Price);
 
-        const buy1Qty = isEven
-          ? Math.floor(halfQuota / buy1Price)
-          : Math.floor((adjustedQuota - halfQuota) / buy1Price);
-        const buy2Qty = isEven
-          ? Math.floor((adjustedQuota - halfQuota) / buy2Price)
-          : Math.floor(halfQuota / buy2Price);
+        // 분할 매수 불가 시 전액으로 단일 매수 (고가주 대응)
+        if (buy1Qty === 0 && buy2Qty === 0) {
+          buy1Qty = Math.floor(adjustedQuota / buy1Price);
+        }
 
         if (buy1Qty > 0 && buy1Price > 0) {
           signals.push({

@@ -17,7 +17,7 @@ describe('InfiniteBuyStrategy', () => {
       stockCode: '005930',
       stockName: 'Samsung',
       strategyName: 'infinite-buy',
-      quota: 100000,
+      quota: 4000000,
       cycle: 1,
       maxCycles: 40,
       stopLossRate: 0.3,
@@ -158,10 +158,10 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
-          quantity: 100,
+          quantity: 60,
           avgPrice: 70000,
           currentPrice: 70000,
-          totalInvested: 4000000, // T = 4000000 / 100000 = 40 >= maxCycles(40)
+          totalInvested: 4000000, // perCycleQuota=100000, T = 4000000 / 100000 = 40 >= maxCycles(40)
         },
       });
       const signals = await strategy.evaluateStock(ctx);
@@ -256,6 +256,27 @@ describe('InfiniteBuyStrategy', () => {
       expect(sells.length).toBeGreaterThanOrEqual(1);
     });
 
+    it('should fallback to full quota when split buy fails (high-price stock)', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 7,
+          avgPrice: 70000,
+          currentPrice: 70000,
+          totalInvested: 500000, // T = 5
+        },
+        totalPortfolioValue: 10000000,
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      // halfQuota=50000 < 주가 70000 → 분할 불가 → 전액(100000)으로 1주 매수
+      expect(buys).toHaveLength(1);
+      expect(buys[0].quantity).toBe(1);
+      expect(buys[0].price).toBe(70000);
+    });
+
     it('should generate sell signals with dynamic target rates', async () => {
       const ctx = createContext({
         position: {
@@ -282,10 +303,10 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
-          quantity: 100,
+          quantity: 36,
           avgPrice: 70000,
           currentPrice: 70000,
-          totalInvested: 2500000, // T = 2500000 / 100000 = 25
+          totalInvested: 2500000, // perCycleQuota=100000, T = 2500000 / 100000 = 25
         },
         totalPortfolioValue: 100000000, // Large portfolio to avoid maxPortfolioRate
       });
@@ -301,10 +322,10 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
-          quantity: 100,
+          quantity: 36,
           avgPrice: 70000,
           currentPrice: 70000,
-          totalInvested: 2500000, // T = 25
+          totalInvested: 2500000, // perCycleQuota=100000, T = 2500000 / 100000 = 25
         },
         totalPortfolioValue: 100000000, // Large portfolio to avoid maxPortfolioRate
       });
