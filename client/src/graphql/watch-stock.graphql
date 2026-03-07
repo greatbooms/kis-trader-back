@@ -1,0 +1,63 @@
+query GetWatchStocks($market: Market) {
+  watchStocks(market: $market) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    isActive
+    strategyName
+    quota
+    cycle
+    maxCycles
+    stopLossRate
+    maxPortfolioRate
+    strategyParams
+    createdAt
+    updatedAt
+  }
+}
+
+mutation CreateWatchStock($input: CreateWatchStockInput!) {
+  createWatchStock(input: $input) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    isActive
+    strategyName
+    quota
+    cycle
+    maxCycles
+    stopLossRate
+    maxPortfolioRate
+    strategyParams
+    createdAt
+    updatedAt
+  }
+}
+
+mutation UpdateWatchStock($id: ID!, $input: UpdateWatchStockInput!) {
+  updateWatchStock(id: $id, input: $input) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    isActive
+    strategyName
+    quota
+    cycle
+    maxCycles
+    stopLossRate
+    maxPortfolioRate
+    strategyParams
+    createdAt
+    updatedAt
+  }
+}
+
+mutation DeleteWatchStock($id: ID!) {
+  deleteWatchStock(id: $id)
+}

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { ScheduleModule } from '@nestjs/schedule';
 import { join } from 'path';
 import configuration from './config/configuration';
@@ -12,6 +13,8 @@ import { TradeRecordModule } from './trade-record/trade-record.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health/health.controller';
 import { NotificationModule } from './notification/notification.module';
+import { SimulationModule } from './simulation/simulation.module';
+import { StockMasterModule } from './stock-master/stock-master.module';
 
 @Module({
   imports: [
@@ -26,6 +29,10 @@ import { NotificationModule } from './notification/notification.module';
       introspection: true,
       context: ({ req, res }) => ({ req, res }),
     }),
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'client', 'dist'),
+      exclude: ['/graphql', '/health'],
+    }),
     ScheduleModule.forRoot(),
     KisModule,
     TradingModule,
@@ -33,6 +40,8 @@ import { NotificationModule } from './notification/notification.module';
     TradeRecordModule,
     AuthModule,
     NotificationModule,
+    SimulationModule,
+    StockMasterModule,
   ],
   controllers: [HealthController],
 })

@@ -7,11 +7,7 @@ export default () => ({
     prodCode: process.env.KIS_PROD_CODE || '01',
     env: (process.env.KIS_ENV || 'paper') as 'paper' | 'prod',
   },
-  trading: {
-    intervalMs: parseInt(process.env.TRADING_INTERVAL_MS || '30000', 10),
-    usMarketCron: process.env.US_MARKET_CRON || '0 30 5 * * 1-6',  // KST 05:30
-    krMarketCron: process.env.KR_MARKET_CRON || '0 0 15 * * 1-5',  // KST 15:00
-  },
+  trading: {},
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
     adminPassword: process.env.ADMIN_PASSWORD || '',

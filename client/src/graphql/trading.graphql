@@ -1,0 +1,28 @@
+query GetAvailableStrategies {
+  availableStrategies {
+    name
+    displayName
+    description
+  }
+}
+
+query GetMarketRegime($market: Market!, $exchangeCode: String!) {
+  marketRegime(market: $market, exchangeCode: $exchangeCode) {
+    regime
+    market
+    exchangeCode
+  }
+}
+
+query GetRiskState($market: Market!) {
+  riskState(market: $market) {
+    buyBlocked
+    liquidateAll
+    positionCount
+    investedRate
+    dailyPnlRate
+    drawdown
+    reasons
+  }
+}
+

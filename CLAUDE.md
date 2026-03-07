@@ -3,7 +3,7 @@
 ## Project Overview
 KIS (Korea Investment & Securities) 자동매매 백엔드 서비스
 - Backend: NestJS + Prisma + GraphQL
-- Frontend: /Users/shinsanghoon/workspace/kis-trader-front
+- Frontend: client/ (React + Vite, 같은 레포 내 통합)
 
 ## Code Conventions
 
@@ -43,7 +43,7 @@ src/
 
 ### 프론트엔드 타입 정의 규칙
 
-프론트엔드(kis-trader-front)에서도 타입은 별도 파일로 분리한다.
+프론트엔드(client/)에서도 타입은 별도 파일로 분리한다.
 
 **디렉토리 구조:**
 ```
@@ -104,7 +104,7 @@ src/
 
 2. **Frontend Developer** (frontend)
    - React 프론트엔드 코드 구현 담당
-   - 작업 범위: /Users/shinsanghoon/workspace/kis-trader-front
+   - 작업 범위: client/ 디렉토리
    - React 컴포넌트, 페이지, 훅, GraphQL 쿼리/뮤테이션
 
 3. **Test Engineer** (tester)
@@ -123,7 +123,7 @@ src/
 ```
 다음 구성으로 에이전트 팀을 만들어줘:
 - backend: 백엔드 개발자. src/ 디렉토리의 NestJS 코드 구현 담당.
-- frontend: React 프론트엔드 개발자. kis-trader-front 프로젝트 코드 구현 담당.
+- frontend: React 프론트엔드 개발자. client/ 디렉토리 코드 구현 담당.
 - tester: 테스트 엔지니어. 테스트 코드 작성 및 검증 담당.
 - reviewer: 코드 리뷰어. 코드 품질 검증 및 리뷰 담당. 다른 팀원 작업 완료 후 리뷰. plan approval 필요.
 ```

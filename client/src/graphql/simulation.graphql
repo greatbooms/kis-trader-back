@@ -1,0 +1,172 @@
+query GetSimulationSessions($status: SimulationStatus) {
+  simulationSessions(status: $status) {
+    id
+    name
+    description
+    market
+    strategyName
+    status
+    initialCapital
+    currentCash
+    startedAt
+    stoppedAt
+    createdAt
+    watchStocks {
+      id
+      stockCode
+      stockName
+      market
+      exchangeCode
+      quota
+      cycle
+      maxCycles
+      stopLossRate
+      maxPortfolioRate
+      isActive
+    }
+  }
+}
+
+query GetSimulationSession($id: String!) {
+  simulationSession(id: $id) {
+    id
+    name
+    description
+    market
+    strategyName
+    status
+    initialCapital
+    currentCash
+    startedAt
+    stoppedAt
+    createdAt
+    watchStocks {
+      id
+      stockCode
+      stockName
+      market
+      exchangeCode
+      quota
+      cycle
+      maxCycles
+      stopLossRate
+      maxPortfolioRate
+      strategyParams
+      isActive
+    }
+  }
+}
+
+query GetSimulationPositions($sessionId: String!) {
+  simulationPositions(sessionId: $sessionId) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    quantity
+    avgPrice
+    currentPrice
+    totalInvested
+    profitLoss
+    profitRate
+  }
+}
+
+query GetSimulationTrades($sessionId: String!, $limit: Int, $offset: Int) {
+  simulationTrades(sessionId: $sessionId, limit: $limit, offset: $offset) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    side
+    quantity
+    price
+    totalAmount
+    strategyName
+    reason
+    createdAt
+  }
+}
+
+query GetSimulationSnapshots($sessionId: String!) {
+  simulationSnapshots(sessionId: $sessionId) {
+    id
+    snapshotDate
+    portfolioValue
+    cashBalance
+    totalValue
+    dailyPnl
+    dailyPnlRate
+    drawdown
+    peakValue
+    positionCount
+    tradeCount
+  }
+}
+
+query GetSimulationMetrics($sessionId: String!) {
+  simulationMetrics(sessionId: $sessionId) {
+    totalReturn
+    totalReturnAmount
+    maxDrawdown
+    winRate
+    totalTrades
+    winTrades
+    lossTrades
+    sharpeRatio
+    profitFactor
+    currentCash
+    currentPortfolioValue
+  }
+}
+
+mutation CreateSimulation($input: CreateSimulationInput!) {
+  createSimulation(input: $input) {
+    id
+    name
+    market
+    strategyName
+    status
+    initialCapital
+    currentCash
+  }
+}
+
+mutation AddSimulationWatchStock($input: AddSimulationWatchStockInput!) {
+  addSimulationWatchStock(input: $input) {
+    id
+    stockCode
+    stockName
+    market
+    exchangeCode
+    quota
+    isActive
+  }
+}
+
+mutation RemoveSimulationWatchStock($id: String!) {
+  removeSimulationWatchStock(id: $id)
+}
+
+mutation UpdateSimulationStatus($id: String!, $status: SimulationStatus!) {
+  updateSimulationStatus(id: $id, status: $status) {
+    id
+    status
+    stoppedAt
+  }
+}
+
+mutation ResetSimulation($id: String!) {
+  resetSimulation(id: $id) {
+    id
+    status
+    currentCash
+    initialCapital
+  }
+}
+
+mutation DeleteSimulation($id: String!) {
+  deleteSimulation(id: $id)
+}

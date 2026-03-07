@@ -8,10 +8,12 @@ async function bootstrap() {
 
   app.use(cookieParser());
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
-  app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-    credentials: true,
-  });
+  if (process.env.NODE_ENV !== 'production') {
+    app.enableCors({
+      origin: process.env.CORS_ORIGIN || `http://localhost:${process.env.CLIENT_PORT || 5173}`,
+      credentials: true,
+    });
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

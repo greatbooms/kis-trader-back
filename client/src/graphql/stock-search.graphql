@@ -1,0 +1,9 @@
+query SearchStocks($keyword: String!, $market: Market, $limit: Int) {
+  searchStocks(keyword: $keyword, market: $market, limit: $limit) {
+    stockCode
+    stockName
+    englishName
+    market
+    exchangeCode
+  }
+}

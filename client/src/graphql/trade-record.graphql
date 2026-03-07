@@ -1,0 +1,104 @@
+query GetTrades($market: Market, $side: Side, $limit: Int, $offset: Int) {
+  trades(market: $market, side: $side, limit: $limit, offset: $offset) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    side
+    orderType
+    quantity
+    price
+    executedPrice
+    executedQty
+    orderNo
+    status
+    strategyName
+    reason
+    createdAt
+  }
+}
+
+query GetTrade($id: ID!) {
+  trade(id: $id) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    side
+    orderType
+    quantity
+    price
+    executedPrice
+    executedQty
+    orderNo
+    status
+    strategyName
+    reason
+    createdAt
+  }
+}
+
+query GetPositions($market: Market) {
+  positions(market: $market) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    quantity
+    avgPrice
+    currentPrice
+    profitLoss
+    profitRate
+    totalInvested
+  }
+}
+
+query GetQuote($stockCode: String!) {
+  quote(stockCode: $stockCode) {
+    stockCode
+    stockName
+    currentPrice
+    openPrice
+    highPrice
+    lowPrice
+    volume
+  }
+}
+
+query GetOverseasQuote($exchangeCode: String!, $symbol: String!) {
+  overseasQuote(exchangeCode: $exchangeCode, symbol: $symbol) {
+    stockCode
+    stockName
+    currentPrice
+    openPrice
+    highPrice
+    lowPrice
+    volume
+  }
+}
+
+query GetDashboardSummary {
+  dashboardSummary {
+    totalProfitLoss
+    totalTradeCount
+    todayTradeCount
+    winRate
+  }
+}
+
+query GetStrategyExecutions($stockCode: String, $strategyName: String, $limit: Int) {
+  strategyExecutions(stockCode: $stockCode, strategyName: $strategyName, limit: $limit) {
+    id
+    market
+    stockCode
+    strategyName
+    executedDate
+    progress
+    signalCount
+    details
+    createdAt
+  }
+}

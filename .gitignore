@@ -27,3 +27,10 @@ prisma/*.db
 
 # Coverage
 /coverage
+
+# Client (frontend)
+client/node_modules
+client/dist
+
+# Stock master temp
+.stock-master-tmp
