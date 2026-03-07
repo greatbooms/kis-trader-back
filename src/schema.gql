@@ -2,6 +2,41 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type StrategyInfo {
+  name: String!
+  displayName: String!
+  description: String!
+}
+
+type StrategyAllocationType {
+  id: ID!
+  market: Market!
+  strategyName: String!
+  allocationRate: Float!
+  isActive: Boolean!
+}
+
+enum Market {
+  DOMESTIC
+  OVERSEAS
+}
+
+type MarketRegimeType {
+  regime: String!
+  market: String!
+  exchangeCode: String!
+}
+
+type RiskStateType {
+  buyBlocked: Boolean!
+  liquidateAll: Boolean!
+  positionCount: Float!
+  investedRate: Float!
+  dailyPnlRate: Float!
+  drawdown: Float!
+  reasons: [String!]!
+}
+
 type TradeRecordType {
   id: ID!
   market: Market!
@@ -19,11 +54,6 @@ type TradeRecordType {
   strategyName: String
   reason: String
   createdAt: DateTime!
-}
-
-enum Market {
-  DOMESTIC
-  OVERSEAS
 }
 
 enum Side {
@@ -106,15 +136,127 @@ type WatchStockType {
   maxCycles: Int!
   stopLossRate: Float!
   maxPortfolioRate: Float!
+  strategyParams: String
   createdAt: DateTime!
   updatedAt: DateTime!
 }
 
 type AuthPayload {
-  accessToken: String!
+  success: Boolean!
+}
+
+type SimulationWatchStockType {
+  id: ID!
+  sessionId: String!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  quota: Float
+  cycle: Int!
+  maxCycles: Int!
+  stopLossRate: Float!
+  maxPortfolioRate: Float!
+  strategyParams: String
+  isActive: Boolean!
+}
+
+type SimulationSessionType {
+  id: ID!
+  name: String!
+  description: String
+  market: Market!
+  strategyName: String!
+  status: SimulationStatus!
+  initialCapital: Float!
+  currentCash: Float!
+  startedAt: DateTime!
+  stoppedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  watchStocks: [SimulationWatchStockType!]
+}
+
+enum SimulationStatus {
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+type SimulationTradeType {
+  id: ID!
+  sessionId: String!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  side: Side!
+  quantity: Int!
+  price: Float!
+  totalAmount: Float!
+  strategyName: String
+  reason: String
+  createdAt: DateTime!
+}
+
+type SimulationPositionType {
+  id: ID!
+  sessionId: String!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  quantity: Int!
+  avgPrice: Float!
+  currentPrice: Float!
+  totalInvested: Float!
+  profitLoss: Float!
+  profitRate: Float!
+}
+
+type SimulationSnapshotType {
+  id: ID!
+  sessionId: String!
+  snapshotDate: String!
+  portfolioValue: Float!
+  cashBalance: Float!
+  totalValue: Float!
+  dailyPnl: Float!
+  dailyPnlRate: Float!
+  drawdown: Float!
+  peakValue: Float!
+  positionCount: Int!
+  tradeCount: Int!
+  createdAt: DateTime!
+}
+
+type SimulationMetricsType {
+  totalReturn: Float!
+  totalReturnAmount: Float!
+  maxDrawdown: Float!
+  winRate: Float!
+  totalTrades: Int!
+  winTrades: Int!
+  lossTrades: Int!
+  sharpeRatio: Float!
+  profitFactor: Float!
+  currentCash: Float!
+  currentPortfolioValue: Float!
+}
+
+type StockSearchResult {
+  stockCode: String!
+  stockName: String!
+  englishName: String
+  market: String!
+  exchangeCode: String!
 }
 
 type Query {
+  availableStrategies: [StrategyInfo!]!
+  strategyAllocations(market: Market!): [StrategyAllocationType!]!
+  marketRegime(market: Market!, exchangeCode: String!): MarketRegimeType!
+  riskState(market: Market!): RiskStateType!
   trades(market: Market, side: Side, limit: Int, offset: Int): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
   positions(market: Market): [PositionType!]!
@@ -123,13 +265,35 @@ type Query {
   dashboardSummary: DashboardSummaryType!
   strategyExecutions(stockCode: String, strategyName: String, limit: Int): [StrategyExecutionType!]!
   watchStocks(market: Market): [WatchStockType!]!
+  simulationSessions(status: SimulationStatus): [SimulationSessionType!]!
+  simulationSession(id: String!): SimulationSessionType
+  simulationPositions(sessionId: String!): [SimulationPositionType!]!
+  simulationTrades(sessionId: String!, limit: Int, offset: Int): [SimulationTradeType!]!
+  simulationSnapshots(sessionId: String!): [SimulationSnapshotType!]!
+  simulationMetrics(sessionId: String!): SimulationMetricsType!
+  searchStocks(keyword: String!, market: Market, limit: Int): [StockSearchResult!]!
 }
 
 type Mutation {
+  setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
   login(username: String!, password: String!): AuthPayload!
+  logout: AuthPayload!
+  createSimulation(input: CreateSimulationInput!): SimulationSessionType!
+  addSimulationWatchStock(input: AddSimulationWatchStockInput!): SimulationWatchStockType!
+  removeSimulationWatchStock(id: String!): Boolean!
+  updateSimulationStatus(id: String!, status: SimulationStatus!): SimulationSessionType!
+  resetSimulation(id: String!): SimulationSessionType!
+  deleteSimulation(id: String!): Boolean!
+}
+
+input SetStrategyAllocationInput {
+  market: Market!
+  strategyName: String!
+  allocationRate: Float!
+  isActive: Boolean
 }
 
 input CreateWatchStockInput {
@@ -142,6 +306,7 @@ input CreateWatchStockInput {
   maxCycles: Int
   stopLossRate: Float
   maxPortfolioRate: Float
+  strategyParams: String
 }
 
 input UpdateWatchStockInput {
@@ -154,4 +319,37 @@ input UpdateWatchStockInput {
   maxCycles: Int
   stopLossRate: Float
   maxPortfolioRate: Float
+  strategyParams: String
+}
+
+input CreateSimulationInput {
+  name: String!
+  description: String
+  market: Market!
+  strategyName: String!
+  initialCapital: Float!
+  watchStocks: [WatchStockInput!]
+}
+
+input WatchStockInput {
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  quota: Float
+  stopLossRate: Float
+  maxPortfolioRate: Float
+  strategyParams: String
+}
+
+input AddSimulationWatchStockInput {
+  sessionId: String!
+  market: Market!
+  exchangeCode: String
+  stockCode: String!
+  stockName: String!
+  quota: Float
+  stopLossRate: Float
+  maxPortfolioRate: Float
+  strategyParams: String
 }

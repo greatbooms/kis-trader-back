@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  ExecutionMode,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -16,6 +17,27 @@ const DEFAULT_PARAMS = {
 @Injectable()
 export class ConservativeStrategy implements PerStockTradingStrategy {
   readonly name = 'conservative';
+  readonly displayName = '보수적 매매';
+  readonly executionMode: ExecutionMode = { type: 'continuous' };
+  readonly description = [
+    '극단적 과매도 구간에서만 소액 진입하고, 소폭 반등 시 빠르게 청산하는 저위험 전략입니다.',
+    '',
+    '【진입 조건 (모두 충족 시 매수)】',
+    '- RSI < 25 (극단적 과매도)',
+    '- 거래량 >= 전일 대비 2배 (이상 거래량 감지)',
+    '- 투자금의 30%만 사용 (나머지 70%는 현금 보유)',
+    '',
+    '【매도 조건】',
+    '- +3% 수익 시 전량 매도 (익절)',
+    '- -5% 손실 시 전량 매도 (손절)',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
+    '',
+    '【특징】',
+    '- 가장 보수적인 전략, 투자금의 30%만 사용',
+    '- 진입 조건이 매우 엄격하여 매매 빈도가 낮음',
+    '- 작은 수익을 자주 실현하는 스타일',
+    '- 큰 손실 위험이 적어 초보자에게 적합',
+  ].join('\n');
   private readonly logger = new Logger(ConservativeStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

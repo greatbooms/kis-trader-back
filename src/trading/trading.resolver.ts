@@ -29,7 +29,11 @@ export class TradingResolver {
 
   @Query(() => [StrategyInfo], { name: 'availableStrategies' })
   getAvailableStrategies(): StrategyInfo[] {
-    return this.strategyRegistry.getStrategyNames().map((name) => ({ name }));
+    return this.strategyRegistry.getAllStrategies().map((s) => ({
+      name: s.name,
+      displayName: s.displayName,
+      description: s.description,
+    }));
   }
 
   @Query(() => [StrategyAllocationType], { name: 'strategyAllocations' })

@@ -24,7 +24,14 @@ export interface StockStrategyContext {
   riskState?: RiskState;
 }
 
+export type ExecutionMode =
+  | { type: 'continuous' }
+  | { type: 'once-daily'; hours: { domestic: number; overseas: number } };
+
 export interface PerStockTradingStrategy {
   name: string;
+  displayName: string;
+  description: string;
+  executionMode: ExecutionMode;
   evaluateStock(context: StockStrategyContext): Promise<TradingSignal[]>;
 }

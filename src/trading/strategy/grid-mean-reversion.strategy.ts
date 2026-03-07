@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  ExecutionMode,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -14,6 +15,32 @@ const DEFAULT_PARAMS = {
 @Injectable()
 export class GridMeanReversionStrategy implements PerStockTradingStrategy {
   readonly name = 'grid-mean-reversion';
+  readonly displayName = '그리드 평균회귀';
+  readonly executionMode: ExecutionMode = { type: 'continuous' };
+  readonly description = [
+    '볼린저 밴드와 RSI를 활용하여 과매도 구간에서 분할 매수하고, 평균으로 회귀할 때 매도하는 전략입니다.',
+    '',
+    '【진입 조건 (모두 충족 시 매수)】',
+    '- 현재가 <= 볼린저 밴드 하단 (과매도 영역 진입)',
+    '- RSI < 30 (과매도 확인)',
+    '- MACD 히스토그램 상승 전환 (반등 시그널)',
+    '',
+    '【그리드 매수 (3단계 분할)】',
+    '- 1단계: 평균단가 -2% → 투자금의 30%',
+    '- 2단계: 평균단가 -4% → 투자금의 30%',
+    '- 3단계: 평균단가 -6% → 투자금의 40%',
+    '- 하락할수록 더 많이 매수하여 평균단가를 낮춤',
+    '',
+    '【매도 조건】',
+    '- 볼린저 밴드 중심선 도달: 보유량의 50% 매도 (1차 익절)',
+    '- 볼린저 밴드 상단 도달: 전량 매도 (2차 익절)',
+    '- -8% 하락 시 전량 매도 (손절)',
+    '',
+    '【특징】',
+    '- 횡보장/박스권 종목에 적합',
+    '- 급락 시 분할 매수로 평균단가를 효과적으로 낮춤',
+    '- 추세가 강한 하락장에서는 손절 주의',
+  ].join('\n');
   private readonly logger = new Logger(GridMeanReversionStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {

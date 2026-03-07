@@ -1,10 +1,29 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { Market, Prisma } from '@prisma/client';
+
+const MAX_TOTAL_ACTIVE_WATCH_STOCKS = 30;
 
 @Injectable()
 export class WatchStockService {
   constructor(private prisma: PrismaService) {}
+
+  async getTotalActiveCount(): Promise<number> {
+    const [realCount, simCount] = await Promise.all([
+      this.prisma.watchStock.count({ where: { isActive: true } }),
+      this.prisma.simulationWatchStock.count({ where: { isActive: true } }),
+    ]);
+    return realCount + simCount;
+  }
+
+  async checkGlobalLimit(): Promise<void> {
+    const total = await this.getTotalActiveCount();
+    if (total >= MAX_TOTAL_ACTIVE_WATCH_STOCKS) {
+      throw new BadRequestException(
+        `전체 활성 관심종목이 최대 ${MAX_TOTAL_ACTIVE_WATCH_STOCKS}개를 초과할 수 없습니다. (현재: 실거래+시뮬레이션 합계 ${total}개)`,
+      );
+    }
+  }
 
   findAll(market?: Market) {
     return this.prisma.watchStock.findMany({
@@ -17,7 +36,7 @@ export class WatchStockService {
     return this.prisma.watchStock.findUnique({ where: { id } });
   }
 
-  create(data: {
+  async create(data: {
     market: Market;
     exchangeCode?: string;
     stockCode: string;
@@ -30,6 +49,7 @@ export class WatchStockService {
     maxPortfolioRate?: number;
     strategyParams?: Record<string, any>;
   }) {
+    await this.checkGlobalLimit();
     return this.prisma.watchStock.create({
       data: {
         market: data.market,

@@ -73,6 +73,16 @@ export const EXCHANGE_REFERENCE_INDEX: Record<string, { code: string; name: stri
   VNSE: { code: 'VNINDEX', name: 'VN지수',     type: 'overseas' },
 };
 
+/** 거래소별 통화 코드 */
+export const EXCHANGE_CURRENCY: Record<string, string> = {
+  KRX: 'KRW',
+  NASD: 'USD', NYSE: 'USD', AMEX: 'USD',
+  SEHK: 'HKD',
+  SHAA: 'CNY', SZAA: 'CNY',
+  TKSE: 'JPY',
+  HASE: 'VND', VNSE: 'VND',
+};
+
 /** 거래소별 운영시간 (KST, 24h format) */
 export interface MarketHours {
   open: { hour: number; minute: number };

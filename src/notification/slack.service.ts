@@ -13,12 +13,21 @@ import {
 export class SlackService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SlackService.name);
   private app: App | null = null;
+  private connected = false;
+  private reconnecting = false;
+  private destroyed = false;
   private readonly enabled: boolean;
   private readonly channel: string;
+  private readonly botToken: string;
+  private readonly appToken: string;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly BASE_DELAY_MS = 3_000;
 
   constructor(private configService: ConfigService) {
     this.enabled = this.configService.get<boolean>('slack.enabled')!;
     this.channel = this.configService.get<string>('slack.channel')!;
+    this.botToken = this.configService.get<string>('slack.botToken') ?? '';
+    this.appToken = this.configService.get<string>('slack.appToken') ?? '';
   }
 
   async onModuleInit() {
@@ -27,28 +36,87 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const botToken = this.configService.get<string>('slack.botToken')!;
-    const appToken = this.configService.get<string>('slack.appToken')!;
-
-    if (!botToken || !appToken) {
+    if (!this.botToken || !this.appToken) {
       this.logger.warn('Slack tokens not configured, disabling notifications');
       return;
     }
 
-    this.app = new App({
-      token: botToken,
-      appToken,
-      socketMode: true,
-      logLevel: LogLevel.WARN,
-    });
+    await this.connect();
+  }
 
-    await this.app.start();
-    this.logger.log('Slack Socket Mode connected');
+  private async connect(): Promise<boolean> {
+    try {
+      // 기존 앱이 있으면 정리
+      if (this.app) {
+        try { await this.app.stop(); } catch { /* ignore */ }
+        this.app = null;
+      }
+
+      this.app = new App({
+        token: this.botToken,
+        appToken: this.appToken,
+        socketMode: true,
+        logLevel: LogLevel.WARN,
+      });
+
+      // WebSocket 에러가 프로세스를 죽이지 않도록
+      this.app.error(async (error) => {
+        this.logger.error(`Slack app error: ${error.message}`);
+        this.connected = false;
+        this.scheduleReconnect();
+      });
+
+      await this.app.start();
+      this.connected = true;
+      this.logger.log('Slack Socket Mode connected');
+      return true;
+    } catch (e) {
+      this.logger.error(`Slack Socket Mode failed to connect: ${e.message}`);
+      this.app = null;
+      this.connected = false;
+      return false;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnecting || this.destroyed) return;
+    this.reconnecting = true;
+
+    // 별도 async 흐름으로 재접속 시도 (에러 전파 방지)
+    void this.reconnectLoop();
+  }
+
+  private async reconnectLoop(): Promise<void> {
+    for (let attempt = 1; attempt <= SlackService.MAX_RECONNECT_ATTEMPTS; attempt++) {
+      if (this.destroyed) break;
+
+      const delay = SlackService.BASE_DELAY_MS * Math.pow(2, attempt - 1); // 3s, 6s, 12s, 24s, 48s
+      this.logger.warn(`Slack reconnect attempt ${attempt}/${SlackService.MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s`);
+      await new Promise((r) => setTimeout(r, delay));
+
+      if (this.destroyed) break;
+
+      const success = await this.connect();
+      if (success) {
+        this.logger.log(`Slack reconnected after ${attempt} attempt(s)`);
+        this.reconnecting = false;
+        return;
+      }
+    }
+
+    this.reconnecting = false;
+    this.logger.error(
+      `Slack reconnect failed after ${SlackService.MAX_RECONNECT_ATTEMPTS} attempts. ` +
+      `Messages will be dropped until next successful reconnect.`,
+    );
   }
 
   async onModuleDestroy() {
+    this.destroyed = true;
     if (this.app) {
-      await this.app.stop();
+      try {
+        await this.app.stop();
+      } catch { /* ignore */ }
       this.logger.log('Slack disconnected');
     }
   }
@@ -58,13 +126,25 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   }
 
   isEnabled(): boolean {
-    return this.enabled && this.app !== null;
+    return this.enabled && this.connected && this.app !== null;
+  }
+
+  /** 메시지 전송 시 연결 끊겨있으면 재접속 시도 후 전송 */
+  private async ensureConnected(): Promise<boolean> {
+    if (this.connected && this.app) return true;
+    if (!this.enabled || !this.botToken || !this.appToken) return false;
+
+    // 이미 재접속 중이면 대기하지 않고 false
+    if (this.reconnecting) return false;
+
+    this.logger.warn('Slack disconnected, attempting immediate reconnect');
+    return this.connect();
   }
 
   // --- Alert methods ---
 
   async sendTradeAlert(ctx: TradeAlertContext): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!await this.ensureConnected()) return;
 
     try {
       const blocks = this.formatTradeAlert(ctx);
@@ -75,11 +155,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`Failed to send trade alert: ${e.message}`);
+      this.handleSendError(e);
     }
   }
 
   async sendDailySummary(ctx: DailySummaryContext): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!await this.ensureConnected()) return;
 
     try {
       const blocks = this.formatDailySummary(ctx);
@@ -90,11 +171,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`Failed to send daily summary: ${e.message}`);
+      this.handleSendError(e);
     }
   }
 
   async sendFilterLog(ctx: FilterLogContext): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!await this.ensureConnected()) return;
 
     try {
       const blocks = this.formatFilterLog(ctx);
@@ -105,6 +187,16 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`Failed to send filter log: ${e.message}`);
+      this.handleSendError(e);
+    }
+  }
+
+  /** 전송 실패 시 연결 문제면 재접속 스케줄링 */
+  private handleSendError(e: any): void {
+    const msg = e.message?.toLowerCase() ?? '';
+    if (msg.includes('disconnect') || msg.includes('socket') || msg.includes('websocket') || msg.includes('not connected')) {
+      this.connected = false;
+      this.scheduleReconnect();
     }
   }
 

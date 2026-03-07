@@ -3,14 +3,11 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import {
-  TradingStrategy,
   TradingSignal,
-  TradingStrategyContext,
   PerStockTradingStrategy,
   StockStrategyContext,
 } from './types';
-import { NoopStrategy } from './strategy/noop.strategy';
-import { StockPriceResult, BalanceItem } from '../kis/types/kis-api.types';
+import { BalanceItem } from '../kis/types/kis-api.types';
 import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { TradeAlertContext, FilterLogContext } from '../notification/types/notification.types';
@@ -18,81 +15,15 @@ import { TradeAlertContext, FilterLogContext } from '../notification/types/notif
 @Injectable()
 export class TradingService {
   private readonly logger = new Logger(TradingService.name);
-  private strategy: TradingStrategy;
 
   constructor(
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private prisma: PrismaService,
-    noopStrategy: NoopStrategy,
     @Optional() private slackService?: SlackService,
-  ) {
-    this.strategy = noopStrategy;
-  }
+  ) {}
 
-  setStrategy(strategy: TradingStrategy) {
-    this.logger.log(`Strategy changed: ${this.strategy.name} → ${strategy.name}`);
-    this.strategy = strategy;
-  }
-
-  /** 국내 시세 조회 (감시 종목) */
-  async fetchDomesticPrices(stockCodes: string[]): Promise<Map<string, StockPriceResult>> {
-    const prices = new Map<string, StockPriceResult>();
-    for (const code of stockCodes) {
-      try {
-        const price = await this.kisDomestic.getPrice(code);
-        prices.set(code, price);
-      } catch (e) {
-        this.logger.error(`Failed to fetch domestic price for ${code}: ${e.message}`);
-      }
-    }
-    return prices;
-  }
-
-  /** 해외 시세 조회 (감시 종목) */
-  async fetchOverseasPrices(
-    stocks: Array<{ exchangeCode: string; stockCode: string }>,
-  ): Promise<Map<string, StockPriceResult>> {
-    const prices = new Map<string, StockPriceResult>();
-    for (const s of stocks) {
-      try {
-        const price = await this.kisOverseas.getPrice(s.exchangeCode, s.stockCode);
-        prices.set(s.stockCode, price);
-      } catch (e) {
-        this.logger.error(`Failed to fetch overseas price for ${s.exchangeCode}:${s.stockCode}: ${e.message}`);
-      }
-    }
-    return prices;
-  }
-
-  /** 전략 실행 + 주문 (기존 TradingStrategy용) */
-  async executeStrategy(
-    market: 'DOMESTIC' | 'OVERSEAS',
-    prices: Map<string, StockPriceResult>,
-    positions: BalanceItem[],
-  ): Promise<void> {
-    const context: TradingStrategyContext = {
-      market,
-      prices,
-      positions: positions.map((p) => ({
-        stockCode: p.stockCode,
-        quantity: p.quantity,
-        avgPrice: p.avgPrice,
-        currentPrice: p.currentPrice,
-      })),
-    };
-
-    const signals = await this.strategy.evaluate(context);
-    if (signals.length === 0) return;
-
-    this.logger.log(`Strategy "${this.strategy.name}" generated ${signals.length} signal(s) for ${market}`);
-
-    for (const signal of signals) {
-      await this.executeSignal(signal);
-    }
-  }
-
-  /** 종목별 전략 실행 (무한매수법 등 PerStockTradingStrategy용) */
+  /** 종목별 전략 실행 */
   async executePerStockStrategy(
     strategy: PerStockTradingStrategy,
     contexts: StockStrategyContext[],
@@ -203,7 +134,7 @@ export class TradingService {
         quantity: signal.quantity,
         price: new Prisma.Decimal(signal.price || 0),
         status: OrderStatus.PENDING,
-        strategyName: strategyName || this.strategy.name,
+        strategyName: strategyName || 'unknown',
         reason: signal.reason,
       },
     });

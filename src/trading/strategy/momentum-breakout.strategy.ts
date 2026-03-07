@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  ExecutionMode,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -18,6 +19,31 @@ const DEFAULT_PARAMS = {
 @Injectable()
 export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
   readonly name = 'momentum-breakout';
+  readonly displayName = '모멘텀 돌파';
+  readonly executionMode: ExecutionMode = { type: 'continuous' };
+  readonly description = [
+    '래리 윌리엄스의 변동성 돌파 전략을 기반으로, 강한 상승 모멘텀이 감지될 때 진입하는 단기 전략입니다.',
+    '',
+    '【진입 조건 (모두 충족 시 매수)】',
+    '- 현재가 > 20일 이동평균선 (상승 추세 확인)',
+    '- RSI 50~70 구간 (과열되지 않은 상승 구간)',
+    '- 거래량 >= 전일 대비 1.5배 (거래량 확인)',
+    '- 시가 + 전일 변동폭 × K(0.5) 돌파 (변동성 돌파)',
+    '',
+    '【익절 조건】',
+    '- +5% 도달: 보유량의 50% 매도 (1차 익절)',
+    '- +8% 도달: 전량 매도 (2차 익절)',
+    '',
+    '【손절 조건】',
+    '- -3% 하락 시 전량 매도 (손절)',
+    '- 당일 고가 대비 -2% 하락 시 전량 매도 (트레일링 스탑)',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
+    '',
+    '【특징】',
+    '- 단기 매매에 적합 (보유기간 1~3일)',
+    '- 손절 폭이 작아 리스크 관리에 유리',
+    '- 강한 추세가 있는 종목에서 효과적',
+  ].join('\n');
   private readonly logger = new Logger(MomentumBreakoutStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
