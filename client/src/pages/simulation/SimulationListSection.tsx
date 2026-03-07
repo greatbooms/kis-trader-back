@@ -31,41 +31,14 @@ const statusConfig: Record<string, { label: string; variant: 'success' | 'warnin
 
 export function SimulationListSection({ onSelect }: { onSelect: (id: string) => void }) {
   const [statusFilter, setStatusFilter] = useState<SimulationStatus | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
+  const [showModal, setShowModal] = useState(false)
 
   const { data, loading } = useGetSimulationSessionsQuery({
     variables: { status: statusFilter ?? undefined },
   })
+  const sessions = data?.simulationSessions ?? []
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
   const strategies = strategiesData?.availableStrategies ?? []
-  const [createMutation] = useCreateSimulationMutation({
-    refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { status: statusFilter ?? undefined } }],
-  })
-
-  const sessions = data?.simulationSessions ?? []
-
-  const [name, setName] = useState('')
-  const [market, setMarket] = useState<Market>('DOMESTIC')
-  const [strategyName, setStrategyName] = useState('')
-  const [initialCapital, setInitialCapital] = useState('')
-
-  const handleCreate = async () => {
-    if (!name || !strategyName || !initialCapital) return
-    await createMutation({
-      variables: {
-        input: {
-          name,
-          market,
-          strategyName,
-          initialCapital: Number(initialCapital),
-        },
-      },
-    })
-    setName('')
-    setStrategyName('')
-    setInitialCapital('')
-    setShowCreate(false)
-  }
 
   return (
     <div className="space-y-6">
@@ -74,7 +47,7 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
           <h2 className="text-2xl font-bold text-foreground">시뮬레이션</h2>
           <p className="text-sm text-muted-foreground mt-1">가상 매매로 전략을 테스트하세요</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} disabled={showCreate}>
+        <Button onClick={() => setShowModal(true)}>
           <Plus size={16} /> 새 시뮬레이션
         </Button>
       </div>
@@ -91,39 +64,6 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
           </Button>
         ))}
       </div>
-
-      {showCreate && (
-        <Card className="border-primary-300">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">새 시뮬레이션 생성</CardTitle>
-              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowCreate(false)}>
-                <X size={14} />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <Input placeholder="시뮬레이션 이름" value={name} onChange={(e) => setName(e.target.value)} />
-              <Select
-                value={market}
-                onChange={(e) => setMarket(e.target.value as Market)}
-              >
-                <option value="DOMESTIC">국내</option>
-                <option value="OVERSEAS">해외</option>
-              </Select>
-              <Select value={strategyName} onChange={(e) => setStrategyName(e.target.value)}>
-                <option value="">전략 선택</option>
-                {strategies.map((s) => (
-                  <option key={s.name} value={s.name}>{s.displayName}</option>
-                ))}
-              </Select>
-              <Input placeholder="초기 자본금" type="number" value={initialCapital} onChange={(e) => setInitialCapital(e.target.value)} />
-              <Button onClick={handleCreate}>생성</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>
@@ -189,6 +129,153 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
           })}
         </div>
       )}
+
+      {showModal && (
+        <CreateSimulationModal
+          strategies={strategies}
+          statusFilter={statusFilter}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+const COUNTRY_OPTIONS = [
+  { value: 'KR', label: '한국', market: 'DOMESTIC' as Market, exchanges: ['KRX'] },
+  { value: 'US', label: '미국', market: 'OVERSEAS' as Market, exchanges: ['NASD', 'NYSE', 'AMEX'] },
+  { value: 'HK', label: '홍콩', market: 'OVERSEAS' as Market, exchanges: ['SEHK'] },
+  { value: 'CN', label: '중국', market: 'OVERSEAS' as Market, exchanges: ['SHAA', 'SZAA'] },
+  { value: 'JP', label: '일본', market: 'OVERSEAS' as Market, exchanges: ['TKSE'] },
+  { value: 'VN', label: '베트남', market: 'OVERSEAS' as Market, exchanges: ['HASE', 'VNSE'] },
+]
+
+function CreateSimulationModal({
+  strategies,
+  statusFilter,
+  onClose,
+}: {
+  strategies: { name: string; displayName: string }[]
+  statusFilter: SimulationStatus | null
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [country, setCountry] = useState('KR')
+  const [strategyName, setStrategyName] = useState('')
+  const [initialCapital, setInitialCapital] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === country)
+  const market = selectedCountry?.market ?? 'DOMESTIC'
+
+  const [createMutation] = useCreateSimulationMutation({
+    refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { status: statusFilter ?? undefined } }],
+  })
+
+  const handleCreate = async () => {
+    const missing: string[] = []
+    if (!name.trim()) missing.push('이름')
+    if (!strategyName) missing.push('전략')
+    if (!initialCapital || Number(initialCapital) <= 0) missing.push('초기 자본금')
+
+    if (missing.length > 0) {
+      setError(`${missing.join(', ')}을(를) 입력해주세요`)
+      return
+    }
+
+    setError('')
+    setSubmitting(true)
+    try {
+      await createMutation({
+        variables: {
+          input: {
+            name: name.trim(),
+            market,
+            countryCode: country,
+            strategyName,
+            initialCapital: Number(initialCapital),
+          },
+        },
+      })
+      onClose()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '생성 중 오류가 발생했습니다'
+      setError(msg)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-md mx-4 p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-bold text-foreground">새 시뮬레이션</h3>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">이름</label>
+            <Input
+              placeholder="예: 나스닥 테스트"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">시장</label>
+            <Select value={country} onChange={(e) => setCountry(e.target.value)}>
+              {COUNTRY_OPTIONS.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">전략</label>
+            <Select value={strategyName} onChange={(e) => setStrategyName(e.target.value)}>
+              <option value="">전략을 선택하세요</option>
+              {strategies.map((s) => (
+                <option key={s.name} value={s.name}>{s.displayName}</option>
+              ))}
+            </Select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">초기 자본금</label>
+            <Input
+              placeholder="예: 10000000"
+              type="number"
+              value={initialCapital}
+              onChange={(e) => setInitialCapital(e.target.value)}
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-danger">{error}</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={onClose}>취소</Button>
+            <Button onClick={handleCreate} disabled={submitting}>
+              {submitting ? '생성중...' : '생성'}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

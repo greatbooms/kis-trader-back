@@ -15,11 +15,13 @@ export class StockMasterResolver {
     @Args('keyword') keyword: string,
     @Args('market', { type: () => Market, nullable: true }) market?: Market,
     @Args('limit', { type: () => Int, nullable: true }) limit?: number,
+    @Args('exchangeCode', { nullable: true }) exchangeCode?: string,
   ): StockSearchResult[] {
     return this.stockMasterService.searchStocks(
       keyword,
       market as 'DOMESTIC' | 'OVERSEAS' | undefined,
       limit || 20,
+      exchangeCode,
     );
   }
 }

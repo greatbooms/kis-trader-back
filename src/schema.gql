@@ -166,6 +166,7 @@ type SimulationSessionType {
   name: String!
   description: String
   market: Market!
+  countryCode: String
   strategyName: String!
   status: SimulationStatus!
   initialCapital: Float!
@@ -252,6 +253,27 @@ type StockSearchResult {
   exchangeCode: String!
 }
 
+type StockRecommendationType {
+  id: String!
+  screeningDate: String!
+  market: String!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  totalScore: Float!
+  technicalScore: Float!
+  fundamentalScore: Float!
+  momentumScore: Float!
+  rank: Int!
+  reasons: String!
+  indicators: String!
+  currentPrice: Float!
+  changeRate: Float!
+  volume: Float!
+  marketCap: Float!
+  createdAt: DateTime!
+}
+
 type Query {
   availableStrategies: [StrategyInfo!]!
   strategyAllocations(market: Market!): [StrategyAllocationType!]!
@@ -271,7 +293,10 @@ type Query {
   simulationTrades(sessionId: String!, limit: Int, offset: Int): [SimulationTradeType!]!
   simulationSnapshots(sessionId: String!): [SimulationSnapshotType!]!
   simulationMetrics(sessionId: String!): SimulationMetricsType!
-  searchStocks(keyword: String!, market: Market, limit: Int): [StockSearchResult!]!
+  searchStocks(keyword: String!, market: Market, limit: Int, exchangeCode: String): [StockSearchResult!]!
+  stockRecommendations(date: String, market: String, limit: Float = 20): [StockRecommendationType!]!
+  screeningDates(limit: Float = 10): [String!]!
+  runScreeningNow(market: String!, exchangeCode: String): Boolean!
 }
 
 type Mutation {
@@ -326,6 +351,7 @@ input CreateSimulationInput {
   name: String!
   description: String
   market: Market!
+  countryCode: String
   strategyName: String!
   initialCapital: Float!
   watchStocks: [WatchStockInput!]

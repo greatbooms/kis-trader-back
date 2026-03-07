@@ -174,11 +174,37 @@ enum SimulationStatus {
   COMPLETED
 }
 
+model StockRecommendation {
+  id             String   @id @default(uuid())
+  screeningDate  String   @map("screening_date")
+  market         Market
+  exchangeCode   String   @map("exchange_code")
+  stockCode      String   @map("stock_code")
+  stockName      String   @map("stock_name")
+  totalScore     Decimal  @map("total_score") @db.Decimal(6, 2)
+  technicalScore Decimal  @map("technical_score") @db.Decimal(6, 2)
+  fundamentalScore Decimal @map("fundamental_score") @db.Decimal(6, 2)
+  momentumScore  Decimal  @map("momentum_score") @db.Decimal(6, 2)
+  rank           Int
+  reasons        Json
+  indicators     Json
+  currentPrice   Decimal  @map("current_price") @db.Decimal(16, 4)
+  changeRate     Decimal  @map("change_rate") @db.Decimal(8, 4)
+  volume         BigInt   @default(0)
+  marketCap      BigInt   @default(0) @map("market_cap")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([screeningDate, market, stockCode])
+  @@index([screeningDate, market])
+  @@map("stock_recommendations")
+}
+
 model SimulationSession {
   id              String           @id @default(uuid())
   name            String
   description     String?
   market          Market
+  countryCode     String?          @map("country_code")
   strategyName    String           @map("strategy_name")
   status          SimulationStatus @default(RUNNING)
   initialCapital  Decimal          @map("initial_capital") @db.Decimal(16, 4)

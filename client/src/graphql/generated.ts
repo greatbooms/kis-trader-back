@@ -30,6 +30,7 @@ export type Scalars = {
   Boolean: { input: boolean; output: boolean };
   Int: { input: number; output: number };
   Float: { input: number; output: number };
+  /** A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format. */
   DateTime: { input: any; output: any };
 };
 
@@ -51,6 +52,7 @@ export type AuthPayload = {
 };
 
 export type CreateSimulationInput = {
+  countryCode?: InputMaybe<Scalars["String"]["input"]>;
   description?: InputMaybe<Scalars["String"]["input"]>;
   initialCapital: Scalars["Float"]["input"];
   market: Market;
@@ -185,6 +187,8 @@ export type Query = {
   positions: Array<PositionType>;
   quote?: Maybe<StockPriceType>;
   riskState: RiskStateType;
+  runScreeningNow: Scalars["Boolean"]["output"];
+  screeningDates: Array<Scalars["String"]["output"]>;
   searchStocks: Array<StockSearchResult>;
   simulationMetrics: SimulationMetricsType;
   simulationPositions: Array<SimulationPositionType>;
@@ -192,6 +196,7 @@ export type Query = {
   simulationSessions: Array<SimulationSessionType>;
   simulationSnapshots: Array<SimulationSnapshotType>;
   simulationTrades: Array<SimulationTradeType>;
+  stockRecommendations: Array<StockRecommendationType>;
   strategyAllocations: Array<StrategyAllocationType>;
   strategyExecutions: Array<StrategyExecutionType>;
   trade?: Maybe<TradeRecordType>;
@@ -221,7 +226,17 @@ export type QueryRiskStateArgs = {
   market: Market;
 };
 
+export type QueryRunScreeningNowArgs = {
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  market: Scalars["String"]["input"];
+};
+
+export type QueryScreeningDatesArgs = {
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+};
+
 export type QuerySearchStocksArgs = {
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
   keyword: Scalars["String"]["input"];
   limit?: InputMaybe<Scalars["Int"]["input"]>;
   market?: InputMaybe<Market>;
@@ -251,6 +266,12 @@ export type QuerySimulationTradesArgs = {
   limit?: InputMaybe<Scalars["Int"]["input"]>;
   offset?: InputMaybe<Scalars["Int"]["input"]>;
   sessionId: Scalars["String"]["input"];
+};
+
+export type QueryStockRecommendationsArgs = {
+  date?: InputMaybe<Scalars["String"]["input"]>;
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  market?: InputMaybe<Scalars["String"]["input"]>;
 };
 
 export type QueryStrategyAllocationsArgs = {
@@ -331,6 +352,7 @@ export type SimulationPositionType = {
 
 export type SimulationSessionType = {
   __typename?: "SimulationSessionType";
+  countryCode?: Maybe<Scalars["String"]["output"]>;
   createdAt: Scalars["DateTime"]["output"];
   currentCash: Scalars["Float"]["output"];
   description?: Maybe<Scalars["String"]["output"]>;
@@ -408,6 +430,28 @@ export type StockPriceType = {
   stockCode: Scalars["String"]["output"];
   stockName: Scalars["String"]["output"];
   volume?: Maybe<Scalars["Int"]["output"]>;
+};
+
+export type StockRecommendationType = {
+  __typename?: "StockRecommendationType";
+  changeRate: Scalars["Float"]["output"];
+  createdAt: Scalars["DateTime"]["output"];
+  currentPrice: Scalars["Float"]["output"];
+  exchangeCode: Scalars["String"]["output"];
+  fundamentalScore: Scalars["Float"]["output"];
+  id: Scalars["String"]["output"];
+  indicators: Scalars["String"]["output"];
+  market: Scalars["String"]["output"];
+  marketCap: Scalars["Float"]["output"];
+  momentumScore: Scalars["Float"]["output"];
+  rank: Scalars["Int"]["output"];
+  reasons: Scalars["String"]["output"];
+  screeningDate: Scalars["String"]["output"];
+  stockCode: Scalars["String"]["output"];
+  stockName: Scalars["String"]["output"];
+  technicalScore: Scalars["Float"]["output"];
+  totalScore: Scalars["Float"]["output"];
+  volume: Scalars["Float"]["output"];
 };
 
 export type StockSearchResult = {
@@ -528,6 +572,46 @@ export type LogoutMutation = {
   logout: { __typename?: "AuthPayload"; success: boolean };
 };
 
+export type GetStockRecommendationsQueryVariables = Exact<{
+  date?: InputMaybe<Scalars["String"]["input"]>;
+  market?: InputMaybe<Scalars["String"]["input"]>;
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+}>;
+
+export type GetStockRecommendationsQuery = {
+  __typename?: "Query";
+  stockRecommendations: Array<{
+    __typename?: "StockRecommendationType";
+    id: string;
+    screeningDate: string;
+    market: string;
+    exchangeCode: string;
+    stockCode: string;
+    stockName: string;
+    totalScore: number;
+    technicalScore: number;
+    fundamentalScore: number;
+    momentumScore: number;
+    rank: number;
+    reasons: string;
+    indicators: string;
+    currentPrice: number;
+    changeRate: number;
+    volume: number;
+    marketCap: number;
+    createdAt: any;
+  }>;
+};
+
+export type GetScreeningDatesQueryVariables = Exact<{
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+}>;
+
+export type GetScreeningDatesQuery = {
+  __typename?: "Query";
+  screeningDates: Array<string>;
+};
+
 export type GetSimulationSessionsQueryVariables = Exact<{
   status?: InputMaybe<SimulationStatus>;
 }>;
@@ -540,6 +624,7 @@ export type GetSimulationSessionsQuery = {
     name: string;
     description?: string | null;
     market: Market;
+    countryCode?: string | null;
     strategyName: string;
     status: SimulationStatus;
     initialCapital: number;
@@ -576,6 +661,7 @@ export type GetSimulationSessionQuery = {
     name: string;
     description?: string | null;
     market: Market;
+    countryCode?: string | null;
     strategyName: string;
     status: SimulationStatus;
     initialCapital: number;
@@ -703,6 +789,7 @@ export type CreateSimulationMutation = {
     id: string;
     name: string;
     market: Market;
+    countryCode?: string | null;
     strategyName: string;
     status: SimulationStatus;
     initialCapital: number;
@@ -780,6 +867,7 @@ export type SearchStocksQueryVariables = Exact<{
   keyword: Scalars["String"]["input"];
   market?: InputMaybe<Market>;
   limit?: InputMaybe<Scalars["Int"]["input"]>;
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
 }>;
 
 export type SearchStocksQuery = {
@@ -1156,6 +1244,213 @@ export function useLogoutMutation(
   );
 }
 export type LogoutMutationHookResult = ReturnType<typeof useLogoutMutation>;
+export const GetStockRecommendationsDocument = gql`
+  query GetStockRecommendations($date: String, $market: String, $limit: Float) {
+    stockRecommendations(date: $date, market: $market, limit: $limit) {
+      id
+      screeningDate
+      market
+      exchangeCode
+      stockCode
+      stockName
+      totalScore
+      technicalScore
+      fundamentalScore
+      momentumScore
+      rank
+      reasons
+      indicators
+      currentPrice
+      changeRate
+      volume
+      marketCap
+      createdAt
+    }
+  }
+`;
+
+/**
+ * __useGetStockRecommendationsQuery__
+ *
+ * To run a query within a React component, call `useGetStockRecommendationsQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetStockRecommendationsQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetStockRecommendationsQuery({
+ *   variables: {
+ *      date: // value for 'date'
+ *      market: // value for 'market'
+ *      limit: // value for 'limit'
+ *   },
+ * });
+ */
+export function useGetStockRecommendationsQuery(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >(GetStockRecommendationsDocument, options);
+}
+export function useGetStockRecommendationsLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >(GetStockRecommendationsDocument, options);
+}
+// @ts-ignore
+export function useGetStockRecommendationsSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetStockRecommendationsQuery,
+  GetStockRecommendationsQueryVariables
+>;
+export function useGetStockRecommendationsSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetStockRecommendationsQuery,
+        GetStockRecommendationsQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetStockRecommendationsQuery | undefined,
+  GetStockRecommendationsQueryVariables
+>;
+export function useGetStockRecommendationsSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetStockRecommendationsQuery,
+        GetStockRecommendationsQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetStockRecommendationsQuery,
+    GetStockRecommendationsQueryVariables
+  >(GetStockRecommendationsDocument, options);
+}
+export type GetStockRecommendationsQueryHookResult = ReturnType<
+  typeof useGetStockRecommendationsQuery
+>;
+export type GetStockRecommendationsLazyQueryHookResult = ReturnType<
+  typeof useGetStockRecommendationsLazyQuery
+>;
+export type GetStockRecommendationsSuspenseQueryHookResult = ReturnType<
+  typeof useGetStockRecommendationsSuspenseQuery
+>;
+export const GetScreeningDatesDocument = gql`
+  query GetScreeningDates($limit: Float) {
+    screeningDates(limit: $limit)
+  }
+`;
+
+/**
+ * __useGetScreeningDatesQuery__
+ *
+ * To run a query within a React component, call `useGetScreeningDatesQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetScreeningDatesQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetScreeningDatesQuery({
+ *   variables: {
+ *      limit: // value for 'limit'
+ *   },
+ * });
+ */
+export function useGetScreeningDatesQuery(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >(GetScreeningDatesDocument, options);
+}
+export function useGetScreeningDatesLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >(GetScreeningDatesDocument, options);
+}
+// @ts-ignore
+export function useGetScreeningDatesSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningDatesQuery,
+  GetScreeningDatesQueryVariables
+>;
+export function useGetScreeningDatesSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningDatesQuery,
+        GetScreeningDatesQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningDatesQuery | undefined,
+  GetScreeningDatesQueryVariables
+>;
+export function useGetScreeningDatesSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningDatesQuery,
+        GetScreeningDatesQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetScreeningDatesQuery,
+    GetScreeningDatesQueryVariables
+  >(GetScreeningDatesDocument, options);
+}
+export type GetScreeningDatesQueryHookResult = ReturnType<
+  typeof useGetScreeningDatesQuery
+>;
+export type GetScreeningDatesLazyQueryHookResult = ReturnType<
+  typeof useGetScreeningDatesLazyQuery
+>;
+export type GetScreeningDatesSuspenseQueryHookResult = ReturnType<
+  typeof useGetScreeningDatesSuspenseQuery
+>;
 export const GetSimulationSessionsDocument = gql`
   query GetSimulationSessions($status: SimulationStatus) {
     simulationSessions(status: $status) {
@@ -1163,6 +1458,7 @@ export const GetSimulationSessionsDocument = gql`
       name
       description
       market
+      countryCode
       strategyName
       status
       initialCapital
@@ -1281,6 +1577,7 @@ export const GetSimulationSessionDocument = gql`
       name
       description
       market
+      countryCode
       strategyName
       status
       initialCapital
@@ -1842,6 +2139,7 @@ export const CreateSimulationDocument = gql`
       id
       name
       market
+      countryCode
       strategyName
       status
       initialCapital
@@ -2091,8 +2389,18 @@ export type DeleteSimulationMutationHookResult = ReturnType<
   typeof useDeleteSimulationMutation
 >;
 export const SearchStocksDocument = gql`
-  query SearchStocks($keyword: String!, $market: Market, $limit: Int) {
-    searchStocks(keyword: $keyword, market: $market, limit: $limit) {
+  query SearchStocks(
+    $keyword: String!
+    $market: Market
+    $limit: Int
+    $exchangeCode: String
+  ) {
+    searchStocks(
+      keyword: $keyword
+      market: $market
+      limit: $limit
+      exchangeCode: $exchangeCode
+    ) {
       stockCode
       stockName
       englishName
@@ -2117,6 +2425,7 @@ export const SearchStocksDocument = gql`
  *      keyword: // value for 'keyword'
  *      market: // value for 'market'
  *      limit: // value for 'limit'
+ *      exchangeCode: // value for 'exchangeCode'
  *   },
  * });
  */

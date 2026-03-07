@@ -28,7 +28,7 @@ export class KisBaseService {
     private configService: ConfigService,
   ) {
     const env = this.configService.get<string>('kis.env');
-    this.rateLimitMs = env === 'prod' ? 100 : 300;
+    this.rateLimitMs = env === 'prod' ? 67 : 300; // prod: 15 req/s
   }
 
   private rateLimit(): Promise<void> {

@@ -1,0 +1,26 @@
+query GetStockRecommendations($date: String, $market: String, $limit: Float) {
+  stockRecommendations(date: $date, market: $market, limit: $limit) {
+    id
+    screeningDate
+    market
+    exchangeCode
+    stockCode
+    stockName
+    totalScore
+    technicalScore
+    fundamentalScore
+    momentumScore
+    rank
+    reasons
+    indicators
+    currentPrice
+    changeRate
+    volume
+    marketCap
+    createdAt
+  }
+}
+
+query GetScreeningDates($limit: Float) {
+  screeningDates(limit: $limit)
+}

@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Wallet, PiggyBank, BarChart3, CircleDollarSign } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
+import { Wallet, PiggyBank, BarChart3, CircleDollarSign, Info } from 'lucide-react'
 import { useGetSimulationPositionsQuery } from '@/graphql/generated'
 import { formatCurrency } from '@/lib/utils'
 import type { SimulationCapitalSummaryProps } from '@/pages/simulation/types'
@@ -18,7 +19,12 @@ export function SimulationCapitalSummary({ sessionId, initialCapital, currentCas
   return (
     <Card>
       <CardHeader>
-        <CardTitle>자본 현황</CardTitle>
+        <div className="flex items-center gap-1">
+          <CardTitle>자본 현황</CardTitle>
+          <Tooltip text="시뮬레이션의 자금 배분 상태입니다. 초기자본에서 종목별로 배정(quota)하고, 실제 매수에 사용된 금액과 평가액을 확인할 수 있습니다.">
+            <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+          </Tooltip>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

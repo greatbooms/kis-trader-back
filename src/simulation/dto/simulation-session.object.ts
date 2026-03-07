@@ -18,6 +18,9 @@ export class SimulationSessionType {
   @Field(() => Market)
   market: Market;
 
+  @Field({ nullable: true })
+  countryCode?: string;
+
   @Field()
   strategyName: string;
 

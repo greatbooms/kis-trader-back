@@ -60,15 +60,22 @@ export class StockMasterService implements OnModuleInit {
     await this.loadAllMasters();
   }
 
-  searchStocks(keyword: string, market?: 'DOMESTIC' | 'OVERSEAS', limit = 20): StockInfo[] {
+  searchStocks(keyword: string, market?: 'DOMESTIC' | 'OVERSEAS', limit = 20, exchangeCode?: string): StockInfo[] {
     if (!keyword || keyword.length < 1) return [];
 
     const lowerKeyword = keyword.toLowerCase();
-    const stocks = market === 'DOMESTIC'
-      ? this.domesticStocks
-      : market === 'OVERSEAS'
-        ? this.overseasStocks
-        : [...this.domesticStocks, ...this.overseasStocks];
+    let stocks: StockInfo[];
+
+    if (exchangeCode) {
+      const allStocks = market === 'DOMESTIC' ? this.domesticStocks : market === 'OVERSEAS' ? this.overseasStocks : [...this.domesticStocks, ...this.overseasStocks];
+      stocks = allStocks.filter((s) => s.exchangeCode === exchangeCode);
+    } else if (market === 'DOMESTIC') {
+      stocks = this.domesticStocks;
+    } else if (market === 'OVERSEAS') {
+      stocks = this.overseasStocks;
+    } else {
+      stocks = [...this.domesticStocks, ...this.overseasStocks];
+    }
 
     const results: StockInfo[] = [];
     for (const stock of stocks) {

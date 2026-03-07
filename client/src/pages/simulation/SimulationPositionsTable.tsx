@@ -1,6 +1,8 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Info } from 'lucide-react'
 import { useGetSimulationPositionsQuery } from '@/graphql/generated'
 import { formatCurrency, formatNumber, formatPercent } from '@/lib/utils'
 import type { SimulationPositionsTableProps } from '@/pages/simulation/types'
@@ -15,7 +17,12 @@ export function SimulationPositionsTable({ sessionId }: SimulationPositionsTable
   return (
     <Card>
       <CardHeader>
-        <CardTitle>보유 포지션</CardTitle>
+        <div className="flex items-center gap-1">
+          <CardTitle>보유 포지션</CardTitle>
+          <Tooltip text="현재 보유 중인 종목 목록입니다. 전략이 매수한 종목의 수량, 평균 매수가, 현재 평가 손익을 확인할 수 있습니다.">
+            <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+          </Tooltip>
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (

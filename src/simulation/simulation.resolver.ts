@@ -162,6 +162,7 @@ export class SimulationResolver {
       name: session.name,
       description: session.description || undefined,
       market: session.market,
+      countryCode: session.countryCode || undefined,
       strategyName: session.strategyName,
       status: session.status,
       initialCapital: Number(session.initialCapital),

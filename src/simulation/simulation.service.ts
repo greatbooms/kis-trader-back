@@ -30,6 +30,7 @@ export class SimulationService {
         name: input.name,
         description: input.description,
         market: input.market,
+        countryCode: input.countryCode,
         strategyName: input.strategyName,
         initialCapital: new Prisma.Decimal(input.initialCapital),
         currentCash: new Prisma.Decimal(input.initialCapital),

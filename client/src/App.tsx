@@ -7,6 +7,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { WatchlistPage } from '@/pages/WatchlistPage'
 import { PortfolioPage } from '@/pages/PortfolioPage'
 import { StrategyGuidePage } from '@/pages/StrategyGuidePage'
+import { ScreeningPage } from '@/pages/ScreeningPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
 const SimulationPage = lazy(() =>
@@ -30,6 +31,7 @@ function App() {
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/strategy-guide" element={<StrategyGuidePage />} />
           <Route path="/simulation" element={<Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>}><SimulationPage /></Suspense>} />
+          <Route path="/screening" element={<ScreeningPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

@@ -1,8 +1,20 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, Target, BarChart3 } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
+import { TrendingUp, TrendingDown, Target, BarChart3, Info } from 'lucide-react'
 import { useGetSimulationMetricsQuery } from '@/graphql/generated'
 import { formatCurrency, formatPercent } from '@/lib/utils'
 import type { SimulationMetricsCardsProps } from '@/pages/simulation/types'
+
+function MetricTitle({ label, tooltip }: { label: string; tooltip: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+      <Tooltip text={tooltip}>
+        <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+      </Tooltip>
+    </div>
+  )
+}
 
 export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsCardsProps) {
   const { data, loading } = useGetSimulationMetricsQuery({
@@ -24,7 +36,7 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">총 수익률</CardTitle>
+            <MetricTitle label="총 수익률" tooltip="초기 자본 대비 현재 총 자산의 변화율입니다. 실현 손익과 미실현 평가 손익을 모두 포함합니다." />
             <TrendingUp className="h-4 w-4 text-primary-500" />
           </div>
         </CardHeader>
@@ -41,7 +53,7 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">최대 낙폭</CardTitle>
+            <MetricTitle label="최대 낙폭" tooltip="고점 대비 최대 하락 폭입니다. 투자 기간 중 최악의 손실 구간을 나타내며, 값이 작을수록 안정적입니다." />
             <TrendingDown className="h-4 w-4 text-danger" />
           </div>
         </CardHeader>
@@ -55,7 +67,7 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">승률</CardTitle>
+            <MetricTitle label="승률" tooltip="수익으로 마감한 거래의 비율입니다. 50% 이상이면 양호하며, 높을수록 안정적인 전략입니다." />
             <Target className="h-4 w-4 text-warning" />
           </div>
         </CardHeader>
@@ -72,7 +84,7 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">샤프 비율</CardTitle>
+            <MetricTitle label="샤프 비율" tooltip="위험 대비 수익률 지표입니다. 변동성이 적으면서 수익이 높을수록 값이 큽니다. 1 이상 양호, 2 이상 우수입니다." />
             <BarChart3 className="h-4 w-4 text-info" />
           </div>
         </CardHeader>

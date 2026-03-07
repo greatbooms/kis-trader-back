@@ -5,11 +5,12 @@ import { SearchStocksDocument, type Market, type SearchStocksQuery, type SearchS
 
 interface StockSearchInputProps {
   market?: Market
+  exchangeCode?: string
   placeholder?: string
   onSelect: (stock: StockSearchResult) => void
 }
 
-export function StockSearchInput({ market, placeholder = '종목명 또는 코드 검색', onSelect }: StockSearchInputProps) {
+export function StockSearchInput({ market, exchangeCode, placeholder = '종목명 또는 코드 검색', onSelect }: StockSearchInputProps) {
   const [keyword, setKeyword] = useState('')
   const [debouncedKeyword, setDebouncedKeyword] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -23,7 +24,7 @@ export function StockSearchInput({ market, placeholder = '종목명 또는 코�
   const { data, loading } = useQuery<SearchStocksQuery, SearchStocksQueryVariables>(
     SearchStocksDocument,
     {
-      variables: { keyword: debouncedKeyword || '', market: market ?? undefined, limit: 15 },
+      variables: { keyword: debouncedKeyword || '', market: market ?? undefined, limit: 15, exchangeCode: exchangeCode ?? undefined },
       skip: shouldSkip,
     },
   )

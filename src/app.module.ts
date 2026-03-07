@@ -15,6 +15,7 @@ import { HealthController } from './health/health.controller';
 import { NotificationModule } from './notification/notification.module';
 import { SimulationModule } from './simulation/simulation.module';
 import { StockMasterModule } from './stock-master/stock-master.module';
+import { ScreeningModule } from './screening/screening.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { StockMasterModule } from './stock-master/stock-master.module';
     NotificationModule,
     SimulationModule,
     StockMasterModule,
+    ScreeningModule,
   ],
   controllers: [HealthController],
 })

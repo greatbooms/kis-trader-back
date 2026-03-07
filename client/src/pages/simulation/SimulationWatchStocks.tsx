@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Trash2, Info } from 'lucide-react'
 import {
   useGetSimulationSessionQuery,
   useAddSimulationWatchStockMutation,
@@ -13,8 +13,25 @@ import {
   type StockSearchResult,
 } from '@/graphql/generated'
 import { StockSearchInput } from '@/components/StockSearchInput'
+import { Tooltip } from '@/components/ui/tooltip'
 import { formatCurrency } from '@/lib/utils'
 import type { SimulationWatchStocksProps } from '@/pages/simulation/types'
+
+const EXCHANGE_LABELS: Record<string, string> = {
+  KRX: '한국',
+  NASD: '나스닥', NYSE: '뉴욕', AMEX: '아멕스',
+  SEHK: '홍콩', SHAA: '상해', SZAA: '심천',
+  TKSE: '일본', HASE: '하노이', VNSE: '호치민',
+}
+
+const COUNTRY_OPTIONS = [
+  { value: 'KR', label: '한국', market: 'DOMESTIC' as Market, exchanges: ['KRX'] },
+  { value: 'US', label: '미국', market: 'OVERSEAS' as Market, exchanges: ['NASD', 'NYSE', 'AMEX'] },
+  { value: 'HK', label: '홍콩', market: 'OVERSEAS' as Market, exchanges: ['SEHK'] },
+  { value: 'CN', label: '중국', market: 'OVERSEAS' as Market, exchanges: ['SHAA', 'SZAA'] },
+  { value: 'JP', label: '일본', market: 'OVERSEAS' as Market, exchanges: ['TKSE'] },
+  { value: 'VN', label: '베트남', market: 'OVERSEAS' as Market, exchanges: ['HASE', 'VNSE'] },
+]
 
 export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps) {
   const [expanded, setExpanded] = useState(false)
@@ -33,6 +50,11 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
 
   const watchStocks = data?.simulationSession?.watchStocks ?? []
   const sessionMarket = data?.simulationSession?.market
+  const sessionCountryCode = data?.simulationSession?.countryCode
+
+  // countryCode로 국가 결정 (없으면 market에서 유추)
+  const country = COUNTRY_OPTIONS.find((c) => c.value === sessionCountryCode)
+    ?? (sessionMarket === 'DOMESTIC' ? COUNTRY_OPTIONS[0] : COUNTRY_OPTIONS[1])
 
   const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null)
   const [quota, setQuota] = useState('')
@@ -49,7 +71,7 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
           sessionId,
           stockCode: selectedStock.stockCode,
           stockName: selectedStock.stockName,
-          market: (selectedStock.market as Market) || sessionMarket || 'DOMESTIC',
+          market: (selectedStock.market as Market) || country.market || sessionMarket || 'DOMESTIC',
           exchangeCode: selectedStock.exchangeCode || undefined,
           quota: quota ? Number(quota) : undefined,
         },
@@ -69,7 +91,12 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <CardTitle>관심종목 ({watchStocks.length})</CardTitle>
+          <div className="flex items-center gap-1">
+            <CardTitle>관심종목 ({watchStocks.length})</CardTitle>
+            <Tooltip text="전략이 매매할 대상 종목 목록입니다. 각 종목에 투자금(quota)을 배정하면 전략이 해당 금액 범위 내에서 자동으로 매수/매도합니다.">
+              <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
           <div className="flex items-center gap-2">
             {expanded && (
               <Button
@@ -92,15 +119,16 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
           {showAdd && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4 p-3 rounded-lg border border-primary-300">
               <StockSearchInput
-                market={sessionMarket as Market}
+                market={country.market}
+                exchangeCode={country.exchanges.length === 1 ? country.exchanges[0] : undefined}
                 onSelect={handleStockSelect}
-                placeholder="종목명 또는 코드 검색"
+                placeholder={`${country.label} 종목 검색`}
               />
               <Input placeholder="투자금(quota)" type="number" value={quota} onChange={(e) => setQuota(e.target.value)} />
               <div className="flex items-center gap-2">
                 {selectedStock && (
                   <Badge variant="outline" className="text-xs">
-                    {selectedStock.stockCode} ({selectedStock.exchangeCode})
+                    {selectedStock.stockCode} ({EXCHANGE_LABELS[selectedStock.exchangeCode ?? ''] ?? selectedStock.exchangeCode})
                   </Badge>
                 )}
                 <Button size="sm" onClick={handleAdd} disabled={!selectedStock}>추가</Button>
@@ -120,7 +148,7 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
                         <span className="font-medium text-sm">{stock.stockName}</span>
                         <span className="text-xs text-muted-foreground">{stock.stockCode}</span>
                         <Badge variant={stock.market === 'DOMESTIC' ? 'default' : 'info'}>
-                          {stock.market === 'DOMESTIC' ? '국내' : '해외'}
+                          {stock.exchangeCode ? (EXCHANGE_LABELS[stock.exchangeCode] ?? stock.exchangeCode) : (stock.market === 'DOMESTIC' ? '국내' : '해외')}
                         </Badge>
                         <Badge variant={stock.isActive ? 'success' : 'outline'}>
                           {stock.isActive ? '활성' : '비활성'}
@@ -129,7 +157,7 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
                       <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                         {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
                         <span>사이클: {stock.cycle}/{stock.maxCycles}</span>
-                        {stock.stopLossRate !== undefined && <span>손절: {stock.stopLossRate}%</span>}
+                        {stock.stopLossRate !== undefined && stock.stopLossRate > 0 && <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>}
                       </div>
                     </div>
                   </div>

@@ -200,6 +200,48 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async sendScreeningResult(market: string, date: string, scores: { stockCode: string; stockName: string; exchangeCode: string; totalScore: number; technicalScore: number; fundamentalScore: number; momentumScore: number; reasons: string[]; currentPrice: number; changeRate: number }[]): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const top = scores.slice(0, 10);
+      const marketLabel = market === 'DOMESTIC' ? '국내' : top[0]?.exchangeCode || '해외';
+      const lines = top.map((s, i) =>
+        `${i + 1}. *${s.stockName}* (${s.stockCode}) — ${s.totalScore.toFixed(1)}점\n` +
+        `    기술 ${s.technicalScore.toFixed(0)} | 펀더 ${s.fundamentalScore.toFixed(0)} | 모멘텀 ${s.momentumScore.toFixed(0)} | ${s.changeRate >= 0 ? '+' : ''}${s.changeRate.toFixed(1)}%\n` +
+        `    ${s.reasons.slice(0, 3).join(' / ')}`,
+      );
+
+      const blocks: KnownBlock[] = [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `:mag: *종목 스크리닝 완료 | ${marketLabel} | ${date}*` },
+        },
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: lines.join('\n\n') },
+        },
+      ];
+
+      if (scores.length > 10) {
+        blocks.push({
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: `외 ${scores.length - 10}종목 추가 (GraphQL API로 조회)` }],
+        });
+      }
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks,
+        text: `종목 스크리닝 완료 | ${marketLabel} | ${date} | ${top.length}종목`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send screening result: ${e.message}`);
+      this.handleSendError(e);
+    }
+  }
+
   // --- Block Kit Formatting (also used by SlackCommandsService) ---
 
   formatTradeAlert(ctx: TradeAlertContext): KnownBlock[] {

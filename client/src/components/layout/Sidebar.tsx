@@ -6,6 +6,7 @@ import {
   Settings,
   TrendingUp,
   FlaskConical,
+  Search,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/watchlist', icon: Eye, label: '관심종목' },
   { to: '/portfolio', icon: TrendingUp, label: '포트폴리오' },
   { to: '/strategy-guide', icon: BookOpen, label: '전략 가이드' },
+  { to: '/screening', icon: Search, label: '종목 추천' },
   { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
   { to: '/settings', icon: Settings, label: '설정' },
 ]

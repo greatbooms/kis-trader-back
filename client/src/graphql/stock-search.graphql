@@ -1,5 +1,5 @@
-query SearchStocks($keyword: String!, $market: Market, $limit: Int) {
-  searchStocks(keyword: $keyword, market: $market, limit: $limit) {
+query SearchStocks($keyword: String!, $market: Market, $limit: Int, $exchangeCode: String) {
+  searchStocks(keyword: $keyword, market: $market, limit: $limit, exchangeCode: $exchangeCode) {
     stockCode
     stockName
     englishName

@@ -4,6 +4,7 @@ query GetSimulationSessions($status: SimulationStatus) {
     name
     description
     market
+    countryCode
     strategyName
     status
     initialCapital
@@ -33,6 +34,7 @@ query GetSimulationSession($id: String!) {
     name
     description
     market
+    countryCode
     strategyName
     status
     initialCapital
@@ -127,6 +129,7 @@ mutation CreateSimulation($input: CreateSimulationInput!) {
     id
     name
     market
+    countryCode
     strategyName
     status
     initialCapital

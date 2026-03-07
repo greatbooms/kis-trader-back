@@ -56,7 +56,7 @@ export class WatchStockService {
         exchangeCode: data.exchangeCode,
         stockCode: data.stockCode,
         stockName: data.stockName,
-        isActive: data.isActive,
+        isActive: data.isActive ?? false,
         strategyName: data.strategyName,
         quota: data.quota != null ? new Prisma.Decimal(data.quota) : undefined,
         maxCycles: data.maxCycles,

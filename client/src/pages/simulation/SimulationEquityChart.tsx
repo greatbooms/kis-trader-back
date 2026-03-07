@@ -1,4 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Tooltip as InfoTooltip } from '@/components/ui/tooltip'
+import { Info } from 'lucide-react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -30,7 +32,12 @@ export function SimulationEquityChart({ sessionId }: SimulationEquityChartProps)
   return (
     <Card>
       <CardHeader>
-        <CardTitle>자산 추이</CardTitle>
+        <div className="flex items-center gap-1">
+          <CardTitle>자산 추이</CardTitle>
+          <InfoTooltip text="시간에 따른 총 자산(현금 + 보유 종목 평가액)의 변화를 보여줍니다. 점선은 현금 잔고이며, 실선과의 차이가 주식 평가액입니다.">
+            <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+          </InfoTooltip>
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (

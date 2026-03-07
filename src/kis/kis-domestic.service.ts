@@ -342,6 +342,84 @@ export class KisDomesticService {
     }
   }
 
+  /** 국내 거래량순위 조회 */
+  async getVolumeRanking(marketDiv = 'J'): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/ranking/volume-rank',
+      'FHPST01710000',
+      {
+        FID_COND_MRKT_DIV_CODE: marketDiv,
+        FID_COND_SCR_DIV_CODE: '20171',
+        FID_INPUT_ISCD: '0000',
+        FID_DIV_CLS_CODE: '0',
+        FID_BLNG_CLS_CODE: '0',
+        FID_TRGT_CLS_CODE: '111111111',
+        FID_TRGT_EXLS_CLS_CODE: '0000000000',
+        FID_INPUT_PRICE_1: '',
+        FID_INPUT_PRICE_2: '',
+        FID_VOL_CNT: '',
+        FID_INPUT_DATE_1: '',
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
+  /** 국내 등락률 순위 조회 */
+  async getFluctuationRanking(marketDiv = 'J'): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/ranking/fluctuation',
+      'FHPST01700000',
+      {
+        FID_COND_MRKT_DIV_CODE: marketDiv,
+        FID_COND_SCR_DIV_CODE: '20170',
+        FID_INPUT_ISCD: '0000',
+        FID_RANK_SORT_CLS_CODE: '0', // 상승률순
+        FID_INPUT_CNT_1: '0',
+        FID_PRC_CLS_CODE: '0',
+        FID_INPUT_PRICE_1: '',
+        FID_INPUT_PRICE_2: '',
+        FID_VOL_CNT: '',
+        FID_TRGT_CLS_CODE: '0',
+        FID_TRGT_EXLS_CLS_CODE: '0',
+        FID_DIV_CLS_CODE: '0',
+        FID_RSFL_RATE1: '',
+        FID_RSFL_RATE2: '',
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
+  /** 국내 재무비율 조회 (종목별) */
+  async getFinancialRatio(stockCode: string): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/finance/financial-ratio',
+      'FHKST66430300',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
+  /** 국내 기관/외국인 매매 종목 가집계 */
+  async getForeignInstitutionTotal(marketDiv = 'J'): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/quotations/foreign-institution-total',
+      'FHPTJ04400000',
+      {
+        FID_COND_MRKT_DIV_CODE: marketDiv,
+        FID_COND_SCR_DIV_CODE: '16449',
+        FID_INPUT_ISCD: '0000',
+        FID_DIV_CLS_CODE: '0',
+        FID_RANK_SORT_CLS_CODE: '0',
+        FID_ETC_CLS_CODE: '',
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
   /** 국내 잔고 조회 */
   async getBalance(): Promise<BalanceItem[]> {
     const trId = this.isPaper ? 'VTTC8494R' : 'TTTC8494R';

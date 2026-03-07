@@ -334,6 +334,69 @@ export class KisOverseasService {
     }));
   }
 
+  /** 해외 조건검색 */
+  async searchStocks(exchangeCode: string, options: {
+    minPrice?: number; maxPrice?: number;
+    minMarketCap?: number; maxMarketCap?: number;
+    minVolume?: number; maxVolume?: number;
+    minPer?: number; maxPer?: number;
+  } = {}): Promise<any[]> {
+    const excd = EXCHANGE_CODE_MAP[exchangeCode] || exchangeCode;
+    const params: Record<string, string> = {
+      AUTH: '',
+      EXCD: excd,
+      CO_YN_PRICECUR: options.minPrice || options.maxPrice ? '1' : '',
+      CO_ST_PRICECUR: options.minPrice ? String(options.minPrice) : '',
+      CO_EN_PRICECUR: options.maxPrice ? String(options.maxPrice) : '',
+      CO_YN_RATE: '',
+      CO_ST_RATE: '',
+      CO_EN_RATE: '',
+      CO_YN_VALX: options.minMarketCap ? '1' : '',
+      CO_ST_VALX: options.minMarketCap ? String(options.minMarketCap) : '',
+      CO_EN_VALX: options.maxMarketCap ? String(options.maxMarketCap) : '',
+      CO_YN_SHAR: '',
+      CO_ST_SHAR: '',
+      CO_EN_SHAR: '',
+      CO_YN_VOLUME: options.minVolume ? '1' : '',
+      CO_ST_VOLUME: options.minVolume ? String(options.minVolume) : '',
+      CO_EN_VOLUME: options.maxVolume ? String(options.maxVolume) : '',
+      CO_YN_AMT: '',
+      CO_ST_AMT: '',
+      CO_EN_AMT: '',
+      CO_YN_EPS: '',
+      CO_ST_EPS: '',
+      CO_EN_EPS: '',
+      CO_YN_PER: options.minPer || options.maxPer ? '1' : '',
+      CO_ST_PER: options.minPer ? String(options.minPer) : '',
+      CO_EN_PER: options.maxPer ? String(options.maxPer) : '',
+      KEYB: '',
+    };
+
+    const res = await this.kisBase.get(
+      '/uapi/overseas-price/v1/quotations/inquire-search',
+      'HHDFS76410000',
+      params,
+    );
+    return (res.output2 as any[]) || [];
+  }
+
+  /** 해외 거래량순위 */
+  async getVolumeRanking(exchangeCode: string): Promise<any[]> {
+    const excd = EXCHANGE_CODE_MAP[exchangeCode] || exchangeCode;
+    const res = await this.kisBase.get(
+      '/uapi/overseas-stock/v1/ranking/trade-vol',
+      'HHDFS76310010',
+      {
+        AUTH: '',
+        EXCD: excd,
+        NDAY: '0',
+        VOLC: '100000',
+        KEYB: '',
+      },
+    );
+    return (res.output as any[]) || [];
+  }
+
   /** 해외 잔고 조회 */
   async getBalance(nationCode = '000'): Promise<BalanceItem[]> {
     const trId = this.isPaper ? 'VTRP6504R' : 'CTRP6504R';
