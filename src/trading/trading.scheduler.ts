@@ -12,7 +12,7 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
 import { HolidayItem } from '../kis/types/kis-api.types';
-import { StockStrategyContext, WatchStockConfig, PerStockTradingStrategy } from './types';
+import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy } from './types';
 import { Market } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
@@ -276,6 +276,12 @@ export class TradingScheduler implements OnModuleInit {
             strategyParams: ws.strategyParams as Record<string, any> | undefined,
           };
 
+          // 밸류 팩터 전략일 때만 재무 데이터 조회 (API 호출 최소화)
+          let fundamentals: StockFundamentals | undefined;
+          if (strategyName === 'value-factor') {
+            fundamentals = await this.fetchFundamentals(market, ws.exchangeCode || exchangeCode, ws.stockCode);
+          }
+
           contexts.push({
             watchStock: watchStockConfig,
             price,
@@ -289,6 +295,7 @@ export class TradingScheduler implements OnModuleInit {
             alreadyExecutedToday: !!existing,
             marketCondition,
             stockIndicators,
+            fundamentals,
             buyableAmount,
             totalPortfolioValue,
             marketRegime: regime,
@@ -507,5 +514,33 @@ export class TradingScheduler implements OnModuleInit {
     }
 
     return currentMin >= openMin && currentMin < closeMin;
+  }
+
+  // ========== 재무 데이터 조회 ==========
+
+  private async fetchFundamentals(
+    market: string,
+    exchangeCode: string,
+    stockCode: string,
+  ): Promise<StockFundamentals | undefined> {
+    try {
+      if (market === 'DOMESTIC') {
+        const rows = await this.kisDomestic.getFinancialRatio(stockCode);
+        if (rows.length > 0) {
+          const latest = rows[0];
+          return {
+            per: parseFloat(latest.per) || undefined,
+            pbr: parseFloat(latest.pbr) || undefined,
+            roe: parseFloat(latest.roe_val) || undefined,
+            debtRatio: parseFloat(latest.lblt_rate) || undefined,
+          };
+        }
+      }
+      // 해외: 개별 종목 재무비율 API 없음 → undefined 반환
+      return undefined;
+    } catch (e) {
+      this.logger.warn(`Failed to fetch fundamentals for ${stockCode}: ${e.message}`);
+      return undefined;
+    }
   }
 }

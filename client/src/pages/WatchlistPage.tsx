@@ -489,6 +489,18 @@ const STRATEGY_META: Record<string, {
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 극단적 과매도 시 투자금의 30%만 사용합니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절합니다.',
   },
+  'trend-following': {
+    defaultStopLoss: 7,
+    hasMaxCycles: false,
+    quotaDesc: '이 종목에 배정할 투자 금액입니다. 추세 진입 시 한 번에 매수하고, 수익 5% 이상 시 50%를 추가 매수(피라미딩)합니다.',
+    stopLossDesc: '진입가 대비 이 비율만큼 하락하면 손절합니다. 추세 소멸(데드크로스, ADX<20) 시에도 자동 청산됩니다.',
+  },
+  'value-factor': {
+    defaultStopLoss: 10,
+    hasMaxCycles: false,
+    quotaDesc: '이 종목에 배정할 투자 금액입니다. 재무 지표(PER, PBR, ROE, 부채비율) 조건 충족 시 매수합니다. 해외 종목은 KIS API 제약으로 PER만 사용 가능하며, PBR/ROE/부채비율은 국내 종목에서만 확인됩니다.',
+    stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절합니다. +15% 수익 또는 RSI > 70 과열 시에도 자동 청산됩니다.',
+  },
 }
 
 const DEFAULT_STRATEGY_META = {

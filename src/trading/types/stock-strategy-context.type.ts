@@ -3,6 +3,7 @@ import { TradingSignal } from './trading-signal.type';
 import { WatchStockConfig } from './watch-stock-config.type';
 import { MarketCondition } from './market-condition.type';
 import { StockIndicators } from './stock-indicators.type';
+import { StockFundamentals } from './stock-fundamentals.type';
 import { MarketRegimeLabel, RiskState } from './risk-state.type';
 
 export interface StockStrategyContext {
@@ -18,6 +19,7 @@ export interface StockStrategyContext {
   alreadyExecutedToday: boolean;
   marketCondition: MarketCondition;
   stockIndicators: StockIndicators;
+  fundamentals?: StockFundamentals;
   buyableAmount: number;
   totalPortfolioValue: number;
   marketRegime?: MarketRegimeLabel;

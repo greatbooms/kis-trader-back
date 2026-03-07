@@ -3,6 +3,7 @@ import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
 import { ConservativeStrategy } from './conservative.strategy';
 import { TrendFollowingStrategy } from './trend-following.strategy';
+import { ValueFactorStrategy } from './value-factor.strategy';
 import {
   StockStrategyContext,
   WatchStockConfig,
@@ -80,6 +81,7 @@ describe('Edge Cases - Common across all strategies', () => {
     { name: 'momentum-breakout', instance: new MomentumBreakoutStrategy() },
     { name: 'conservative', instance: new ConservativeStrategy() },
     { name: 'trend-following', instance: new TrendFollowingStrategy() },
+    { name: 'value-factor', instance: new ValueFactorStrategy() },
   ];
 
   describe.each(strategies)('$name: buyableAmount edge cases', ({ instance }) => {

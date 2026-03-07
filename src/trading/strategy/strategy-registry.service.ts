@@ -6,6 +6,7 @@ import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
 import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
 import { ConservativeStrategy } from './conservative.strategy';
 import { TrendFollowingStrategy } from './trend-following.strategy';
+import { ValueFactorStrategy } from './value-factor.strategy';
 import { Market, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -20,12 +21,14 @@ export class StrategyRegistryService {
     gridMeanReversion: GridMeanReversionStrategy,
     conservative: ConservativeStrategy,
     trendFollowing: TrendFollowingStrategy,
+    valueFactor: ValueFactorStrategy,
   ) {
     this.register(infiniteBuy);
     this.register(momentumBreakout);
     this.register(gridMeanReversion);
     this.register(conservative);
     this.register(trendFollowing);
+    this.register(valueFactor);
 
     this.logger.log(`Registered strategies: ${this.getStrategyNames().join(', ')}`);
   }
