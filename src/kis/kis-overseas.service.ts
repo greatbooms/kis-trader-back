@@ -51,6 +51,7 @@ export class KisOverseasService {
     const perx = o.perx ? parseFloat(o.perx) : undefined;
     const pbrx = o.pbrx ? parseFloat(o.pbrx) : undefined;
     const epsx = o.epsx ? parseFloat(o.epsx) : undefined;
+    const bpsx = o.bpsx ? parseFloat(o.bpsx) : undefined;
     return {
       stockCode: symbol,
       stockName: o.name || symbol,
@@ -62,8 +63,16 @@ export class KisOverseasService {
       per: perx && !isNaN(perx) ? perx : undefined,
       pbr: pbrx && !isNaN(pbrx) ? pbrx : undefined,
       eps: epsx && !isNaN(epsx) ? epsx : undefined,
+      bps: bpsx && !isNaN(bpsx) ? bpsx : undefined,
       w52High: o.h52p ? parseFloat(o.h52p) || undefined : undefined,
       w52Low: o.l52p ? parseFloat(o.l52p) || undefined : undefined,
+      prevDayVolume: o.pvol ? parseInt(o.pvol, 10) || undefined : undefined,
+      prevDayTradingValue: o.pamt ? parseFloat(o.pamt) || undefined : undefined,
+      marketCap: o.tomv ? parseFloat(o.tomv) || undefined : undefined,
+      listedShares: o.shar ? parseInt(o.shar, 10) || undefined : undefined,
+      sector: o.e_icod || undefined,
+      exchangeRate: o.t_rate ? parseFloat(o.t_rate) || undefined : undefined,
+      krwPrice: o.t_xprc ? parseFloat(o.t_xprc) || undefined : undefined,
     };
   }
 

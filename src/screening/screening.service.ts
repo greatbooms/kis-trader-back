@@ -6,6 +6,14 @@ import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP } from '../kis/types/kis-config.types';
 import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy } from './types';
 
+interface ForeignInstitutionDetail {
+  foreignNet: number;
+  instNet: number;
+  trustNet: number; // 투자신탁
+  fundNet: number; // 기금(연기금)
+  foreignNetAmount: number; // 외국인 순매수 거래대금 (백만원)
+}
+
 @Injectable()
 export class ScreeningService {
   private readonly logger = new Logger(ScreeningService.name);
@@ -165,14 +173,20 @@ export class ScreeningService {
         changeRate: parseFloat(item.prdy_ctrt) || 0,
         volume: parseInt(item.acml_vol, 10) || 0,
         marketCap: 0,
+        // 거래량순위 API 추가 필드
+        volumeIncreaseRate: item.vol_inrt ? parseFloat(item.vol_inrt) : undefined,
+        avgVolume: item.avrg_vol ? parseInt(item.avrg_vol, 10) : undefined,
+        avgTradingValue: item.avrg_tr_pbmn ? parseFloat(item.avrg_tr_pbmn) : undefined,
+        volumeTurnoverRate: item.vol_tnrt ? parseFloat(item.vol_tnrt) : undefined,
+        nDayPriceRate: item.n_befr_clpr_vrss_prpr_rate ? parseFloat(item.n_befr_clpr_vrss_prpr_rate) : undefined,
       });
     }
 
     return candidates;
   }
 
-  private async collectForeignInstitutionData(): Promise<Map<string, { foreignNet: number; instNet: number }>> {
-    const map = new Map<string, { foreignNet: number; instNet: number }>();
+  private async collectForeignInstitutionData(): Promise<Map<string, ForeignInstitutionDetail>> {
+    const map = new Map<string, ForeignInstitutionDetail>();
     try {
       const data = await this.kisDomestic.getForeignInstitutionTotal();
       for (const item of data) {
@@ -181,6 +195,9 @@ export class ScreeningService {
         map.set(code, {
           foreignNet: parseInt(item.frgn_ntby_qty, 10) || 0,
           instNet: parseInt(item.orgn_ntby_qty, 10) || 0,
+          trustNet: parseInt(item.ivtr_ntby_qty, 10) || 0, // 투자신탁
+          fundNet: parseInt(item.fund_ntby_qty, 10) || 0, // 기금(연기금)
+          foreignNetAmount: parseInt(item.frgn_ntby_tr_pbmn, 10) || 0, // 외국인 순매수 거래대금 (백만원)
         });
       }
     } catch (e) {
@@ -254,18 +271,49 @@ export class ScreeningService {
 
   private async analyzeDomesticStock(
     candidate: ScreeningCandidate,
-    foreignInstMap: Map<string, { foreignNet: number; instNet: number }>,
+    foreignInstMap: Map<string, ForeignInstitutionDetail>,
   ): Promise<StockScore> {
     const endDate = this.todayStr();
     const startDate = this.dateNDaysAgo(300);
     const dailyPrices = await this.kisDomestic.getDailyPrices(candidate.stockCode, startDate, endDate);
 
     const indicators = this.calculateIndicators(dailyPrices);
-    const fiData = foreignInstMap.get(candidate.stockCode);
 
+    // 기관/외인 매매 동향 (세부 분류)
+    const fiData = foreignInstMap.get(candidate.stockCode);
     if (fiData) {
       indicators.foreignNetBuy = fiData.foreignNet > 0;
       indicators.institutionNetBuy = fiData.instNet > 0;
+      indicators.fundNetBuy = fiData.fundNet > 0;
+      indicators.trustNetBuy = fiData.trustNet > 0;
+      indicators.foreignNetBuyAmount = fiData.foreignNetAmount;
+    }
+
+    // 거래량순위 API에서 가져온 추가 지표 반영
+    if (candidate.volumeIncreaseRate !== undefined) {
+      indicators.volumeIncreaseRate = candidate.volumeIncreaseRate;
+    }
+    if (candidate.avgVolume && candidate.avgVolume > 0) {
+      indicators.avgVolume = candidate.avgVolume;
+      indicators.volumeToAvgRatio = candidate.volume / candidate.avgVolume;
+    }
+
+    // 현재가 상세 조회 (가격 위치, 리스크 지표)
+    try {
+      const priceDetail = await this.kisDomestic.getPrice(candidate.stockCode);
+      if (priceDetail.marketCap) candidate.marketCap = priceDetail.marketCap;
+      indicators.d250High = priceDetail.d250High;
+      indicators.d250Low = priceDetail.d250Low;
+      indicators.d250HighRate = priceDetail.d250HighRate;
+      indicators.d250LowRate = priceDetail.d250LowRate;
+      indicators.yearHigh = priceDetail.yearHigh;
+      indicators.yearLow = priceDetail.yearLow;
+      indicators.yearHighRate = priceDetail.yearHighRate;
+      indicators.yearLowRate = priceDetail.yearLowRate;
+      indicators.loanBalanceRate = priceDetail.loanBalanceRate;
+      indicators.shortSellable = priceDetail.shortSellable;
+    } catch {
+      // 현재가 상세 조회 실패 시 무시
     }
 
     // 재무비율
@@ -276,6 +324,8 @@ export class ScreeningService {
         indicators.per = parseFloat(latest.per) || undefined;
         indicators.pbr = parseFloat(latest.pbr) || undefined;
         indicators.roe = parseFloat(latest.roe_val) || undefined;
+        indicators.eps = parseFloat(latest.eps) || undefined;
+        indicators.bps = parseFloat(latest.bps) || undefined;
         indicators.debtRatio = parseFloat(latest.lblt_rate) || undefined;
       }
     } catch {
@@ -311,23 +361,36 @@ export class ScreeningService {
     // 조건검색 API에서 가져온 PER/EPS를 indicators에 반영
     if (candidate.per !== undefined) indicators.per = candidate.per;
 
+    // 현재가상세 조회 → 추가 지표 (시총, 섹터, 전일거래량, PBR 등)
+    try {
+      const priceDetail = await this.kisOverseas.getPrice(candidate.exchangeCode, candidate.stockCode);
+      if (priceDetail.marketCap) candidate.marketCap = priceDetail.marketCap;
+      if (priceDetail.pbr !== undefined) indicators.pbr = priceDetail.pbr;
+      if (priceDetail.sector) indicators.sector = priceDetail.sector;
+      if (priceDetail.prevDayVolume && priceDetail.prevDayVolume > 0 && candidate.volume > 0) {
+        indicators.prevDayVolumeChangeRate = (candidate.volume / priceDetail.prevDayVolume - 1) * 100;
+      }
+    } catch {
+      // 현재가상세 조회 실패 시 무시
+    }
+
     const { technicalScore, techReasons } = this.scoreTechnical(indicators, candidate);
     const { fundamentalScore, fundReasons } = this.scoreOverseasFundamental(indicators);
     const { momentumScore, momentumReasons } = this.scoreMomentum(indicators, candidate);
 
     // 해외는 재무 데이터가 제한적 → 100점 만점으로 비례 보정
-    // 가용 배점: Technical(40) + OverseasFundamental(15) + Momentum(30) = 85
+    // 가용 배점: Technical(40) + OverseasFundamental(20) + Momentum(30) = 90
     const rawTotal = technicalScore + fundamentalScore + momentumScore;
-    const normalizedTotal = Math.round((rawTotal / 85) * 100 * 10) / 10;
+    const normalizedTotal = Math.round((rawTotal / 90) * 100 * 10) / 10;
 
     const suggestedStrategies = this.suggestStrategies(indicators, candidate, true);
 
     return {
       ...candidate,
       totalScore: normalizedTotal,
-      technicalScore: Math.round((technicalScore / 40) * 40 * 10) / 10, // 기술적은 동일 배점
-      fundamentalScore: Math.round((fundamentalScore / 15) * 30 * 10) / 10, // 15점→30점 스케일
-      momentumScore: Math.round((momentumScore / 30) * 30 * 10) / 10, // 모멘텀은 동일 배점
+      technicalScore: Math.round((technicalScore / 40) * 40 * 10) / 10,
+      fundamentalScore: Math.round((fundamentalScore / 20) * 30 * 10) / 10, // 20점→30점 스케일
+      momentumScore: Math.round((momentumScore / 30) * 30 * 10) / 10,
       reasons: [...techReasons, ...fundReasons, ...momentumReasons],
       indicators,
       suggestedStrategies,
@@ -433,10 +496,16 @@ export class ScreeningService {
       reasons.push('MA20-MA60 골든크로스 근접');
     }
 
-    // MA20 위 여부 (0~5)
+    // MA20 위 여부 (0~3)
     if (ind.ma20 && cand.currentPrice > ind.ma20) {
-      score += 5;
+      score += 3;
       reasons.push('현재가 > MA20 — 단기 상승 추세');
+    }
+
+    // 연중 최고가 근접도 (0~2) — 신고가 근접은 상승 모멘텀 강화
+    if (ind.yearHighRate !== undefined && ind.yearHighRate >= -5) {
+      score += 2;
+      reasons.push(`연중 최고가 근접 (${ind.yearHighRate.toFixed(0)}%)`);
     }
 
     return { technicalScore: Math.min(score, 40), techReasons: reasons };
@@ -447,46 +516,46 @@ export class ScreeningService {
     let score = 0;
     const reasons: string[] = [];
 
-    // PER (0~10)
+    // PER (0~8)
     if (ind.per !== undefined && ind.per > 0) {
       if (ind.per <= 10) {
-        score += 10;
+        score += 8;
         reasons.push(`PER ${ind.per.toFixed(1)} — 저평가`);
       } else if (ind.per <= 20) {
-        score += 7;
+        score += 5;
         reasons.push(`PER ${ind.per.toFixed(1)} — 적정`);
       } else if (ind.per <= 30) {
-        score += 3;
+        score += 2;
         reasons.push(`PER ${ind.per.toFixed(1)} — 다소 고평가`);
       }
     }
 
-    // ROE (0~10)
+    // ROE (0~8)
     if (ind.roe !== undefined) {
       if (ind.roe >= 15) {
-        score += 10;
+        score += 8;
         reasons.push(`ROE ${ind.roe.toFixed(1)}% — 우수`);
       } else if (ind.roe >= 10) {
-        score += 7;
+        score += 5;
         reasons.push(`ROE ${ind.roe.toFixed(1)}% — 양호`);
       } else if (ind.roe >= 5) {
-        score += 4;
+        score += 3;
         reasons.push(`ROE ${ind.roe.toFixed(1)}% — 보통`);
       }
     }
 
-    // 부채비율 (0~5)
+    // 부채비율 (0~4)
     if (ind.debtRatio !== undefined) {
       if (ind.debtRatio < 100) {
-        score += 5;
+        score += 4;
         reasons.push(`부채비율 ${ind.debtRatio.toFixed(0)}% — 안정적`);
       } else if (ind.debtRatio < 200) {
-        score += 3;
+        score += 2;
         reasons.push(`부채비율 ${ind.debtRatio.toFixed(0)}% — 보통`);
       }
     }
 
-    // 기관/외인 동향 (0~5)
+    // 기관/외인 동향 (0~7) — 세부 분류 반영
     if (ind.foreignNetBuy && ind.institutionNetBuy) {
       score += 5;
       reasons.push('외국인+기관 동시 순매수');
@@ -497,28 +566,46 @@ export class ScreeningService {
       score += 3;
       reasons.push('기관 순매수');
     }
+    // 연기금/투자신탁 추가 보너스 (0~2)
+    if (ind.fundNetBuy) {
+      score += 1;
+      reasons.push('연기금 순매수');
+    }
+    if (ind.trustNetBuy) {
+      score += 1;
+      reasons.push('투자신탁 순매수');
+    }
 
-    return { fundamentalScore: Math.min(score, 30), fundReasons: reasons };
+    // 융자잔고 리스크 감점 (0~-3)
+    if (ind.loanBalanceRate !== undefined && ind.loanBalanceRate > 10) {
+      score -= 3;
+      reasons.push(`융자잔고 ${ind.loanBalanceRate.toFixed(1)}% — 레버리지 과다 주의`);
+    } else if (ind.loanBalanceRate !== undefined && ind.loanBalanceRate > 5) {
+      score -= 1;
+      reasons.push(`융자잔고 ${ind.loanBalanceRate.toFixed(1)}%`);
+    }
+
+    return { fundamentalScore: Math.max(Math.min(score, 30), 0), fundReasons: reasons };
   }
 
-  /** 해외 펀더멘탈 점수 (0~15, PER만 활용 가능) */
+  /** 해외 펀더멘탈 점수 (0~20, PER + PBR) */
   private scoreOverseasFundamental(ind: StockIndicatorDetail): { fundamentalScore: number; fundReasons: string[] } {
     let score = 0;
     const reasons: string[] = [];
 
-    // PER (0~15) — 해외는 PER만 조건검색 API에서 제공
+    // PER (0~13)
     if (ind.per !== undefined && ind.per > 0) {
       if (ind.per <= 10) {
-        score += 15;
+        score += 13;
         reasons.push(`PER ${ind.per.toFixed(1)} — 저평가`);
       } else if (ind.per <= 15) {
-        score += 12;
+        score += 10;
         reasons.push(`PER ${ind.per.toFixed(1)} — 양호`);
       } else if (ind.per <= 25) {
-        score += 8;
+        score += 7;
         reasons.push(`PER ${ind.per.toFixed(1)} — 적정`);
       } else if (ind.per <= 40) {
-        score += 4;
+        score += 3;
         reasons.push(`PER ${ind.per.toFixed(1)} — 다소 고평가`);
       } else {
         score += 0;
@@ -526,7 +613,21 @@ export class ScreeningService {
       }
     }
 
-    return { fundamentalScore: Math.min(score, 15), fundReasons: reasons };
+    // PBR (0~7) — 해외 현재가상세 API에서 제공
+    if (ind.pbr !== undefined && ind.pbr > 0) {
+      if (ind.pbr < 1.0) {
+        score += 7;
+        reasons.push(`PBR ${ind.pbr.toFixed(2)} — 자산가치 대비 저평가`);
+      } else if (ind.pbr < 3.0) {
+        score += 4;
+        reasons.push(`PBR ${ind.pbr.toFixed(2)} — 적정`);
+      } else if (ind.pbr < 5.0) {
+        score += 2;
+        reasons.push(`PBR ${ind.pbr.toFixed(2)} — 다소 고평가`);
+      }
+    }
+
+    return { fundamentalScore: Math.min(score, 20), fundReasons: reasons };
   }
 
   /** 모멘텀 점수 (0~30) */
@@ -534,39 +635,52 @@ export class ScreeningService {
     let score = 0;
     const reasons: string[] = [];
 
-    // 등락률 (0~10)
+    // 등락률 (0~8)
     if (cand.changeRate >= 1 && cand.changeRate <= 5) {
-      score += 10;
+      score += 8;
       reasons.push(`등락률 +${cand.changeRate.toFixed(1)}% — 완만한 상승`);
     } else if (cand.changeRate > 5 && cand.changeRate <= 10) {
-      score += 7;
+      score += 6;
       reasons.push(`등락률 +${cand.changeRate.toFixed(1)}% — 강한 상승`);
     } else if (cand.changeRate >= -3 && cand.changeRate < 0) {
-      score += 5;
+      score += 4;
       reasons.push(`등락률 ${cand.changeRate.toFixed(1)}% — 소폭 하락 (매수 기회)`);
     } else if (cand.changeRate > 10) {
-      score += 3;
+      score += 2;
       reasons.push(`등락률 +${cand.changeRate.toFixed(1)}% — 급등 주의`);
     }
 
-    // 거래량 급증 (0~10)
-    if (ind.volumeSurgeRate !== undefined) {
-      if (ind.volumeSurgeRate >= 50 && ind.volumeSurgeRate <= 200) {
+    // 거래량 급증 (0~10) — API 직접 증가율 우선, 없으면 계산값 사용
+    const volRate = ind.volumeIncreaseRate ?? ind.volumeSurgeRate;
+    if (volRate !== undefined) {
+      if (volRate >= 50 && volRate <= 200) {
         score += 10;
-        reasons.push(`거래량 급증 +${ind.volumeSurgeRate.toFixed(0)}% — 수급 호전`);
-      } else if (ind.volumeSurgeRate >= 20) {
+        reasons.push(`거래량 급증 +${volRate.toFixed(0)}% — 수급 호전`);
+      } else if (volRate >= 20) {
         score += 6;
-        reasons.push(`거래량 증가 +${ind.volumeSurgeRate.toFixed(0)}%`);
-      } else if (ind.volumeSurgeRate > 200) {
+        reasons.push(`거래량 증가 +${volRate.toFixed(0)}%`);
+      } else if (volRate > 200) {
         score += 5;
-        reasons.push(`거래량 폭증 +${ind.volumeSurgeRate.toFixed(0)}% — 과열 주의`);
+        reasons.push(`거래량 폭증 +${volRate.toFixed(0)}% — 과열 주의`);
       }
     }
 
-    // 가격 모멘텀: MA20 > MA60 (0~10)
+    // 비정상 거래량 감지 (현재 / 평균 거래량 비율)
+    if (ind.volumeToAvgRatio !== undefined && ind.volumeToAvgRatio > 3) {
+      score += 2;
+      reasons.push(`평균 대비 거래량 ${ind.volumeToAvgRatio.toFixed(1)}배 — 이례적 거래`);
+    }
+
+    // 가격 모멘텀: MA20 > MA60 (0~8)
     if (ind.ma20 && ind.ma60 && ind.ma20 > ind.ma60) {
-      score += 10;
+      score += 8;
       reasons.push('MA20 > MA60 — 중기 상승 모멘텀');
+    }
+
+    // 가격 위치 보너스: 250일 저점 근접 (0~2)
+    if (ind.d250LowRate !== undefined && ind.d250LowRate <= 20) {
+      score += 2;
+      reasons.push(`250일 저점 대비 +${ind.d250LowRate.toFixed(0)}% — 바닥권 근접`);
     }
 
     return { momentumScore: Math.min(score, 30), momentumReasons: reasons };
@@ -679,20 +793,25 @@ export class ScreeningService {
       let score = 0;
       const parts: string[] = [];
       if (ind.rsi14 !== undefined && ind.rsi14 < 35) {
-        score += 40;
+        score += 35;
         parts.push(`RSI ${ind.rsi14.toFixed(0)} 과매도`);
       }
       if (ind.ma20 && cand.currentPrice < ind.ma20) {
-        score += 25;
+        score += 20;
         parts.push('MA20 아래 (평균 회귀 기대)');
       }
       if (cand.changeRate < -2) {
-        score += 20;
+        score += 15;
         parts.push(`등락률 ${cand.changeRate.toFixed(1)}%`);
       }
       if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 30) {
         score += 15;
         parts.push('거래량 증가 (반등 신호)');
+      }
+      // 250일 저점 근접 시 반등 매수 기대치 상승
+      if (ind.d250LowRate !== undefined && ind.d250LowRate <= 15) {
+        score += 15;
+        parts.push(`250일 저점 근접 (+${ind.d250LowRate.toFixed(0)}%)`);
       }
       if (score >= 40) {
         strategies.push({
@@ -709,16 +828,26 @@ export class ScreeningService {
       let score = 0;
       const parts: string[] = [];
       if (ind.rsi14 !== undefined && ind.rsi14 < 25) {
-        score += 50;
+        score += 45;
         parts.push(`RSI ${ind.rsi14.toFixed(0)} 극단적 과매도`);
       }
       if (ind.volumeSurgeRate !== undefined && ind.volumeSurgeRate >= 100) {
-        score += 30;
+        score += 25;
         parts.push(`거래량 폭증 +${ind.volumeSurgeRate.toFixed(0)}%`);
       }
       if (cand.changeRate < -5) {
-        score += 20;
+        score += 15;
         parts.push(`급락 ${cand.changeRate.toFixed(1)}%`);
+      }
+      // 공매도 불가 종목은 하방 방어력이 있어 보수적 전략에 유리
+      if (ind.shortSellable === false) {
+        score += 10;
+        parts.push('공매도 불가 (하방 방어)');
+      }
+      // 융자잔고 낮으면 레버리지 청산 리스크 적음
+      if (ind.loanBalanceRate !== undefined && ind.loanBalanceRate < 3) {
+        score += 5;
+        parts.push('융자잔고 안정');
       }
       if (score >= 50) {
         strategies.push({
@@ -735,20 +864,30 @@ export class ScreeningService {
       let score = 0;
       const parts: string[] = [];
       if (ind.priceAboveMa200) {
-        score += 40;
+        score += 35;
         parts.push('MA200 위 장기 상승 추세');
       }
       if (ind.rsi14 !== undefined && ind.rsi14 >= 30 && ind.rsi14 <= 55) {
-        score += 25;
+        score += 20;
         parts.push(`RSI ${ind.rsi14.toFixed(0)} 적정 구간`);
       }
       if (ind.per !== undefined && ind.per > 0 && ind.per <= 20) {
-        score += 20;
+        score += 15;
         parts.push(`PER ${ind.per.toFixed(1)} 합리적`);
       }
       if (!isOverseas && ind.foreignNetBuy) {
         score += 15;
         parts.push('외국인 순매수');
+      }
+      // 연기금 매수 시 장기 우상향 기대
+      if (!isOverseas && ind.fundNetBuy) {
+        score += 10;
+        parts.push('연기금 순매수 — 장기 우상향 시그널');
+      }
+      // 시가총액이 충분히 큰 종목이 무한매수에 적합
+      if (cand.marketCap > 0 && cand.marketCap > 10000) {
+        score += 5;
+        parts.push('대형주');
       }
       if (score >= 40) {
         strategies.push({

@@ -20,15 +20,33 @@ export interface DomesticPriceOutput {
   hts_kor_isnm?: string; // 종목명
   per?: string; // PER
   pbr?: string; // PBR
+  eps?: string; // EPS
+  bps?: string; // BPS
   hts_frgn_ehrt?: string; // 외국인 소진율
   frgn_ntby_qty?: string; // 외국인 순매수 수량
   pgtr_ntby_qty?: string; // 프로그램매매 순매수 수량
   acml_tr_pbmn?: string; // 누적 거래대금
   w52_hgpr?: string; // 52주 최고가
   w52_lwpr?: string; // 52주 최저가
+  d250_hgpr?: string; // 250일 최고가
+  d250_lwpr?: string; // 250일 최저가
+  d250_hgpr_vrss_prpr_rate?: string; // 250일 최고가 대비 현재가 비율
+  d250_lwpr_vrss_prpr_rate?: string; // 250일 최저가 대비 현재가 비율
+  stck_dryy_hgpr?: string; // 연중 최고가
+  stck_dryy_lwpr?: string; // 연중 최저가
+  dryy_hgpr_vrss_prpr_rate?: string; // 연중 최고가 대비 현재가 비율
+  dryy_lwpr_vrss_prpr_rate?: string; // 연중 최저가 대비 현재가 비율
+  vol_tnrt?: string; // 거래량 회전율
+  cpfn?: string; // 자본금
+  hts_avls?: string; // HTS 시가총액
+  lstn_stcn?: string; // 상장 주수
+  whol_loan_rmnd_rate?: string; // 전체 융자 잔고 비율
+  ssts_yn?: string; // 공매도 가능 여부
+  apprch_rate?: string; // 접근도
   invt_caful_yn?: string; // 투자유의여부
   mrkt_warn_cls_code?: string; // 시장경고코드 (00:없음, 01:투자주의, 02:투자경고, 03:투자위험)
   short_over_yn?: string; // 단기과열여부
+  frgn_hldn_qty?: string; // 외국인 보유 수량
 }
 
 /** 국내 주문 응답 */
@@ -64,9 +82,21 @@ export interface OverseasPriceOutput {
   bpsx?: string;  // BPS
   h52p?: string;  // 52주 최고가
   l52p?: string;  // 52주 최저가
+  h52d?: string;  // 52주 최고일자
+  l52d?: string;  // 52주 최저일자
   pvol?: string;  // 전일거래량
+  pamt?: string;  // 전일거래대금
   tomv?: string;  // 시가총액
+  shar?: string;  // 상장주수
   e_icod?: string; // 업종(섹터)
+  e_ordyn?: string; // 거래가능여부
+  e_hogau?: string; // 호가단위
+  e_parp?: string; // 액면가
+  base?: string;  // 전일종가
+  curr?: string;  // 통화
+  t_xprc?: string; // 원환산당일가격
+  t_rate?: string; // 당일환율
+  etyp_nm?: string; // ETP 분류명
 }
 
 /** 해외 주문 응답 */
@@ -101,16 +131,38 @@ export interface StockPriceResult {
   prevDayVolumeRate?: number; // 전일 대비 거래량 비율 (%)
   per?: number; // PER
   pbr?: number; // PBR
-  eps?: number; // EPS — 해외 현재가상세 API에서만 제공 (국내는 재무비율 API 사용)
+  eps?: number; // EPS
+  bps?: number; // BPS
   foreignHoldRate?: number; // 외국인 소진율 (%) — 국내만
   foreignNetBuyQty?: number; // 외국인 순매수 수량 — 국내만
   programNetBuyQty?: number; // 프로그램매매 순매수 수량 — 국내만
   tradingValue?: number; // 누적 거래대금 — 국내만
   w52High?: number; // 52주 최고가
   w52Low?: number; // 52주 최저가
+  // 가격 위치 지표
+  d250High?: number; // 250일 최고가 — 국내만
+  d250Low?: number; // 250일 최저가 — 국내만
+  d250HighRate?: number; // 250일 최고가 대비 현재가 비율 (%) — 국내만
+  d250LowRate?: number; // 250일 최저가 대비 현재가 비율 (%) — 국내만
+  yearHigh?: number; // 연중 최고가 — 국내만
+  yearLow?: number; // 연중 최저가 — 국내만
+  yearHighRate?: number; // 연중 최고가 대비 현재가 비율 (%) — 국내만
+  yearLowRate?: number; // 연중 최저가 대비 현재가 비율 (%) — 국내만
+  // 시가총액/유통 정보
+  marketCap?: number; // 시가총액 — 국내: hts_avls, 해외: tomv
+  listedShares?: number; // 상장 주수
+  // 리스크 지표
+  loanBalanceRate?: number; // 융자잔고 비율 (%) — 국내만
+  shortSellable?: boolean; // 공매도 가능 여부 — 국내만
   investCautionYn?: boolean; // 투자유의여부 — 국내만
   marketWarnCode?: string; // 시장경고코드 — 국내만
   shortOverheatYn?: boolean; // 단기과열여부 — 국내만
+  // 해외 추가 필드
+  prevDayVolume?: number; // 전일거래량 — 해외만
+  prevDayTradingValue?: number; // 전일거래대금 — 해외만
+  sector?: string; // 업종/섹터 — 해외만
+  exchangeRate?: number; // 당일환율 — 해외만
+  krwPrice?: number; // 원환산 당일가격 — 해외만
 }
 
 /** 주문 결과 */
