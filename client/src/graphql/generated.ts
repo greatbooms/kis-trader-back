@@ -193,6 +193,7 @@ export type Query = {
   quote?: Maybe<StockPriceType>;
   riskState: RiskStateType;
   runScreeningNow: Scalars["Boolean"]["output"];
+  screeningDateSummaries: Array<ScreeningDateSummary>;
   screeningDates: Array<Scalars["String"]["output"]>;
   screeningSettings: ScreeningSettingsType;
   searchStocks: Array<StockSearchResult>;
@@ -235,6 +236,10 @@ export type QueryRiskStateArgs = {
 export type QueryRunScreeningNowArgs = {
   exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
   market: Scalars["String"]["input"];
+};
+
+export type QueryScreeningDateSummariesArgs = {
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
 };
 
 export type QueryScreeningDatesArgs = {
@@ -321,6 +326,21 @@ export type ScreeningCountrySetting = {
   country: Scalars["String"]["output"];
   enabled: Scalars["Boolean"]["output"];
   label: Scalars["String"]["output"];
+};
+
+export type ScreeningCountrySummary = {
+  __typename?: "ScreeningCountrySummary";
+  avgScore: Scalars["Float"]["output"];
+  count: Scalars["Int"]["output"];
+  country: Scalars["String"]["output"];
+  label: Scalars["String"]["output"];
+};
+
+export type ScreeningDateSummary = {
+  __typename?: "ScreeningDateSummary";
+  countries: Array<ScreeningCountrySummary>;
+  date: Scalars["String"]["output"];
+  totalCount: Scalars["Int"]["output"];
 };
 
 export type ScreeningSettingsType = {
@@ -665,6 +685,26 @@ export type GetScreeningDatesQueryVariables = Exact<{
 export type GetScreeningDatesQuery = {
   __typename?: "Query";
   screeningDates: Array<string>;
+};
+
+export type GetScreeningDateSummariesQueryVariables = Exact<{
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+}>;
+
+export type GetScreeningDateSummariesQuery = {
+  __typename?: "Query";
+  screeningDateSummaries: Array<{
+    __typename?: "ScreeningDateSummary";
+    date: string;
+    totalCount: number;
+    countries: Array<{
+      __typename?: "ScreeningCountrySummary";
+      country: string;
+      label: string;
+      count: number;
+      avgScore: number;
+    }>;
+  }>;
 };
 
 export type GetScreeningSettingsQueryVariables = Exact<{
@@ -1557,6 +1597,108 @@ export type GetScreeningDatesLazyQueryHookResult = ReturnType<
 >;
 export type GetScreeningDatesSuspenseQueryHookResult = ReturnType<
   typeof useGetScreeningDatesSuspenseQuery
+>;
+export const GetScreeningDateSummariesDocument = gql`
+  query GetScreeningDateSummaries($limit: Float) {
+    screeningDateSummaries(limit: $limit) {
+      date
+      totalCount
+      countries {
+        country
+        label
+        count
+        avgScore
+      }
+    }
+  }
+`;
+
+/**
+ * __useGetScreeningDateSummariesQuery__
+ *
+ * To run a query within a React component, call `useGetScreeningDateSummariesQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetScreeningDateSummariesQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetScreeningDateSummariesQuery({
+ *   variables: {
+ *      limit: // value for 'limit'
+ *   },
+ * });
+ */
+export function useGetScreeningDateSummariesQuery(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >(GetScreeningDateSummariesDocument, options);
+}
+export function useGetScreeningDateSummariesLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >(GetScreeningDateSummariesDocument, options);
+}
+// @ts-ignore
+export function useGetScreeningDateSummariesSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningDateSummariesQuery,
+  GetScreeningDateSummariesQueryVariables
+>;
+export function useGetScreeningDateSummariesSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningDateSummariesQuery,
+        GetScreeningDateSummariesQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetScreeningDateSummariesQuery | undefined,
+  GetScreeningDateSummariesQueryVariables
+>;
+export function useGetScreeningDateSummariesSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetScreeningDateSummariesQuery,
+        GetScreeningDateSummariesQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetScreeningDateSummariesQuery,
+    GetScreeningDateSummariesQueryVariables
+  >(GetScreeningDateSummariesDocument, options);
+}
+export type GetScreeningDateSummariesQueryHookResult = ReturnType<
+  typeof useGetScreeningDateSummariesQuery
+>;
+export type GetScreeningDateSummariesLazyQueryHookResult = ReturnType<
+  typeof useGetScreeningDateSummariesLazyQuery
+>;
+export type GetScreeningDateSummariesSuspenseQueryHookResult = ReturnType<
+  typeof useGetScreeningDateSummariesSuspenseQuery
 >;
 export const GetScreeningSettingsDocument = gql`
   query GetScreeningSettings {

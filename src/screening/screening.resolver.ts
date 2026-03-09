@@ -1,7 +1,7 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
-import { StockRecommendationType, ScreeningSettingsType, UpdateScreeningSettingsInput } from './dto';
+import { StockRecommendationType, ScreeningSettingsType, UpdateScreeningSettingsInput, ScreeningDateSummary } from './dto';
 import { PrismaService } from '../prisma.service';
 
 const SCREENING_SETTINGS_KEY = 'screening-countries';
@@ -65,6 +65,13 @@ export class ScreeningResolver {
     @Args('limit', { nullable: true, defaultValue: 10 }) limit?: number,
   ): Promise<string[]> {
     return this.screeningService.getScreeningDates(limit);
+  }
+
+  @Query(() => [ScreeningDateSummary])
+  async screeningDateSummaries(
+    @Args('limit', { nullable: true, defaultValue: 10 }) limit?: number,
+  ): Promise<ScreeningDateSummary[]> {
+    return this.screeningService.getScreeningDateSummaries(limit);
   }
 
   @Query(() => Boolean)

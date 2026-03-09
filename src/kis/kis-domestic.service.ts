@@ -143,6 +143,7 @@ export class KisDomesticService {
           FID_INPUT_DATE_1: startDate,
           FID_INPUT_DATE_2: currentEndDate,
           FID_PERIOD_DIV_CODE: 'D',
+          FID_ORG_ADJ_PRC: '0',
         },
       );
 
@@ -479,6 +480,7 @@ export class KisDomesticService {
         FUND_STTL_ICLD_YN: 'N',
         FNCG_AMT_AUTO_RDPT_YN: 'N',
         PRCS_DVSN: '00',
+        COST_ICLD_YN: 'N',
         CTX_AREA_FK100: ctxAreaFk100,
         CTX_AREA_NK100: ctxAreaNk100,
       };

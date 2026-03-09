@@ -309,6 +309,19 @@ type ScreeningSettingsType {
   countries: [ScreeningCountrySetting!]!
 }
 
+type ScreeningCountrySummary {
+  country: String!
+  label: String!
+  count: Int!
+  avgScore: Float!
+}
+
+type ScreeningDateSummary {
+  date: String!
+  countries: [ScreeningCountrySummary!]!
+  totalCount: Int!
+}
+
 type Query {
   availableStrategies: [StrategyInfo!]!
   strategyAllocations(market: Market!): [StrategyAllocationType!]!
@@ -331,6 +344,7 @@ type Query {
   searchStocks(keyword: String!, market: Market, limit: Int, exchangeCode: String): [StockSearchResult!]!
   stockRecommendations(date: String, market: String, limit: Float = 20): [StockRecommendationType!]!
   screeningDates(limit: Float = 10): [String!]!
+  screeningDateSummaries(limit: Float = 10): [ScreeningDateSummary!]!
   runScreeningNow(market: String!, exchangeCode: String): Boolean!
   screeningSettings: ScreeningSettingsType!
 }

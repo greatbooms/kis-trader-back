@@ -1,30 +1,40 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { useState, useRef, useCallback, type ReactNode } from 'react'
 
 export function Tooltip({ text, children }: { text: string; children: ReactNode }) {
-  const [show, setShow] = useState(false)
+  const [style, setStyle] = useState<React.CSSProperties | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<'bottom' | 'top'>('bottom')
 
-  useEffect(() => {
-    if (show && ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      setPos(rect.bottom + 80 > window.innerHeight ? 'top' : 'bottom')
-    }
-  }, [show])
+  const show = useCallback(() => {
+    if (!ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    const TOOLTIP_W = 224 // w-56 = 14rem = 224px
+    const GAP = 6
+
+    // vertical: prefer bottom, flip to top if not enough space
+    const goUp = rect.bottom + GAP + 80 > window.innerHeight
+    const top = goUp ? rect.top - GAP : rect.bottom + GAP
+
+    // horizontal: center on trigger, clamp to viewport
+    let left = rect.left + rect.width / 2 - TOOLTIP_W / 2
+    left = Math.max(8, Math.min(left, window.innerWidth - TOOLTIP_W - 8))
+
+    setStyle({ position: 'fixed', top, left, width: TOOLTIP_W, zIndex: 9999 })
+  }, [])
+
+  const hide = useCallback(() => setStyle(null), [])
 
   return (
     <div
       ref={ref}
       className="relative inline-flex"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
+      onMouseEnter={show}
+      onMouseLeave={hide}
     >
       {children}
-      {show && (
+      {style && (
         <div
-          className={`absolute z-50 left-1/2 -translate-x-1/2 w-56 rounded-lg bg-foreground text-background text-xs leading-relaxed p-2.5 shadow-lg pointer-events-none ${
-            pos === 'bottom' ? 'top-full mt-1.5' : 'bottom-full mb-1.5'
-          }`}
+          style={style}
+          className="rounded-lg bg-foreground text-background text-xs leading-relaxed p-2.5 shadow-lg pointer-events-none"
         >
           {text}
         </div>

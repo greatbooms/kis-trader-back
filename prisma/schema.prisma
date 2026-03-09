@@ -60,42 +60,12 @@ model WatchStock {
   maxCycles        Int      @default(40) @map("max_cycles")
   stopLossRate     Decimal  @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
   maxPortfolioRate Decimal  @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
-  strategyParams   Json?    @map("strategy_params")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
+  strategyParams   Json?    @map("strategy_params")
 
   @@unique([market, stockCode])
   @@map("watch_stocks")
-}
-
-enum Market {
-  DOMESTIC
-  OVERSEAS
-}
-
-enum Side {
-  BUY
-  SELL
-}
-
-enum OrderType {
-  MARKET
-  LIMIT
-  LOC
-}
-
-enum OrderStatus {
-  PENDING
-  FILLED
-  PARTIAL
-  CANCELLED
-  FAILED
-}
-
-enum MarketRegime {
-  TRENDING_UP
-  SIDEWAYS
-  TRENDING_DOWN
 }
 
 model StrategyExecution {
@@ -129,18 +99,18 @@ model MarketRegimeSnapshot {
 }
 
 model RiskSnapshot {
-  id              String   @id @default(uuid())
-  market          Market
-  snapshotDate    String   @map("snapshot_date")
-  portfolioValue  Decimal  @map("portfolio_value") @db.Decimal(16, 4)
-  cashBalance     Decimal  @map("cash_balance") @db.Decimal(16, 4)
-  dailyPnl        Decimal  @map("daily_pnl") @db.Decimal(16, 4)
-  dailyPnlRate    Decimal  @map("daily_pnl_rate") @db.Decimal(8, 6)
-  drawdown        Decimal  @db.Decimal(8, 6)
-  peakValue       Decimal  @map("peak_value") @db.Decimal(16, 4)
-  positionCount   Int      @map("position_count")
-  investedRate    Decimal  @map("invested_rate") @db.Decimal(8, 6)
-  createdAt       DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  market         Market
+  snapshotDate   String   @map("snapshot_date")
+  portfolioValue Decimal  @map("portfolio_value") @db.Decimal(16, 4)
+  cashBalance    Decimal  @map("cash_balance") @db.Decimal(16, 4)
+  dailyPnl       Decimal  @map("daily_pnl") @db.Decimal(16, 4)
+  dailyPnlRate   Decimal  @map("daily_pnl_rate") @db.Decimal(8, 6)
+  drawdown       Decimal  @db.Decimal(8, 6)
+  peakValue      Decimal  @map("peak_value") @db.Decimal(16, 4)
+  positionCount  Int      @map("position_count")
+  investedRate   Decimal  @map("invested_rate") @db.Decimal(8, 6)
+  createdAt      DateTime @default(now()) @map("created_at")
 
   @@unique([market, snapshotDate])
   @@map("risk_snapshots")
@@ -168,32 +138,26 @@ model KisToken {
   @@map("kis_tokens")
 }
 
-enum SimulationStatus {
-  RUNNING
-  PAUSED
-  COMPLETED
-}
-
 model StockRecommendation {
-  id             String   @id @default(uuid())
-  screeningDate  String   @map("screening_date")
-  market         Market
-  exchangeCode   String   @map("exchange_code")
-  stockCode      String   @map("stock_code")
-  stockName      String   @map("stock_name")
-  totalScore     Decimal  @map("total_score") @db.Decimal(6, 2)
-  technicalScore Decimal  @map("technical_score") @db.Decimal(6, 2)
-  fundamentalScore Decimal @map("fundamental_score") @db.Decimal(6, 2)
-  momentumScore  Decimal  @map("momentum_score") @db.Decimal(6, 2)
-  rank           Int
-  reasons        Json
-  indicators     Json
-  suggestedStrategies Json? @map("suggested_strategies")
-  currentPrice   Decimal  @map("current_price") @db.Decimal(16, 4)
-  changeRate     Decimal  @map("change_rate") @db.Decimal(8, 4)
-  volume         BigInt   @default(0)
-  marketCap      BigInt   @default(0) @map("market_cap")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id                  String   @id @default(uuid())
+  screeningDate       String   @map("screening_date")
+  market              Market
+  exchangeCode        String   @map("exchange_code")
+  stockCode           String   @map("stock_code")
+  stockName           String   @map("stock_name")
+  totalScore          Decimal  @map("total_score") @db.Decimal(6, 2)
+  technicalScore      Decimal  @map("technical_score") @db.Decimal(6, 2)
+  fundamentalScore    Decimal  @map("fundamental_score") @db.Decimal(6, 2)
+  momentumScore       Decimal  @map("momentum_score") @db.Decimal(6, 2)
+  rank                Int
+  reasons             Json
+  indicators          Json
+  currentPrice        Decimal  @map("current_price") @db.Decimal(16, 4)
+  changeRate          Decimal  @map("change_rate") @db.Decimal(8, 4)
+  volume              BigInt   @default(0)
+  marketCap           BigInt   @default(0) @map("market_cap")
+  createdAt           DateTime @default(now()) @map("created_at")
+  suggestedStrategies Json?    @map("suggested_strategies")
 
   @@unique([screeningDate, market, stockCode])
   @@index([screeningDate, market])
@@ -209,43 +173,41 @@ model AppSetting {
 }
 
 model SimulationSession {
-  id              String           @id @default(uuid())
-  name            String
-  description     String?
-  market          Market
-  countryCode     String?          @map("country_code")
-  strategyName    String           @map("strategy_name")
-  status          SimulationStatus @default(RUNNING)
-  initialCapital  Decimal          @map("initial_capital") @db.Decimal(16, 4)
-  currentCash     Decimal          @map("current_cash") @db.Decimal(16, 4)
-  startedAt       DateTime         @default(now()) @map("started_at")
-  stoppedAt       DateTime?        @map("stopped_at")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
-
-  watchStocks     SimulationWatchStock[]
-  trades          SimulationTrade[]
-  positions       SimulationPosition[]
-  snapshots       SimulationSnapshot[]
+  id             String                 @id @default(uuid())
+  name           String
+  description    String?
+  market         Market
+  strategyName   String                 @map("strategy_name")
+  status         SimulationStatus       @default(RUNNING)
+  initialCapital Decimal                @map("initial_capital") @db.Decimal(16, 4)
+  currentCash    Decimal                @map("current_cash") @db.Decimal(16, 4)
+  startedAt      DateTime               @default(now()) @map("started_at")
+  stoppedAt      DateTime?              @map("stopped_at")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  countryCode    String?                @map("country_code")
+  positions      SimulationPosition[]
+  snapshots      SimulationSnapshot[]
+  trades         SimulationTrade[]
+  watchStocks    SimulationWatchStock[]
 
   @@map("simulation_sessions")
 }
 
 model SimulationWatchStock {
-  id               String   @id @default(uuid())
-  sessionId        String   @map("session_id")
+  id               String            @id @default(uuid())
+  sessionId        String            @map("session_id")
   market           Market
-  exchangeCode     String?  @map("exchange_code")
-  stockCode        String   @map("stock_code")
-  stockName        String   @map("stock_name")
-  quota            Decimal? @db.Decimal(12, 2)
-  cycle            Int      @default(0)
-  maxCycles        Int      @default(40) @map("max_cycles")
-  stopLossRate     Decimal  @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
-  maxPortfolioRate Decimal  @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
-  strategyParams   Json?    @map("strategy_params")
-  isActive         Boolean  @default(true) @map("is_active")
-
+  exchangeCode     String?           @map("exchange_code")
+  stockCode        String            @map("stock_code")
+  stockName        String            @map("stock_name")
+  quota            Decimal?          @db.Decimal(12, 2)
+  cycle            Int               @default(0)
+  maxCycles        Int               @default(40) @map("max_cycles")
+  stopLossRate     Decimal           @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
+  maxPortfolioRate Decimal           @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
+  strategyParams   Json?             @map("strategy_params")
+  isActive         Boolean           @default(true) @map("is_active")
   session          SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, stockCode])
@@ -253,40 +215,38 @@ model SimulationWatchStock {
 }
 
 model SimulationTrade {
-  id            String   @id @default(uuid())
-  sessionId     String   @map("session_id")
-  market        Market
-  exchangeCode  String?  @map("exchange_code")
-  stockCode     String   @map("stock_code")
-  stockName     String   @map("stock_name")
-  side          Side
-  quantity      Int
-  price         Decimal  @db.Decimal(16, 4)
-  totalAmount   Decimal  @map("total_amount") @db.Decimal(16, 4)
-  strategyName  String?  @map("strategy_name")
-  reason        String?
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  session       SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id           String            @id @default(uuid())
+  sessionId    String            @map("session_id")
+  market       Market
+  exchangeCode String?           @map("exchange_code")
+  stockCode    String            @map("stock_code")
+  stockName    String            @map("stock_name")
+  side         Side
+  quantity     Int
+  price        Decimal           @db.Decimal(16, 4)
+  totalAmount  Decimal           @map("total_amount") @db.Decimal(16, 4)
+  strategyName String?           @map("strategy_name")
+  reason       String?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  session      SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("simulation_trades")
 }
 
 model SimulationPosition {
-  id            String   @id @default(uuid())
-  sessionId     String   @map("session_id")
+  id            String            @id @default(uuid())
+  sessionId     String            @map("session_id")
   market        Market
-  exchangeCode  String?  @map("exchange_code")
-  stockCode     String   @map("stock_code")
-  stockName     String   @map("stock_name")
+  exchangeCode  String?           @map("exchange_code")
+  stockCode     String            @map("stock_code")
+  stockName     String            @map("stock_name")
   quantity      Int
-  avgPrice      Decimal  @map("avg_price") @db.Decimal(16, 4)
-  currentPrice  Decimal  @map("current_price") @db.Decimal(16, 4)
-  totalInvested Decimal  @map("total_invested") @db.Decimal(16, 4)
-  profitLoss    Decimal  @map("profit_loss") @db.Decimal(16, 4)
-  profitRate    Decimal  @map("profit_rate") @db.Decimal(8, 6)
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
+  avgPrice      Decimal           @map("avg_price") @db.Decimal(16, 4)
+  currentPrice  Decimal           @map("current_price") @db.Decimal(16, 4)
+  totalInvested Decimal           @map("total_invested") @db.Decimal(16, 4)
+  profitLoss    Decimal           @map("profit_loss") @db.Decimal(16, 4)
+  profitRate    Decimal           @map("profit_rate") @db.Decimal(8, 6)
+  updatedAt     DateTime          @updatedAt @map("updated_at")
   session       SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, stockCode])
@@ -294,22 +254,57 @@ model SimulationPosition {
 }
 
 model SimulationSnapshot {
-  id              String   @id @default(uuid())
-  sessionId       String   @map("session_id")
-  snapshotDate    String   @map("snapshot_date")
-  portfolioValue  Decimal  @map("portfolio_value") @db.Decimal(16, 4)
-  cashBalance     Decimal  @map("cash_balance") @db.Decimal(16, 4)
-  totalValue      Decimal  @map("total_value") @db.Decimal(16, 4)
-  dailyPnl        Decimal  @map("daily_pnl") @db.Decimal(16, 4)
-  dailyPnlRate    Decimal  @map("daily_pnl_rate") @db.Decimal(8, 6)
-  drawdown        Decimal  @db.Decimal(8, 6)
-  peakValue       Decimal  @map("peak_value") @db.Decimal(16, 4)
-  positionCount   Int      @map("position_count")
-  tradeCount      Int      @map("trade_count")
-  createdAt       DateTime @default(now()) @map("created_at")
-
-  session         SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id             String            @id @default(uuid())
+  sessionId      String            @map("session_id")
+  snapshotDate   String            @map("snapshot_date")
+  portfolioValue Decimal           @map("portfolio_value") @db.Decimal(16, 4)
+  cashBalance    Decimal           @map("cash_balance") @db.Decimal(16, 4)
+  totalValue     Decimal           @map("total_value") @db.Decimal(16, 4)
+  dailyPnl       Decimal           @map("daily_pnl") @db.Decimal(16, 4)
+  dailyPnlRate   Decimal           @map("daily_pnl_rate") @db.Decimal(8, 6)
+  drawdown       Decimal           @db.Decimal(8, 6)
+  peakValue      Decimal           @map("peak_value") @db.Decimal(16, 4)
+  positionCount  Int               @map("position_count")
+  tradeCount     Int               @map("trade_count")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  session        SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, snapshotDate])
   @@map("simulation_snapshots")
+}
+
+enum Market {
+  DOMESTIC
+  OVERSEAS
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  LOC
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  PARTIAL
+  CANCELLED
+  FAILED
+}
+
+enum MarketRegime {
+  TRENDING_UP
+  SIDEWAYS
+  TRENDING_DOWN
+}
+
+enum SimulationStatus {
+  RUNNING
+  PAUSED
+  COMPLETED
 }

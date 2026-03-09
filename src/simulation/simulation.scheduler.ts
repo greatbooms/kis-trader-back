@@ -7,6 +7,15 @@ import { PrismaService } from '../prisma.service';
 import { SimulationStatus, Market } from '@prisma/client';
 import { MARKET_HOURS } from '../kis/types/kis-config.types';
 
+/** 국가코드 → 대표 거래소코드 (MARKET_HOURS 키) */
+const COUNTRY_EXCHANGE_MAP: Record<string, string> = {
+  US: 'NASD',
+  HK: 'SEHK',
+  CN: 'SHAA',
+  JP: 'TKSE',
+  VN: 'HASE',
+};
+
 @Injectable()
 export class SimulationScheduler implements OnModuleInit {
   private readonly logger = new Logger(SimulationScheduler.name);
@@ -113,7 +122,6 @@ export class SimulationScheduler implements OnModuleInit {
   }
 
   private async executeSimulationsOverseas(): Promise<void> {
-    // 모든 해외 거래소 중 하나라도 열려있으면 실행
     const overseasExchanges = Object.keys(MARKET_HOURS).filter((ex) => ex !== 'KRX');
     const anyOpen = overseasExchanges.some((ex) => this.tradingScheduler.isMarketOpen(ex));
     if (!anyOpen) return;
@@ -132,6 +140,12 @@ export class SimulationScheduler implements OnModuleInit {
 
       for (const session of sessions) {
         try {
+          // 해외 세션: 세션의 국가코드로 거래소 장 오픈 여부 확인
+          if (market === Market.OVERSEAS) {
+            const exchangeCode = COUNTRY_EXCHANGE_MAP[session.countryCode || ''] || 'NASD';
+            if (!this.tradingScheduler.isMarketOpen(exchangeCode)) continue;
+          }
+
           await this.simulationService.updatePositionPrices(session.id);
           await this.simulationService.executeSimulationTick(session.id);
         } catch (e) {

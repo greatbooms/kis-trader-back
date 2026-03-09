@@ -149,6 +149,58 @@ export class ScreeningService {
     return results.map((r) => r.screeningDate);
   }
 
+  /** 날짜별 국가 요약 (날짜 목록 + 각 날짜의 국가별 종목 수/평균점수) */
+  async getScreeningDateSummaries(limit = 10) {
+    const dates = await this.getScreeningDates(limit);
+    if (dates.length === 0) return [];
+
+    const rows = await this.prisma.stockRecommendation.groupBy({
+      by: ['screeningDate', 'exchangeCode'],
+      where: { screeningDate: { in: dates } },
+      _count: true,
+      _avg: { totalScore: true },
+    });
+
+    const exchangeToCountry: Record<string, { code: string; label: string }> = {
+      KRX: { code: 'KR', label: '한국' },
+      NASD: { code: 'US', label: '미국' },
+      NYSE: { code: 'US', label: '미국' },
+      AMEX: { code: 'US', label: '미국' },
+      SEHK: { code: 'HK', label: '홍콩' },
+      SHAA: { code: 'CN', label: '중국' },
+      SZAA: { code: 'CN', label: '중국' },
+      TKSE: { code: 'JP', label: '일본' },
+      HASE: { code: 'VN', label: '베트남' },
+      VNSE: { code: 'VN', label: '베트남' },
+    };
+
+    return dates.map((date) => {
+      const dateRows = rows.filter((r) => r.screeningDate === date);
+      // 국가별로 합산
+      const countryMap = new Map<string, { label: string; count: number; totalScore: number }>();
+      for (const row of dateRows) {
+        const country = exchangeToCountry[row.exchangeCode] || { code: row.exchangeCode, label: row.exchangeCode };
+        const existing = countryMap.get(country.code) || { label: country.label, count: 0, totalScore: 0 };
+        existing.count += row._count;
+        existing.totalScore += (row._avg.totalScore?.toNumber() ?? 0) * row._count;
+        countryMap.set(country.code, existing);
+      }
+
+      const countries = [...countryMap.entries()].map(([code, v]) => ({
+        country: code,
+        label: v.label,
+        count: v.count,
+        avgScore: v.count > 0 ? v.totalScore / v.count : 0,
+      }));
+
+      return {
+        date,
+        countries,
+        totalCount: countries.reduce((sum, c) => sum + c.count, 0),
+      };
+    });
+  }
+
   // ── 국내 후보 수집 ──
 
   private async collectDomesticCandidates(): Promise<ScreeningCandidate[]> {

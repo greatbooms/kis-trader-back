@@ -407,7 +407,9 @@ export class KisOverseasService {
         AUTH: '',
         EXCD: excd,
         NDAY: '0',
-        VOLC: '100000',
+        PRC1: '',
+        PRC2: '',
+        VOL_RANG: '0',
         KEYB: '',
       },
     );
