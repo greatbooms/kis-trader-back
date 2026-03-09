@@ -394,7 +394,11 @@ export class KisOverseasService {
       'HHDFS76410000',
       params,
     );
-    return (res.output2 as any[]) || [];
+    const output = (res.output2 as any[]) || [];
+    if (output.length === 0) {
+      this.logger.debug(`searchStocks(${exchangeCode}) empty response - rt_cd: ${res.rt_cd}, msg1: ${res.msg1}`);
+    }
+    return output;
   }
 
   /** 해외 거래량순위 */
@@ -413,7 +417,11 @@ export class KisOverseasService {
         KEYB: '',
       },
     );
-    return (res.output as any[]) || [];
+    const output = (res.output2 as any[]) || [];
+    if (output.length === 0) {
+      this.logger.debug(`getVolumeRanking(${exchangeCode}) empty response - rt_cd: ${res.rt_cd}, msg1: ${res.msg1}`);
+    }
+    return output;
   }
 
   /** 해외 잔고 조회 */

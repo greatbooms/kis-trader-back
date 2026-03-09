@@ -6,6 +6,19 @@ import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP } from '../kis/types/kis-config.types';
 import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy } from './types';
 
+// 거래소별 최소 시가총액 (단위: 천, 각국 통화) — 약 2000억원 상당
+const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
+  NASD: 150000,     // USD 1.5억 ≈ 2000억원
+  NYSE: 150000,
+  AMEX: 50000,      // USD 5천만 ≈ 675억원 (소형주 거래소)
+  TKSE: 20000000,   // JPY 200억 ≈ 1900억원
+  SEHK: 1200000,    // HKD 12억 ≈ 2100억원
+  SHAA: 1100000,    // CNY 11억 ≈ 2100억원
+  SZAA: 1100000,
+  HASE: 4000000000, // VND 4조 ≈ 2200억원
+  VNSE: 4000000000,
+};
+
 interface ForeignInstitutionDetail {
   foreignNet: number;
   instNet: number;
@@ -205,6 +218,7 @@ export class ScreeningService {
 
   private async collectDomesticCandidates(): Promise<ScreeningCandidate[]> {
     const volumeRank = await this.kisDomestic.getVolumeRanking();
+    this.logger.log(`Domestic volumeRanking returned ${volumeRank.length} items`);
     const candidates: ScreeningCandidate[] = [];
     const seen = new Set<string>();
 
@@ -264,18 +278,23 @@ export class ScreeningService {
     const candidates: ScreeningCandidate[] = [];
     const seen = new Set<string>();
 
-    // 조건검색: 시총 일정 이상, 거래량 일정 이상
-    try {
-      const results = await this.kisOverseas.searchStocks(exchangeCode, {
-        minVolume: 100000,
-        minMarketCap: 1000000, // 시총 10억(단위:천) 이상
-      });
+    const minMcap = MIN_MARKET_CAP_BY_EXCHANGE[exchangeCode] ?? 200000;
 
-      for (const item of results.slice(0, 60)) {
+    // 조건검색: 필터 없이 조회 후 코드에서 필터링 (API 필터는 장중 초반 불안정)
+    try {
+      const results = await this.kisOverseas.searchStocks(exchangeCode, {});
+      this.logger.log(`${exchangeCode} searchStocks returned ${results.length} items`);
+
+      let filtered = 0;
+      for (const item of results) {
         const code = item.symb;
         if (!code || seen.has(code)) continue;
-        seen.add(code);
 
+        const volume = parseInt(item.tvol, 10) || 0;
+        const marketCap = parseInt(item.valx, 10) || 0;
+        if (volume < 100000 || marketCap < minMcap) { filtered++; continue; }
+
+        seen.add(code);
         candidates.push({
           stockCode: code,
           stockName: item.name || code,
@@ -283,12 +302,13 @@ export class ScreeningService {
           market: 'OVERSEAS',
           currentPrice: parseFloat(item.last) || 0,
           changeRate: parseFloat(item.rate) || 0,
-          volume: parseInt(item.tvol, 10) || 0,
-          marketCap: parseInt(item.valx, 10) || 0,
+          volume,
+          marketCap,
           per: parseFloat(item.perx) || undefined,
           eps: parseFloat(item.epsx) || undefined,
         });
       }
+      if (filtered > 0) this.logger.log(`${exchangeCode} searchStocks filtered out ${filtered} items (vol<100k or mcap<${minMcap})`);
     } catch (e) {
       this.logger.warn(`Overseas search failed for ${exchangeCode}: ${e.message}`);
     }
@@ -296,6 +316,7 @@ export class ScreeningService {
     // 거래량순위로 보강
     try {
       const volRank = await this.kisOverseas.getVolumeRanking(exchangeCode);
+      this.logger.log(`${exchangeCode} volumeRanking returned ${volRank.length} items`);
       for (const item of volRank.slice(0, 30)) {
         const code = item.symb;
         if (!code || seen.has(code)) continue;
