@@ -160,6 +160,31 @@ export class SimulationService {
         for (const signal of signals) {
           await this.virtualExecute(sessionId, signal, price.currentPrice);
         }
+
+        // 무한매수법: 매수금액 부족 시 다음 사이클로 누적 (1일 1회만)
+        if (session.strategyName === 'infinite-buy' && !todayTrade) {
+          const params = (ws.strategyParams as Record<string, any>) || {};
+          const hasBuySignal = signals.some((s) => s.side === 'BUY');
+          const perCycleQuota = ws.quota ? Number(ws.quota) / ws.maxCycles : 0;
+
+          if (hasBuySignal) {
+            // 매수 성공 → 누적 리셋
+            if (params.accumulatedQuota) {
+              await this.prisma.simulationWatchStock.update({
+                where: { id: ws.id },
+                data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
+              });
+            }
+          } else if (perCycleQuota > 0 && params.lastAccumulatedDate !== today) {
+            // 매수 불가 + 오늘 첫 시도 → 누적
+            const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
+            await this.prisma.simulationWatchStock.update({
+              where: { id: ws.id },
+              data: { strategyParams: { ...params, accumulatedQuota: newAccumulated, lastAccumulatedDate: today } },
+            });
+            this.logger.log(`[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (can't afford 1 share)`);
+          }
+        }
       } catch (e) {
         this.logger.error(`Simulation tick error for ${ws.stockCode}: ${e.message}`);
       }

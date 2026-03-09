@@ -29,13 +29,13 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '【매수 조건】',
     '- 하루 1회, 장중 실행 (국내 11시, 해외 장 시작 2시간 후)',
     '- 지수(S&P500/KOSPI)가 200일 이동평균선 위일 때만 신규 진입',
-    '- 종목 가격이 200일 이동평균선 위일 때만 신규 진입',
     '- RSI < 30 과매도 구간에서는 매수금액 1.5배 증가',
     '- 금리 급등 시 매수금액 절반으로 축소',
     '',
     '【매수 방식】',
     '- T < 20: Buy1(현재가 지정가) + Buy2(현재가 아래 지정가) 두 건 분할',
     '- T >= 20: Buy2(현재가 아래 지정가)만 실행',
+    '- 매수금액이 1주 가격 미만이면 다음 사이클로 이월, 누적 후 매수',
     '- Buy2 지정가: T<10 -1%, T<20 -2%, T>=20 -3% (일중 변동 내 체결 가능)',
     '- Buy1은 즉시 체결, Buy2는 장중 가격 하락 시 체결',
     '- 미체결 시 장 마감 후 자동 취소, 다음 날 새 가격으로 재주문',
@@ -145,13 +145,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     // --- 개선 C: 종목 선별 필터 ---
     details.stockIndicators = stockIndicators;
-
-    if (!hasPosition && !stockIndicators.currentAboveMA200) {
-      // 신규 진입 + 현재가 < MA200 → 하락 추세, 매수 거부
-      this.logger.log(`[${watchStock.stockCode}] Price below MA200, no new entry`);
-      details.skippedReason = 'price_below_ma200';
-      return signals;
-    }
+    // 종목 MA200 체크 제거: 무한매수법은 하락장에서 분할매수하여 평균단가를 낮추는 전략이므로
+    // 개별 종목 MA200 필터는 전략 취지에 맞지 않음. 지수 MA200만 유지.
 
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
     const maxCyclesReached = T >= watchStock.maxCycles;
@@ -160,7 +155,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     }
 
     // --- 1회 매수금액 ---
-    let adjustedQuota = maxCyclesReached ? 0 : perCycleQuota;
+    const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
+    let adjustedQuota = maxCyclesReached ? 0 : perCycleQuota + accumulatedQuota;
 
     // 개선 E: 금리 급등시 절반
     if (marketCondition.interestRateRising) {
