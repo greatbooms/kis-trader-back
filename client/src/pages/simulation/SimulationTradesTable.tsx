@@ -14,7 +14,7 @@ const PAGE_SIZE = 20
 export function SimulationTradesTable({ sessionId }: SimulationTradesTableProps) {
   const [offset, setOffset] = useState(0)
   const { data, loading } = useGetSimulationTradesQuery({
-    variables: { sessionId, limit: PAGE_SIZE, offset },
+    variables: { input: { sessionId, limit: PAGE_SIZE, offset } },
   })
 
   const trades = data?.simulationTrades ?? []

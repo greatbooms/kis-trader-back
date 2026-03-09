@@ -13,7 +13,7 @@ describe('TradeRecordService', () => {
     position: {
       findMany: jest.fn(),
     },
-    strategyExecution: {
+    riskSnapshot: {
       findMany: jest.fn(),
     },
   };
@@ -187,41 +187,4 @@ describe('TradeRecordService', () => {
     });
   });
 
-  describe('findStrategyExecutions', () => {
-    it('should return strategy executions with default limit', async () => {
-      mockPrisma.strategyExecution.findMany.mockResolvedValue([]);
-
-      await service.findStrategyExecutions();
-
-      expect(mockPrisma.strategyExecution.findMany).toHaveBeenCalledWith({
-        where: {},
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      });
-    });
-
-    it('should filter by stock code', async () => {
-      mockPrisma.strategyExecution.findMany.mockResolvedValue([]);
-
-      await service.findStrategyExecutions({ stockCode: '005930' });
-
-      expect(mockPrisma.strategyExecution.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { stockCode: '005930' },
-        }),
-      );
-    });
-
-    it('should filter by strategy name', async () => {
-      mockPrisma.strategyExecution.findMany.mockResolvedValue([]);
-
-      await service.findStrategyExecutions({ strategyName: 'infinite-buy' });
-
-      expect(mockPrisma.strategyExecution.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { strategyName: 'infinite-buy' },
-        }),
-      );
-    });
-  });
 });

@@ -48,7 +48,7 @@ export function ScreeningPage() {
   const selectedCountry = searchParams.get('country')
   const selected = selectedDate && selectedCountry ? { date: selectedDate, country: selectedCountry } : null
 
-  const { data: summariesData, loading: summariesLoading } = useGetScreeningDateSummariesQuery({ variables: { limit: 30 } })
+  const { data: summariesData, loading: summariesLoading } = useGetScreeningDateSummariesQuery({ variables: { input: { limit: 30 } } })
   const summaries = summariesData?.screeningDateSummaries ?? []
 
   return (
@@ -88,8 +88,14 @@ function DateListView({
   loading: boolean
   onSelect: (date: string, country: string) => void
 }) {
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const latestDate = summaries.length > 0 ? summaries[0].date : null
+  const [selectedDate, setSelectedDate] = useState<string | null>(latestDate)
   const [countryFilter, setCountryFilter] = useState<string | null>(null)
+
+  // summaries 로딩 완료 후 최신 날짜 자동 선택
+  if (selectedDate === null && latestDate) {
+    setSelectedDate(latestDate)
+  }
 
   if (loading) {
     return <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>
@@ -235,7 +241,7 @@ function StockDetailView({
   const marketFilter = countryOption?.market ?? undefined
 
   const { data, loading } = useGetStockRecommendationsQuery({
-    variables: { date, market: marketFilter, limit: 50 },
+    variables: { input: { date, market: marketFilter, limit: 50 } },
   })
 
   const allRecommendations = data?.stockRecommendations ?? []

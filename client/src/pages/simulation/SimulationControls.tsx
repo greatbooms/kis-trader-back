@@ -22,7 +22,7 @@ export function SimulationControls({ sessionId, status, sessionName, strategyDis
   const [deleteSimulation] = useDeleteSimulationMutation()
 
   const handleUpdateStatus = async (newStatus: string) => {
-    await updateStatus({ variables: { id: sessionId, status: newStatus as never } })
+    await updateStatus({ variables: { input: { id: sessionId, status: newStatus as never } } })
     onStatusChange()
   }
 

@@ -1,8 +1,7 @@
-import { Resolver, Query, Args, ID, Int } from '@nestjs/graphql';
+import { Resolver, Query, Args, ID } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { TradeRecordService } from './trade-record.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
-import { Market, Side } from '@prisma/client';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import {
@@ -10,7 +9,10 @@ import {
   PositionType,
   StockPriceType,
   DashboardSummaryType,
-  StrategyExecutionType,
+  AccountSummaryType,
+  TradeFilterInput,
+  OverseasQuoteInput,
+  PositionsFilterInput,
 } from './dto';
 
 @Resolver()
@@ -23,13 +25,8 @@ export class TradeRecordResolver {
   ) {}
 
   @Query(() => [TradeRecordType], { name: 'trades' })
-  findAll(
-    @Args('market', { type: () => Market, nullable: true }) market?: Market,
-    @Args('side', { type: () => Side, nullable: true }) side?: Side,
-    @Args('limit', { type: () => Int, nullable: true }) limit?: number,
-    @Args('offset', { type: () => Int, nullable: true }) offset?: number,
-  ) {
-    return this.tradeRecordService.findAll({ market, side, limit, offset });
+  findAll(@Args('input', { nullable: true }) input?: TradeFilterInput) {
+    return this.tradeRecordService.findAll(input ?? {});
   }
 
   @Query(() => TradeRecordType, { name: 'trade', nullable: true })
@@ -38,8 +35,8 @@ export class TradeRecordResolver {
   }
 
   @Query(() => [PositionType], { name: 'positions' })
-  positions(@Args('market', { type: () => Market, nullable: true }) market?: Market) {
-    return this.tradeRecordService.findPositions(market);
+  positions(@Args('input', { nullable: true }) input?: PositionsFilterInput) {
+    return this.tradeRecordService.findPositions(input?.market);
   }
 
   @Query(() => StockPriceType, { name: 'quote', nullable: true })
@@ -48,11 +45,13 @@ export class TradeRecordResolver {
   }
 
   @Query(() => StockPriceType, { name: 'overseasQuote', nullable: true })
-  async overseasQuote(
-    @Args('exchangeCode') exchangeCode: string,
-    @Args('symbol') symbol: string,
-  ) {
-    return this.kisOverseas.getPrice(exchangeCode, symbol);
+  async overseasQuote(@Args('input') input: OverseasQuoteInput) {
+    return this.kisOverseas.getPrice(input.exchangeCode, input.symbol);
+  }
+
+  @Query(() => AccountSummaryType, { name: 'accountSummary' })
+  accountSummary() {
+    return this.tradeRecordService.getAccountSummary();
   }
 
   @Query(() => DashboardSummaryType, { name: 'dashboardSummary' })
@@ -60,12 +59,4 @@ export class TradeRecordResolver {
     return this.tradeRecordService.getDashboardSummary();
   }
 
-  @Query(() => [StrategyExecutionType], { name: 'strategyExecutions' })
-  strategyExecutions(
-    @Args('stockCode', { nullable: true }) stockCode?: string,
-    @Args('strategyName', { nullable: true }) strategyName?: string,
-    @Args('limit', { type: () => Int, nullable: true }) limit?: number,
-  ) {
-    return this.tradeRecordService.findStrategyExecutions({ stockCode, strategyName, limit });
-  }
 }

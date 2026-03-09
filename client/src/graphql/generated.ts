@@ -34,6 +34,16 @@ export type Scalars = {
   DateTime: { input: any; output: any };
 };
 
+export type AccountSummaryType = {
+  __typename?: "AccountSummaryType";
+  cashBalance: Scalars["Float"]["output"];
+  positionCount: Scalars["Int"]["output"];
+  profitRate: Scalars["Float"]["output"];
+  totalAssets: Scalars["Float"]["output"];
+  totalInvested: Scalars["Float"]["output"];
+  totalProfitLoss: Scalars["Float"]["output"];
+};
+
 export type AddSimulationWatchStockInput = {
   exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
   market: Market;
@@ -82,7 +92,17 @@ export type DashboardSummaryType = {
   winRate: Scalars["Float"]["output"];
 };
 
+export type LoginInput = {
+  password: Scalars["String"]["input"];
+  username: Scalars["String"]["input"];
+};
+
 export type Market = "DOMESTIC" | "OVERSEAS";
+
+export type MarketRegimeFilterInput = {
+  exchangeCode: Scalars["String"]["input"];
+  market: Market;
+};
 
 export type MarketRegimeType = {
   __typename?: "MarketRegimeType";
@@ -129,8 +149,7 @@ export type MutationDeleteWatchStockArgs = {
 };
 
 export type MutationLoginArgs = {
-  password: Scalars["String"]["input"];
-  username: Scalars["String"]["input"];
+  input: LoginInput;
 };
 
 export type MutationRemoveSimulationWatchStockArgs = {
@@ -150,8 +169,7 @@ export type MutationUpdateScreeningSettingsArgs = {
 };
 
 export type MutationUpdateSimulationStatusArgs = {
-  id: Scalars["String"]["input"];
-  status: SimulationStatus;
+  input: UpdateSimulationStatusInput;
 };
 
 export type MutationUpdateWatchStockArgs = {
@@ -168,6 +186,11 @@ export type OrderStatus =
 
 export type OrderType = "LIMIT" | "LOC" | "MARKET";
 
+export type OverseasQuoteInput = {
+  exchangeCode: Scalars["String"]["input"];
+  symbol: Scalars["String"]["input"];
+};
+
 export type PositionType = {
   __typename?: "PositionType";
   avgPrice: Scalars["Float"]["output"];
@@ -183,8 +206,13 @@ export type PositionType = {
   totalInvested: Scalars["Float"]["output"];
 };
 
+export type PositionsFilterInput = {
+  market?: InputMaybe<Market>;
+};
+
 export type Query = {
   __typename?: "Query";
+  accountSummary: AccountSummaryType;
   availableStrategies: Array<StrategyInfo>;
   dashboardSummary: DashboardSummaryType;
   marketRegime: MarketRegimeType;
@@ -205,24 +233,21 @@ export type Query = {
   simulationTrades: Array<SimulationTradeType>;
   stockRecommendations: Array<StockRecommendationType>;
   strategyAllocations: Array<StrategyAllocationType>;
-  strategyExecutions: Array<StrategyExecutionType>;
   trade?: Maybe<TradeRecordType>;
   trades: Array<TradeRecordType>;
   watchStocks: Array<WatchStockType>;
 };
 
 export type QueryMarketRegimeArgs = {
-  exchangeCode: Scalars["String"]["input"];
-  market: Market;
+  input: MarketRegimeFilterInput;
 };
 
 export type QueryOverseasQuoteArgs = {
-  exchangeCode: Scalars["String"]["input"];
-  symbol: Scalars["String"]["input"];
+  input: OverseasQuoteInput;
 };
 
 export type QueryPositionsArgs = {
-  market?: InputMaybe<Market>;
+  input?: InputMaybe<PositionsFilterInput>;
 };
 
 export type QueryQuoteArgs = {
@@ -230,27 +255,23 @@ export type QueryQuoteArgs = {
 };
 
 export type QueryRiskStateArgs = {
-  market: Market;
+  input: RiskStateFilterInput;
 };
 
 export type QueryRunScreeningNowArgs = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
-  market: Scalars["String"]["input"];
+  input: RunScreeningInput;
 };
 
 export type QueryScreeningDateSummariesArgs = {
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  input?: InputMaybe<ScreeningListFilterInput>;
 };
 
 export type QueryScreeningDatesArgs = {
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  input?: InputMaybe<ScreeningListFilterInput>;
 };
 
 export type QuerySearchStocksArgs = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
-  keyword: Scalars["String"]["input"];
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  market?: InputMaybe<Market>;
+  input: SearchStocksInput;
 };
 
 export type QuerySimulationMetricsArgs = {
@@ -266,7 +287,7 @@ export type QuerySimulationSessionArgs = {
 };
 
 export type QuerySimulationSessionsArgs = {
-  status?: InputMaybe<SimulationStatus>;
+  input?: InputMaybe<SimulationSessionsFilterInput>;
 };
 
 export type QuerySimulationSnapshotsArgs = {
@@ -274,25 +295,15 @@ export type QuerySimulationSnapshotsArgs = {
 };
 
 export type QuerySimulationTradesArgs = {
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  offset?: InputMaybe<Scalars["Int"]["input"]>;
-  sessionId: Scalars["String"]["input"];
+  input: SimulationTradesFilterInput;
 };
 
 export type QueryStockRecommendationsArgs = {
-  date?: InputMaybe<Scalars["String"]["input"]>;
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
-  market?: InputMaybe<Scalars["String"]["input"]>;
+  input?: InputMaybe<StockRecommendationsFilterInput>;
 };
 
 export type QueryStrategyAllocationsArgs = {
-  market: Market;
-};
-
-export type QueryStrategyExecutionsArgs = {
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  stockCode?: InputMaybe<Scalars["String"]["input"]>;
-  strategyName?: InputMaybe<Scalars["String"]["input"]>;
+  input: StrategyAllocationsFilterInput;
 };
 
 export type QueryTradeArgs = {
@@ -300,14 +311,15 @@ export type QueryTradeArgs = {
 };
 
 export type QueryTradesArgs = {
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  market?: InputMaybe<Market>;
-  offset?: InputMaybe<Scalars["Int"]["input"]>;
-  side?: InputMaybe<Side>;
+  input?: InputMaybe<TradeFilterInput>;
 };
 
 export type QueryWatchStocksArgs = {
-  market?: InputMaybe<Market>;
+  input?: InputMaybe<WatchStocksFilterInput>;
+};
+
+export type RiskStateFilterInput = {
+  market: Market;
 };
 
 export type RiskStateType = {
@@ -319,6 +331,11 @@ export type RiskStateType = {
   liquidateAll: Scalars["Boolean"]["output"];
   positionCount: Scalars["Float"]["output"];
   reasons: Array<Scalars["String"]["output"]>;
+};
+
+export type RunScreeningInput = {
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  market: Scalars["String"]["input"];
 };
 
 export type ScreeningCountrySetting = {
@@ -343,9 +360,20 @@ export type ScreeningDateSummary = {
   totalCount: Scalars["Int"]["output"];
 };
 
+export type ScreeningListFilterInput = {
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+};
+
 export type ScreeningSettingsType = {
   __typename?: "ScreeningSettingsType";
   countries: Array<ScreeningCountrySetting>;
+};
+
+export type SearchStocksInput = {
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  keyword: Scalars["String"]["input"];
+  limit?: InputMaybe<Scalars["Int"]["input"]>;
+  market?: InputMaybe<Market>;
 };
 
 export type SetStrategyAllocationInput = {
@@ -406,6 +434,10 @@ export type SimulationSessionType = {
   watchStocks?: Maybe<Array<SimulationWatchStockType>>;
 };
 
+export type SimulationSessionsFilterInput = {
+  status?: InputMaybe<SimulationStatus>;
+};
+
 export type SimulationSnapshotType = {
   __typename?: "SimulationSnapshotType";
   cashBalance: Scalars["Float"]["output"];
@@ -440,6 +472,12 @@ export type SimulationTradeType = {
   stockName: Scalars["String"]["output"];
   strategyName?: Maybe<Scalars["String"]["output"]>;
   totalAmount: Scalars["Float"]["output"];
+};
+
+export type SimulationTradesFilterInput = {
+  limit?: InputMaybe<Scalars["Int"]["input"]>;
+  offset?: InputMaybe<Scalars["Int"]["input"]>;
+  sessionId: Scalars["String"]["input"];
 };
 
 export type SimulationWatchStockType = {
@@ -493,6 +531,12 @@ export type StockRecommendationType = {
   volume: Scalars["Float"]["output"];
 };
 
+export type StockRecommendationsFilterInput = {
+  date?: InputMaybe<Scalars["String"]["input"]>;
+  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  market?: InputMaybe<Scalars["String"]["input"]>;
+};
+
 export type StockSearchResult = {
   __typename?: "StockSearchResult";
   englishName?: Maybe<Scalars["String"]["output"]>;
@@ -511,17 +555,8 @@ export type StrategyAllocationType = {
   strategyName: Scalars["String"]["output"];
 };
 
-export type StrategyExecutionType = {
-  __typename?: "StrategyExecutionType";
-  createdAt: Scalars["DateTime"]["output"];
-  details?: Maybe<Scalars["String"]["output"]>;
-  executedDate: Scalars["String"]["output"];
-  id: Scalars["ID"]["output"];
+export type StrategyAllocationsFilterInput = {
   market: Market;
-  progress: Scalars["Float"]["output"];
-  signalCount: Scalars["Int"]["output"];
-  stockCode: Scalars["String"]["output"];
-  strategyName: Scalars["String"]["output"];
 };
 
 export type StrategyInfo = {
@@ -551,6 +586,15 @@ export type SuggestedStrategyType = {
   reason: Scalars["String"]["output"];
 };
 
+export type TradeFilterInput = {
+  dateFrom?: InputMaybe<Scalars["String"]["input"]>;
+  dateTo?: InputMaybe<Scalars["String"]["input"]>;
+  limit?: InputMaybe<Scalars["Int"]["input"]>;
+  market?: InputMaybe<Market>;
+  offset?: InputMaybe<Scalars["Int"]["input"]>;
+  side?: InputMaybe<Side>;
+};
+
 export type TradeRecordType = {
   __typename?: "TradeRecordType";
   createdAt: Scalars["DateTime"]["output"];
@@ -574,6 +618,11 @@ export type TradeRecordType = {
 export type UpdateScreeningSettingsInput = {
   country: Scalars["String"]["input"];
   enabled: Scalars["Boolean"]["input"];
+};
+
+export type UpdateSimulationStatusInput = {
+  id: Scalars["String"]["input"];
+  status: SimulationStatus;
 };
 
 export type UpdateWatchStockInput = {
@@ -623,9 +672,12 @@ export type WatchStockType = {
   updatedAt: Scalars["DateTime"]["output"];
 };
 
+export type WatchStocksFilterInput = {
+  market?: InputMaybe<Market>;
+};
+
 export type LoginMutationVariables = Exact<{
-  username: Scalars["String"]["input"];
-  password: Scalars["String"]["input"];
+  input: LoginInput;
 }>;
 
 export type LoginMutation = {
@@ -641,9 +693,7 @@ export type LogoutMutation = {
 };
 
 export type GetStockRecommendationsQueryVariables = Exact<{
-  date?: InputMaybe<Scalars["String"]["input"]>;
-  market?: InputMaybe<Scalars["String"]["input"]>;
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  input?: InputMaybe<StockRecommendationsFilterInput>;
 }>;
 
 export type GetStockRecommendationsQuery = {
@@ -679,7 +729,7 @@ export type GetStockRecommendationsQuery = {
 };
 
 export type GetScreeningDatesQueryVariables = Exact<{
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  input?: InputMaybe<ScreeningListFilterInput>;
 }>;
 
 export type GetScreeningDatesQuery = {
@@ -688,7 +738,7 @@ export type GetScreeningDatesQuery = {
 };
 
 export type GetScreeningDateSummariesQueryVariables = Exact<{
-  limit?: InputMaybe<Scalars["Float"]["input"]>;
+  input?: InputMaybe<ScreeningListFilterInput>;
 }>;
 
 export type GetScreeningDateSummariesQuery = {
@@ -742,7 +792,7 @@ export type UpdateScreeningSettingsMutation = {
 };
 
 export type GetSimulationSessionsQueryVariables = Exact<{
-  status?: InputMaybe<SimulationStatus>;
+  input?: InputMaybe<SimulationSessionsFilterInput>;
 }>;
 
 export type GetSimulationSessionsQuery = {
@@ -839,9 +889,7 @@ export type GetSimulationPositionsQuery = {
 };
 
 export type GetSimulationTradesQueryVariables = Exact<{
-  sessionId: Scalars["String"]["input"];
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  offset?: InputMaybe<Scalars["Int"]["input"]>;
+  input: SimulationTradesFilterInput;
 }>;
 
 export type GetSimulationTradesQuery = {
@@ -954,8 +1002,7 @@ export type RemoveSimulationWatchStockMutation = {
 };
 
 export type UpdateSimulationStatusMutationVariables = Exact<{
-  id: Scalars["String"]["input"];
-  status: SimulationStatus;
+  input: UpdateSimulationStatusInput;
 }>;
 
 export type UpdateSimulationStatusMutation = {
@@ -993,10 +1040,7 @@ export type DeleteSimulationMutation = {
 };
 
 export type SearchStocksQueryVariables = Exact<{
-  keyword: Scalars["String"]["input"];
-  market?: InputMaybe<Market>;
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  input: SearchStocksInput;
 }>;
 
 export type SearchStocksQuery = {
@@ -1012,10 +1056,7 @@ export type SearchStocksQuery = {
 };
 
 export type GetTradesQueryVariables = Exact<{
-  market?: InputMaybe<Market>;
-  side?: InputMaybe<Side>;
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-  offset?: InputMaybe<Scalars["Int"]["input"]>;
+  input?: InputMaybe<TradeFilterInput>;
 }>;
 
 export type GetTradesQuery = {
@@ -1069,7 +1110,7 @@ export type GetTradeQuery = {
 };
 
 export type GetPositionsQueryVariables = Exact<{
-  market?: InputMaybe<Market>;
+  input?: InputMaybe<PositionsFilterInput>;
 }>;
 
 export type GetPositionsQuery = {
@@ -1109,8 +1150,7 @@ export type GetQuoteQuery = {
 };
 
 export type GetOverseasQuoteQueryVariables = Exact<{
-  exchangeCode: Scalars["String"]["input"];
-  symbol: Scalars["String"]["input"];
+  input: OverseasQuoteInput;
 }>;
 
 export type GetOverseasQuoteQuery = {
@@ -1127,6 +1167,21 @@ export type GetOverseasQuoteQuery = {
   } | null;
 };
 
+export type GetAccountSummaryQueryVariables = Exact<{ [key: string]: never }>;
+
+export type GetAccountSummaryQuery = {
+  __typename?: "Query";
+  accountSummary: {
+    __typename?: "AccountSummaryType";
+    cashBalance: number;
+    totalInvested: number;
+    totalAssets: number;
+    totalProfitLoss: number;
+    profitRate: number;
+    positionCount: number;
+  };
+};
+
 export type GetDashboardSummaryQueryVariables = Exact<{ [key: string]: never }>;
 
 export type GetDashboardSummaryQuery = {
@@ -1138,28 +1193,6 @@ export type GetDashboardSummaryQuery = {
     todayTradeCount: number;
     winRate: number;
   };
-};
-
-export type GetStrategyExecutionsQueryVariables = Exact<{
-  stockCode?: InputMaybe<Scalars["String"]["input"]>;
-  strategyName?: InputMaybe<Scalars["String"]["input"]>;
-  limit?: InputMaybe<Scalars["Int"]["input"]>;
-}>;
-
-export type GetStrategyExecutionsQuery = {
-  __typename?: "Query";
-  strategyExecutions: Array<{
-    __typename?: "StrategyExecutionType";
-    id: string;
-    market: Market;
-    stockCode: string;
-    strategyName: string;
-    executedDate: string;
-    progress: number;
-    signalCount: number;
-    details?: string | null;
-    createdAt: any;
-  }>;
 };
 
 export type GetAvailableStrategiesQueryVariables = Exact<{
@@ -1187,8 +1220,7 @@ export type GetAvailableStrategiesQuery = {
 };
 
 export type GetMarketRegimeQueryVariables = Exact<{
-  market: Market;
-  exchangeCode: Scalars["String"]["input"];
+  input: MarketRegimeFilterInput;
 }>;
 
 export type GetMarketRegimeQuery = {
@@ -1202,7 +1234,7 @@ export type GetMarketRegimeQuery = {
 };
 
 export type GetRiskStateQueryVariables = Exact<{
-  market: Market;
+  input: RiskStateFilterInput;
 }>;
 
 export type GetRiskStateQuery = {
@@ -1220,7 +1252,7 @@ export type GetRiskStateQuery = {
 };
 
 export type GetWatchStocksQueryVariables = Exact<{
-  market?: InputMaybe<Market>;
+  input?: InputMaybe<WatchStocksFilterInput>;
 }>;
 
 export type GetWatchStocksQuery = {
@@ -1310,8 +1342,8 @@ export type DeleteWatchStockMutation = {
 };
 
 export const LoginDocument = gql`
-  mutation Login($username: String!, $password: String!) {
-    login(username: $username, password: $password) {
+  mutation Login($input: LoginInput!) {
+    login(input: $input) {
       success
     }
   }
@@ -1330,8 +1362,7 @@ export const LoginDocument = gql`
  * @example
  * const [loginMutation, { data, loading, error }] = useLoginMutation({
  *   variables: {
- *      username: // value for 'username'
- *      password: // value for 'password'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -1386,8 +1417,8 @@ export function useLogoutMutation(
 }
 export type LogoutMutationHookResult = ReturnType<typeof useLogoutMutation>;
 export const GetStockRecommendationsDocument = gql`
-  query GetStockRecommendations($date: String, $market: String, $limit: Float) {
-    stockRecommendations(date: $date, market: $market, limit: $limit) {
+  query GetStockRecommendations($input: StockRecommendationsFilterInput) {
+    stockRecommendations(input: $input) {
       id
       screeningDate
       market
@@ -1428,9 +1459,7 @@ export const GetStockRecommendationsDocument = gql`
  * @example
  * const { data, loading, error } = useGetStockRecommendationsQuery({
  *   variables: {
- *      date: // value for 'date'
- *      market: // value for 'market'
- *      limit: // value for 'limit'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -1506,8 +1535,8 @@ export type GetStockRecommendationsSuspenseQueryHookResult = ReturnType<
   typeof useGetStockRecommendationsSuspenseQuery
 >;
 export const GetScreeningDatesDocument = gql`
-  query GetScreeningDates($limit: Float) {
-    screeningDates(limit: $limit)
+  query GetScreeningDates($input: ScreeningListFilterInput) {
+    screeningDates(input: $input)
   }
 `;
 
@@ -1523,7 +1552,7 @@ export const GetScreeningDatesDocument = gql`
  * @example
  * const { data, loading, error } = useGetScreeningDatesQuery({
  *   variables: {
- *      limit: // value for 'limit'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -1599,8 +1628,8 @@ export type GetScreeningDatesSuspenseQueryHookResult = ReturnType<
   typeof useGetScreeningDatesSuspenseQuery
 >;
 export const GetScreeningDateSummariesDocument = gql`
-  query GetScreeningDateSummaries($limit: Float) {
-    screeningDateSummaries(limit: $limit) {
+  query GetScreeningDateSummaries($input: ScreeningListFilterInput) {
+    screeningDateSummaries(input: $input) {
       date
       totalCount
       countries {
@@ -1625,7 +1654,7 @@ export const GetScreeningDateSummariesDocument = gql`
  * @example
  * const { data, loading, error } = useGetScreeningDateSummariesQuery({
  *   variables: {
- *      limit: // value for 'limit'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -1843,8 +1872,8 @@ export type UpdateScreeningSettingsMutationHookResult = ReturnType<
   typeof useUpdateScreeningSettingsMutation
 >;
 export const GetSimulationSessionsDocument = gql`
-  query GetSimulationSessions($status: SimulationStatus) {
-    simulationSessions(status: $status) {
+  query GetSimulationSessions($input: SimulationSessionsFilterInput) {
+    simulationSessions(input: $input) {
       id
       name
       description
@@ -1886,7 +1915,7 @@ export const GetSimulationSessionsDocument = gql`
  * @example
  * const { data, loading, error } = useGetSimulationSessionsQuery({
  *   variables: {
- *      status: // value for 'status'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -2195,8 +2224,8 @@ export type GetSimulationPositionsSuspenseQueryHookResult = ReturnType<
   typeof useGetSimulationPositionsSuspenseQuery
 >;
 export const GetSimulationTradesDocument = gql`
-  query GetSimulationTrades($sessionId: String!, $limit: Int, $offset: Int) {
-    simulationTrades(sessionId: $sessionId, limit: $limit, offset: $offset) {
+  query GetSimulationTrades($input: SimulationTradesFilterInput!) {
+    simulationTrades(input: $input) {
       id
       market
       exchangeCode
@@ -2225,9 +2254,7 @@ export const GetSimulationTradesDocument = gql`
  * @example
  * const { data, loading, error } = useGetSimulationTradesQuery({
  *   variables: {
- *      sessionId: // value for 'sessionId'
- *      limit: // value for 'limit'
- *      offset: // value for 'offset'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -2656,8 +2683,8 @@ export type RemoveSimulationWatchStockMutationHookResult = ReturnType<
   typeof useRemoveSimulationWatchStockMutation
 >;
 export const UpdateSimulationStatusDocument = gql`
-  mutation UpdateSimulationStatus($id: String!, $status: SimulationStatus!) {
-    updateSimulationStatus(id: $id, status: $status) {
+  mutation UpdateSimulationStatus($input: UpdateSimulationStatusInput!) {
+    updateSimulationStatus(input: $input) {
       id
       status
       stoppedAt
@@ -2678,8 +2705,7 @@ export const UpdateSimulationStatusDocument = gql`
  * @example
  * const [updateSimulationStatusMutation, { data, loading, error }] = useUpdateSimulationStatusMutation({
  *   variables: {
- *      id: // value for 'id'
- *      status: // value for 'status'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -2780,18 +2806,8 @@ export type DeleteSimulationMutationHookResult = ReturnType<
   typeof useDeleteSimulationMutation
 >;
 export const SearchStocksDocument = gql`
-  query SearchStocks(
-    $keyword: String!
-    $market: Market
-    $limit: Int
-    $exchangeCode: String
-  ) {
-    searchStocks(
-      keyword: $keyword
-      market: $market
-      limit: $limit
-      exchangeCode: $exchangeCode
-    ) {
+  query SearchStocks($input: SearchStocksInput!) {
+    searchStocks(input: $input) {
       stockCode
       stockName
       englishName
@@ -2813,10 +2829,7 @@ export const SearchStocksDocument = gql`
  * @example
  * const { data, loading, error } = useSearchStocksQuery({
  *   variables: {
- *      keyword: // value for 'keyword'
- *      market: // value for 'market'
- *      limit: // value for 'limit'
- *      exchangeCode: // value for 'exchangeCode'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -2896,8 +2909,8 @@ export type SearchStocksSuspenseQueryHookResult = ReturnType<
   typeof useSearchStocksSuspenseQuery
 >;
 export const GetTradesDocument = gql`
-  query GetTrades($market: Market, $side: Side, $limit: Int, $offset: Int) {
-    trades(market: $market, side: $side, limit: $limit, offset: $offset) {
+  query GetTrades($input: TradeFilterInput) {
+    trades(input: $input) {
       id
       market
       exchangeCode
@@ -2930,10 +2943,7 @@ export const GetTradesDocument = gql`
  * @example
  * const { data, loading, error } = useGetTradesQuery({
  *   variables: {
- *      market: // value for 'market'
- *      side: // value for 'side'
- *      limit: // value for 'limit'
- *      offset: // value for 'offset'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -3116,8 +3126,8 @@ export type GetTradeSuspenseQueryHookResult = ReturnType<
   typeof useGetTradeSuspenseQuery
 >;
 export const GetPositionsDocument = gql`
-  query GetPositions($market: Market) {
-    positions(market: $market) {
+  query GetPositions($input: PositionsFilterInput) {
+    positions(input: $input) {
       id
       market
       exchangeCode
@@ -3145,7 +3155,7 @@ export const GetPositionsDocument = gql`
  * @example
  * const { data, loading, error } = useGetPositionsQuery({
  *   variables: {
- *      market: // value for 'market'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -3321,8 +3331,8 @@ export type GetQuoteSuspenseQueryHookResult = ReturnType<
   typeof useGetQuoteSuspenseQuery
 >;
 export const GetOverseasQuoteDocument = gql`
-  query GetOverseasQuote($exchangeCode: String!, $symbol: String!) {
-    overseasQuote(exchangeCode: $exchangeCode, symbol: $symbol) {
+  query GetOverseasQuote($input: OverseasQuoteInput!) {
+    overseasQuote(input: $input) {
       stockCode
       stockName
       currentPrice
@@ -3346,8 +3356,7 @@ export const GetOverseasQuoteDocument = gql`
  * @example
  * const { data, loading, error } = useGetOverseasQuoteQuery({
  *   variables: {
- *      exchangeCode: // value for 'exchangeCode'
- *      symbol: // value for 'symbol'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -3425,6 +3434,105 @@ export type GetOverseasQuoteLazyQueryHookResult = ReturnType<
 >;
 export type GetOverseasQuoteSuspenseQueryHookResult = ReturnType<
   typeof useGetOverseasQuoteSuspenseQuery
+>;
+export const GetAccountSummaryDocument = gql`
+  query GetAccountSummary {
+    accountSummary {
+      cashBalance
+      totalInvested
+      totalAssets
+      totalProfitLoss
+      profitRate
+      positionCount
+    }
+  }
+`;
+
+/**
+ * __useGetAccountSummaryQuery__
+ *
+ * To run a query within a React component, call `useGetAccountSummaryQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetAccountSummaryQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetAccountSummaryQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGetAccountSummaryQuery(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >(GetAccountSummaryDocument, options);
+}
+export function useGetAccountSummaryLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >(GetAccountSummaryDocument, options);
+}
+// @ts-ignore
+export function useGetAccountSummarySuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetAccountSummaryQuery,
+  GetAccountSummaryQueryVariables
+>;
+export function useGetAccountSummarySuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetAccountSummaryQuery,
+        GetAccountSummaryQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetAccountSummaryQuery | undefined,
+  GetAccountSummaryQueryVariables
+>;
+export function useGetAccountSummarySuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetAccountSummaryQuery,
+        GetAccountSummaryQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetAccountSummaryQuery,
+    GetAccountSummaryQueryVariables
+  >(GetAccountSummaryDocument, options);
+}
+export type GetAccountSummaryQueryHookResult = ReturnType<
+  typeof useGetAccountSummaryQuery
+>;
+export type GetAccountSummaryLazyQueryHookResult = ReturnType<
+  typeof useGetAccountSummaryLazyQuery
+>;
+export type GetAccountSummarySuspenseQueryHookResult = ReturnType<
+  typeof useGetAccountSummarySuspenseQuery
 >;
 export const GetDashboardSummaryDocument = gql`
   query GetDashboardSummary {
@@ -3522,119 +3630,6 @@ export type GetDashboardSummaryLazyQueryHookResult = ReturnType<
 >;
 export type GetDashboardSummarySuspenseQueryHookResult = ReturnType<
   typeof useGetDashboardSummarySuspenseQuery
->;
-export const GetStrategyExecutionsDocument = gql`
-  query GetStrategyExecutions(
-    $stockCode: String
-    $strategyName: String
-    $limit: Int
-  ) {
-    strategyExecutions(
-      stockCode: $stockCode
-      strategyName: $strategyName
-      limit: $limit
-    ) {
-      id
-      market
-      stockCode
-      strategyName
-      executedDate
-      progress
-      signalCount
-      details
-      createdAt
-    }
-  }
-`;
-
-/**
- * __useGetStrategyExecutionsQuery__
- *
- * To run a query within a React component, call `useGetStrategyExecutionsQuery` and pass it any options that fit your needs.
- * When your component renders, `useGetStrategyExecutionsQuery` returns an object from Apollo Client that contains loading, error, and data properties
- * you can use to render your UI.
- *
- * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
- *
- * @example
- * const { data, loading, error } = useGetStrategyExecutionsQuery({
- *   variables: {
- *      stockCode: // value for 'stockCode'
- *      strategyName: // value for 'strategyName'
- *      limit: // value for 'limit'
- *   },
- * });
- */
-export function useGetStrategyExecutionsQuery(
-  baseOptions?: ApolloReactHooks.QueryHookOptions<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >,
-) {
-  const options = { ...defaultOptions, ...baseOptions };
-  return ApolloReactHooks.useQuery<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >(GetStrategyExecutionsDocument, options);
-}
-export function useGetStrategyExecutionsLazyQuery(
-  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >,
-) {
-  const options = { ...defaultOptions, ...baseOptions };
-  return ApolloReactHooks.useLazyQuery<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >(GetStrategyExecutionsDocument, options);
-}
-// @ts-ignore
-export function useGetStrategyExecutionsSuspenseQuery(
-  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >,
-): ApolloReactHooks.UseSuspenseQueryResult<
-  GetStrategyExecutionsQuery,
-  GetStrategyExecutionsQueryVariables
->;
-export function useGetStrategyExecutionsSuspenseQuery(
-  baseOptions?:
-    | ApolloReactHooks.SkipToken
-    | ApolloReactHooks.SuspenseQueryHookOptions<
-        GetStrategyExecutionsQuery,
-        GetStrategyExecutionsQueryVariables
-      >,
-): ApolloReactHooks.UseSuspenseQueryResult<
-  GetStrategyExecutionsQuery | undefined,
-  GetStrategyExecutionsQueryVariables
->;
-export function useGetStrategyExecutionsSuspenseQuery(
-  baseOptions?:
-    | ApolloReactHooks.SkipToken
-    | ApolloReactHooks.SuspenseQueryHookOptions<
-        GetStrategyExecutionsQuery,
-        GetStrategyExecutionsQueryVariables
-      >,
-) {
-  const options =
-    baseOptions === ApolloReactHooks.skipToken
-      ? baseOptions
-      : { ...defaultOptions, ...baseOptions };
-  return ApolloReactHooks.useSuspenseQuery<
-    GetStrategyExecutionsQuery,
-    GetStrategyExecutionsQueryVariables
-  >(GetStrategyExecutionsDocument, options);
-}
-export type GetStrategyExecutionsQueryHookResult = ReturnType<
-  typeof useGetStrategyExecutionsQuery
->;
-export type GetStrategyExecutionsLazyQueryHookResult = ReturnType<
-  typeof useGetStrategyExecutionsLazyQuery
->;
-export type GetStrategyExecutionsSuspenseQueryHookResult = ReturnType<
-  typeof useGetStrategyExecutionsSuspenseQuery
 >;
 export const GetAvailableStrategiesDocument = gql`
   query GetAvailableStrategies {
@@ -3742,8 +3737,8 @@ export type GetAvailableStrategiesSuspenseQueryHookResult = ReturnType<
   typeof useGetAvailableStrategiesSuspenseQuery
 >;
 export const GetMarketRegimeDocument = gql`
-  query GetMarketRegime($market: Market!, $exchangeCode: String!) {
-    marketRegime(market: $market, exchangeCode: $exchangeCode) {
+  query GetMarketRegime($input: MarketRegimeFilterInput!) {
+    marketRegime(input: $input) {
       regime
       market
       exchangeCode
@@ -3763,8 +3758,7 @@ export const GetMarketRegimeDocument = gql`
  * @example
  * const { data, loading, error } = useGetMarketRegimeQuery({
  *   variables: {
- *      market: // value for 'market'
- *      exchangeCode: // value for 'exchangeCode'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -3844,8 +3838,8 @@ export type GetMarketRegimeSuspenseQueryHookResult = ReturnType<
   typeof useGetMarketRegimeSuspenseQuery
 >;
 export const GetRiskStateDocument = gql`
-  query GetRiskState($market: Market!) {
-    riskState(market: $market) {
+  query GetRiskState($input: RiskStateFilterInput!) {
+    riskState(input: $input) {
       buyBlocked
       liquidateAll
       positionCount
@@ -3869,7 +3863,7 @@ export const GetRiskStateDocument = gql`
  * @example
  * const { data, loading, error } = useGetRiskStateQuery({
  *   variables: {
- *      market: // value for 'market'
+ *      input: // value for 'input'
  *   },
  * });
  */
@@ -3949,8 +3943,8 @@ export type GetRiskStateSuspenseQueryHookResult = ReturnType<
   typeof useGetRiskStateSuspenseQuery
 >;
 export const GetWatchStocksDocument = gql`
-  query GetWatchStocks($market: Market) {
-    watchStocks(market: $market) {
+  query GetWatchStocks($input: WatchStocksFilterInput) {
+    watchStocks(input: $input) {
       id
       market
       exchangeCode
@@ -3984,7 +3978,7 @@ export const GetWatchStocksDocument = gql`
  * @example
  * const { data, loading, error } = useGetWatchStocksQuery({
  *   variables: {
- *      market: // value for 'market'
+ *      input: // value for 'input'
  *   },
  * });
  */

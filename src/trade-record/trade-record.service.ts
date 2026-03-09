@@ -6,11 +6,16 @@ import { Market, Side } from '@prisma/client';
 export class TradeRecordService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(options?: { market?: Market; side?: Side; limit?: number; offset?: number }) {
+  findAll(options?: { market?: Market; side?: Side; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) {
+    const createdAt: Record<string, Date> = {};
+    if (options?.dateFrom) createdAt.gte = new Date(options.dateFrom + 'T00:00:00');
+    if (options?.dateTo) createdAt.lte = new Date(options.dateTo + 'T23:59:59');
+
     return this.prisma.tradeRecord.findMany({
       where: {
         ...(options?.market && { market: options.market }),
         ...(options?.side && { side: options.side }),
+        ...(Object.keys(createdAt).length > 0 && { createdAt }),
       },
       orderBy: { createdAt: 'desc' },
       take: options?.limit || 50,
@@ -62,19 +67,29 @@ export class TradeRecordService {
     });
   }
 
-  /** 전략 실행 이력 조회 */
-  findStrategyExecutions(options?: {
-    stockCode?: string;
-    strategyName?: string;
-    limit?: number;
-  }) {
-    return this.prisma.strategyExecution.findMany({
-      where: {
-        ...(options?.stockCode && { stockCode: options.stockCode }),
-        ...(options?.strategyName && { strategyName: options.strategyName }),
-      },
+  /** 계좌 요약 (예수금 + 포지션 합산) */
+  async getAccountSummary() {
+    const positions = await this.prisma.position.findMany();
+    const totalInvested = positions.reduce((sum, p) => sum + Number(p.totalInvested), 0);
+    const totalProfitLoss = positions.reduce((sum, p) => sum + Number(p.profitLoss), 0);
+
+    // 최신 RiskSnapshot에서 cashBalance 조회
+    const latestSnapshots = await this.prisma.riskSnapshot.findMany({
       orderBy: { createdAt: 'desc' },
-      take: options?.limit || 50,
+      take: 2, // DOMESTIC + OVERSEAS 각 1개
+      distinct: ['market'],
     });
+    const cashBalance = latestSnapshots.reduce((sum, s) => sum + Number(s.cashBalance), 0);
+    const totalAssets = cashBalance + totalInvested + totalProfitLoss;
+
+    return {
+      cashBalance,
+      totalInvested,
+      totalAssets,
+      totalProfitLoss,
+      profitRate: totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0,
+      positionCount: positions.length,
+    };
   }
+
 }

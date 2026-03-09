@@ -29,7 +29,7 @@ export function WatchlistPage() {
   const marketFilter: Market | undefined = selectedCountry?.market ?? undefined
 
   const { data, loading } = useGetWatchStocksQuery({
-    variables: { market: marketFilter ?? null },
+    variables: { input: marketFilter ? { market: marketFilter } : undefined },
   })
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
   const strategies = strategiesData?.availableStrategies ?? []
@@ -41,7 +41,7 @@ export function WatchlistPage() {
     : allStocks
 
   const refetchOptions = {
-    refetchQueries: [{ query: GetWatchStocksDocument, variables: { market: marketFilter ?? null } }],
+    refetchQueries: [{ query: GetWatchStocksDocument, variables: { input: marketFilter ? { market: marketFilter } : undefined } }],
   }
 
   const [createMutation] = useCreateWatchStockMutation(refetchOptions)

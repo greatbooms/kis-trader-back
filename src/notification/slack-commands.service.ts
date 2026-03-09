@@ -188,26 +188,6 @@ export class SlackCommandsService implements OnModuleInit {
     const todayBuyCount = todayTrades.filter((t) => t.side === 'BUY').length;
     const todaySellCount = todayTrades.filter((t) => t.side === 'SELL').length;
 
-    // Skip info from today's strategy executions
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const executions = await this.prisma.strategyExecution.findMany({
-      where: { executedDate: todayStr },
-    });
-    const skippedExecs = executions.filter((e) => e.signalCount === 0);
-    const skipReasons: string[] = [];
-    for (const ex of skippedExecs) {
-      try {
-        const details = ex.details ? JSON.parse(ex.details) : {};
-        if (details.marketCondition && !details.marketCondition.referenceIndexAboveMA200) {
-          skipReasons.push('MA200');
-        } else if (details.stockIndicators && !details.stockIndicators.currentAboveMA200) {
-          skipReasons.push('종목MA200');
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-
     const totalInvested = positions.reduce((sum, p) => sum + p.totalInvested, 0);
     const totalEvaluation = positions.reduce((sum, p) => sum + p.quantity * p.currentPrice, 0);
     const totalPnl = totalEvaluation - totalInvested;
@@ -217,8 +197,8 @@ export class SlackCommandsService implements OnModuleInit {
       positions,
       todayBuyCount,
       todaySellCount,
-      skipCount: skippedExecs.length,
-      skipReasons: [...new Set(skipReasons)],
+      skipCount: 0,
+      skipReasons: [],
       totalInvested,
       totalEvaluation,
       totalPnl,

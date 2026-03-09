@@ -28,47 +28,9 @@ export class TradingService {
     strategy: PerStockTradingStrategy,
     contexts: StockStrategyContext[],
   ): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-
     for (const ctx of contexts) {
       try {
         const signals = await strategy.evaluateStock(ctx);
-
-        // 실행 이력 기록
-        const progress = ctx.position?.totalInvested
-          ? ctx.position.totalInvested / (ctx.watchStock.quota || 1)
-          : 0;
-
-        const execDetails = {
-          marketCondition: ctx.marketCondition,
-          stockIndicators: ctx.stockIndicators,
-          buyableAmount: ctx.buyableAmount,
-        };
-
-        await this.prisma.strategyExecution.upsert({
-          where: {
-            market_stockCode_strategyName_executedDate: {
-              market: ctx.watchStock.market as Market,
-              stockCode: ctx.watchStock.stockCode,
-              strategyName: strategy.name,
-              executedDate: today,
-            },
-          },
-          create: {
-            market: ctx.watchStock.market as Market,
-            stockCode: ctx.watchStock.stockCode,
-            strategyName: strategy.name,
-            executedDate: today,
-            progress: new Prisma.Decimal(progress),
-            signalCount: signals.length,
-            details: JSON.stringify(execDetails),
-          },
-          update: {
-            signalCount: signals.length,
-            progress: new Prisma.Decimal(progress),
-            details: JSON.stringify(execDetails),
-          },
-        });
 
         if (signals.length === 0) {
           let reason = '시그널 없음';
@@ -79,21 +41,6 @@ export class TradingService {
           } else if (ctx.alreadyExecutedToday) {
             reason = '오늘 이미 실행됨';
           }
-
-          // 차단 이유를 StrategyExecution details에 저장
-          await this.prisma.strategyExecution.update({
-            where: {
-              market_stockCode_strategyName_executedDate: {
-                market: ctx.watchStock.market as Market,
-                stockCode: ctx.watchStock.stockCode,
-                strategyName: strategy.name,
-                executedDate: today,
-              },
-            },
-            data: {
-              details: JSON.stringify({ ...execDetails, skipReason: reason }),
-            },
-          });
 
           // Send filter skip log to Slack
           if (this.slackService?.isEnabled()) {

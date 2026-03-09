@@ -123,7 +123,7 @@ export function DashboardPage() {
 
 function MarketRegimeCard({ country }: { country: CountryOption }) {
   const { data, loading } = useGetMarketRegimeQuery({
-    variables: { market: country.market, exchangeCode: country.regimeExchangeCode },
+    variables: { input: { market: country.market, exchangeCode: country.regimeExchangeCode } },
   })
   const regime = data?.marketRegime
   const regimeColor = regime?.regime === 'TRENDING_UP' ? 'success' : regime?.regime === 'TRENDING_DOWN' ? 'danger' : 'warning'
@@ -155,7 +155,7 @@ function MarketRegimeCard({ country }: { country: CountryOption }) {
 }
 
 function RiskStateCard({ market }: { market: Market }) {
-  const { data, loading } = useGetRiskStateQuery({ variables: { market } })
+  const { data, loading } = useGetRiskStateQuery({ variables: { input: { market } } })
   const risk = data?.riskState
 
   return (

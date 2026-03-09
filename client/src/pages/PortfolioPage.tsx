@@ -2,15 +2,14 @@ import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
-import { Search } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Tooltip } from '@/components/ui/tooltip'
+import { Wallet, TrendingUp, PiggyBank, BarChart3, Info } from 'lucide-react'
 import {
   useGetPositionsQuery,
   useGetTradesQuery,
-  useGetQuoteQuery,
-  useGetStrategyExecutionsQuery,
+  useGetAccountSummaryQuery,
   type Market,
   type Side,
 } from '@/graphql/generated'
@@ -26,7 +25,7 @@ export function PortfolioPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-foreground">포트폴리오</h2>
-        <p className="text-sm text-muted-foreground mt-1">보유 종목, 매매 기록, 전략 실행 이력을 확인하세요</p>
+        <p className="text-sm text-muted-foreground mt-1">계좌 현황, 보유 종목, 매매 기록을 확인하세요</p>
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -49,35 +48,109 @@ export function PortfolioPage() {
         ))}
       </div>
 
+      <AccountSummaryCard />
       <PositionsCard market={marketFilter} countryFilter={countryFilter} />
-      <StrategyExecutionsCard />
       <TradesCard market={marketFilter} countryFilter={countryFilter} />
-      <QuoteLookup />
     </div>
   )
 }
 
+// ── 계좌 요약 ──
+
+function AccountSummaryCard() {
+  const { data, loading } = useGetAccountSummaryQuery()
+  const summary = data?.accountSummary
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">로딩중...</CardContent>
+      </Card>
+    )
+  }
+
+  if (!summary) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">계좌 정보를 불러올 수 없습니다</CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">예수금</span>
+            <Tooltip text="현재 매수 가능한 현금 잔고입니다. 국내/해외 계좌의 합산 금액입니다.">
+              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
+          <p className="text-xl font-bold">{formatCurrency(summary.cashBalance)}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <PiggyBank className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">총 투자금</span>
+            <Tooltip text="현재 보유 중인 종목에 투입된 총 매수 금액입니다.">
+              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
+          <p className="text-xl font-bold">{formatCurrency(summary.totalInvested)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{summary.positionCount}개 종목 보유</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">총 자산</span>
+            <Tooltip text="예수금 + 보유 종목 평가금액을 합산한 총 자산입니다.">
+              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
+          <p className="text-xl font-bold">{formatCurrency(summary.totalAssets)}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">평가 손익</span>
+            <Tooltip text="보유 종목의 매입가 대비 현재가 차이로 계산한 미실현 손익입니다.">
+              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
+          <p className={`text-xl font-bold ${summary.totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+            {formatCurrency(summary.totalProfitLoss)}
+          </p>
+          <p className={`text-xs mt-1 ${summary.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
+            {summary.profitRate >= 0 ? '+' : ''}{summary.profitRate.toFixed(2)}%
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ── 보유 포지션 ──
+
 function PositionsCard({ market, countryFilter }: { market: Market | null; countryFilter: string | null }) {
-  const { data, loading } = useGetPositionsQuery({ variables: { market } })
+  const { data, loading } = useGetPositionsQuery({ variables: { input: { market } } })
   const allPositions = data?.positions ?? []
   const positions = filterByCountry(allPositions, countryFilter)
-  const totalInvested = positions.reduce((sum, p) => sum + p.totalInvested, 0)
-  const totalPnl = positions.reduce((sum, p) => sum + p.profitLoss, 0)
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>보유 포지션 ({positions.length})</CardTitle>
-          {totalInvested > 0 && (
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-muted-foreground">투자금: {formatCurrency(totalInvested)}</span>
-              <Badge variant={totalPnl >= 0 ? 'success' : 'danger'}>
-                총 손익: {formatCurrency(totalPnl)} ({formatPercent(totalPnl / totalInvested)})
-              </Badge>
-            </div>
-          )}
-        </div>
+        <CardTitle>보유 포지션 ({positions.length})</CardTitle>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -130,132 +203,28 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
   )
 }
 
-function StrategyExecutionsCard() {
-  const { data, loading } = useGetStrategyExecutionsQuery({ variables: { limit: 20 } })
-  const executions = data?.strategyExecutions ?? []
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>전략 실행 이력</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <p className="text-sm text-muted-foreground text-center py-8">로딩중...</p>
-        ) : executions.length === 0 ? (
-          <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">실행 이력이 없습니다</div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-border">
-                <TableHead>날짜</TableHead>
-                <TableHead>종목</TableHead>
-                <TableHead>전략</TableHead>
-                <TableHead className="text-right">진행률</TableHead>
-                <TableHead className="text-right">시그널</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {executions.map((exec) => (
-                <TableRow key={exec.id}>
-                  <TableCell className="py-2">{formatDate(exec.createdAt)}</TableCell>
-                  <TableCell className="py-2">{exec.stockCode}</TableCell>
-                  <TableCell className="py-2"><Badge>{exec.strategyName}</Badge></TableCell>
-                  <TableCell className="py-2 text-right">{(exec.progress * 100).toFixed(0)}%</TableCell>
-                  <TableCell className="py-2 text-right">{exec.signalCount}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function QuoteLookup() {
-  const [quoteCountry, setQuoteCountry] = useState('KR')
-  const quoteMarket = COUNTRY_OPTIONS.find((c) => c.value === quoteCountry)?.market ?? ('DOMESTIC' as Market)
-  const [stockCode, setStockCode] = useState('')
-  const [searchCode, setSearchCode] = useState('')
-
-  const { data, loading } = useGetQuoteQuery({
-    variables: { stockCode: searchCode },
-    skip: !searchCode,
-  })
-  const quote = data?.quote
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>실시간 시세 조회</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex gap-2 mb-4">
-          <Select
-            value={quoteCountry}
-            onChange={(e) => setQuoteCountry(e.target.value)}
-            className="w-auto"
-          >
-            {COUNTRY_OPTIONS.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </Select>
-          <Input
-            placeholder="종목코드 입력 (예: 005930)"
-            value={stockCode}
-            onChange={(e) => setStockCode(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && stockCode && setSearchCode(stockCode)}
-          />
-          <Button onClick={() => stockCode && setSearchCode(stockCode)} disabled={!stockCode}>
-            <Search size={16} /> 조회
-          </Button>
-        </div>
-        {loading && <p className="text-sm text-muted-foreground">조회중...</p>}
-        {quote && (
-          <div className="rounded-lg border border-border/50 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <span className="font-bold text-lg">{quote.stockName}</span>
-                <span className="text-sm text-muted-foreground ml-2">{quote.stockCode}</span>
-              </div>
-              <span className="text-2xl font-bold">{formatCurrency(quote.currentPrice, quoteMarket)}</span>
-            </div>
-            <div className="grid grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">시가</span>
-                <div className="font-medium">{quote.openPrice ? formatCurrency(quote.openPrice, quoteMarket) : '-'}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">고가</span>
-                <div className="font-medium text-danger">{quote.highPrice ? formatCurrency(quote.highPrice, quoteMarket) : '-'}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">저가</span>
-                <div className="font-medium text-info">{quote.lowPrice ? formatCurrency(quote.lowPrice, quoteMarket) : '-'}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">거래량</span>
-                <div className="font-medium">{quote.volume ? formatNumber(quote.volume) : '-'}</div>
-              </div>
-            </div>
-          </div>
-        )}
-        {searchCode && !loading && !quote && (
-          <p className="text-sm text-muted-foreground">시세 정보를 찾을 수 없습니다</p>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
+// ── 매매 기록 ──
 
 function TradesCard({ market, countryFilter }: { market: Market | null; countryFilter: string | null }) {
   const [sideFilter, setSideFilter] = useState<Side | null>(null)
+  const today = new Date().toISOString().slice(0, 10)
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom] = useState<string>(weekAgo)
+  const [dateTo, setDateTo] = useState<string>(today)
   const [page, setPage] = useState(0)
   const limit = 20
 
   const { data, loading } = useGetTradesQuery({
-    variables: { market, side: sideFilter, limit, offset: page * limit },
+    variables: {
+      input: {
+        market,
+        side: sideFilter,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        limit,
+        offset: page * limit,
+      },
+    },
   })
   const allTrades = data?.trades ?? []
   const trades = filterByCountry(allTrades, countryFilter)
@@ -263,14 +232,36 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>매매 기록</CardTitle>
-          <div className="flex gap-2">
-            {([null, 'BUY', 'SELL'] as const).map((s) => (
-              <Button key={s ?? 'all'} variant={sideFilter === s ? 'default' : 'outline'} size="sm" onClick={() => { setSideFilter(s); setPage(0) }}>
-                {s === null ? '전체' : s === 'BUY' ? '매수' : '매도'}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <CardTitle>매매 기록</CardTitle>
+            <div className="flex gap-2">
+              {([null, 'BUY', 'SELL'] as const).map((s) => (
+                <Button key={s ?? 'all'} variant={sideFilter === s ? 'default' : 'outline'} size="sm" onClick={() => { setSideFilter(s); setPage(0) }}>
+                  {s === null ? '전체' : s === 'BUY' ? '매수' : '매도'}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setPage(0) }}
+              className="w-40"
+            />
+            <span className="text-sm text-muted-foreground">~</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setPage(0) }}
+              className="w-40"
+            />
+            {(dateFrom || dateTo) && (
+              <Button variant="outline" size="sm" onClick={() => { setDateFrom(weekAgo); setDateTo(today); setPage(0) }}>
+                초기화
               </Button>
-            ))}
+            )}
           </div>
         </div>
       </CardHeader>
@@ -333,3 +324,4 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
     </Card>
   )
 }
+

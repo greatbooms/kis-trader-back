@@ -1,5 +1,5 @@
-query GetStockRecommendations($date: String, $market: String, $limit: Float) {
-  stockRecommendations(date: $date, market: $market, limit: $limit) {
+query GetStockRecommendations($input: StockRecommendationsFilterInput) {
+  stockRecommendations(input: $input) {
     id
     screeningDate
     market
@@ -27,12 +27,12 @@ query GetStockRecommendations($date: String, $market: String, $limit: Float) {
   }
 }
 
-query GetScreeningDates($limit: Float) {
-  screeningDates(limit: $limit)
+query GetScreeningDates($input: ScreeningListFilterInput) {
+  screeningDates(input: $input)
 }
 
-query GetScreeningDateSummaries($limit: Float) {
-  screeningDateSummaries(limit: $limit) {
+query GetScreeningDateSummaries($input: ScreeningListFilterInput) {
+  screeningDateSummaries(input: $input) {
     date
     totalCount
     countries {

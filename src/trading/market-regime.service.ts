@@ -1,9 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MarketAnalysisService } from './market-analysis.service';
-import { PrismaService } from '../prisma.service';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
 import { MarketRegimeLabel } from './types';
-import { Market, MarketRegime } from '@prisma/client';
 
 interface RegimeCacheEntry {
   regime: MarketRegimeLabel;
@@ -18,7 +16,6 @@ export class MarketRegimeService {
 
   constructor(
     private marketAnalysis: MarketAnalysisService,
-    private prisma: PrismaService,
   ) {}
 
   /** 시장 상태 판별 (캐시 우선) */
@@ -103,24 +100,6 @@ export class MarketRegimeService {
       this.logger.log(
         `Market regime [${refIndex.name}]: ${regime} (ADX=${adx.toFixed(1)}, MA20=${ma20.toFixed(2)}, MA60=${ma60.toFixed(2)}, price=${indexPrice.toFixed(2)})`,
       );
-
-      // DB 스냅샷 저장
-      try {
-        await this.prisma.marketRegimeSnapshot.create({
-          data: {
-            market: market as Market,
-            exchangeCode,
-            regime: regime as MarketRegime,
-            adx,
-            ma20,
-            ma60,
-            indexPrice,
-            details: JSON.stringify({ refIndexName: refIndex.name, dataPoints: prices.length }),
-          },
-        });
-      } catch (e) {
-        this.logger.warn(`Failed to save regime snapshot: ${e.message}`);
-      }
 
       return regime;
     } catch (e) {

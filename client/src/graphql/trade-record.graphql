@@ -1,5 +1,5 @@
-query GetTrades($market: Market, $side: Side, $limit: Int, $offset: Int) {
-  trades(market: $market, side: $side, limit: $limit, offset: $offset) {
+query GetTrades($input: TradeFilterInput) {
+  trades(input: $input) {
     id
     market
     exchangeCode
@@ -40,8 +40,8 @@ query GetTrade($id: ID!) {
   }
 }
 
-query GetPositions($market: Market) {
-  positions(market: $market) {
+query GetPositions($input: PositionsFilterInput) {
+  positions(input: $input) {
     id
     market
     exchangeCode
@@ -68,8 +68,8 @@ query GetQuote($stockCode: String!) {
   }
 }
 
-query GetOverseasQuote($exchangeCode: String!, $symbol: String!) {
-  overseasQuote(exchangeCode: $exchangeCode, symbol: $symbol) {
+query GetOverseasQuote($input: OverseasQuoteInput!) {
+  overseasQuote(input: $input) {
     stockCode
     stockName
     currentPrice
@@ -77,6 +77,17 @@ query GetOverseasQuote($exchangeCode: String!, $symbol: String!) {
     highPrice
     lowPrice
     volume
+  }
+}
+
+query GetAccountSummary {
+  accountSummary {
+    cashBalance
+    totalInvested
+    totalAssets
+    totalProfitLoss
+    profitRate
+    positionCount
   }
 }
 
@@ -89,16 +100,3 @@ query GetDashboardSummary {
   }
 }
 
-query GetStrategyExecutions($stockCode: String, $strategyName: String, $limit: Int) {
-  strategyExecutions(stockCode: $stockCode, strategyName: $strategyName, limit: $limit) {
-    id
-    market
-    stockCode
-    strategyName
-    executedDate
-    progress
-    signalCount
-    details
-    createdAt
-  }
-}

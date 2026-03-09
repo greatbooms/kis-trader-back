@@ -6,3 +6,6 @@ export { SimulationMetricsType } from './simulation-metrics.object';
 export { SimulationWatchStockType } from './simulation-watch-stock.object';
 export { CreateSimulationInput, WatchStockInput } from './create-simulation.input';
 export { AddSimulationWatchStockInput } from './add-simulation-watch-stock.input';
+export { SimulationTradesFilterInput } from './simulation-trades-filter.input';
+export { UpdateSimulationStatusInput } from './update-simulation-status.input';
+export { SimulationSessionsFilterInput } from './simulation-sessions-filter.input';

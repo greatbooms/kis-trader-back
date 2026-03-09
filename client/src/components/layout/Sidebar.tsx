@@ -9,6 +9,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  CandlestickChart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarProps } from '@/components/types'
@@ -19,6 +20,7 @@ const navItems = [
   { to: '/strategy-guide', icon: BookOpen, label: '전략 가이드' },
   { to: '/watchlist', icon: Eye, label: '관심종목' },
   { to: '/portfolio', icon: TrendingUp, label: '포트폴리오' },
+  { to: '/quote', icon: CandlestickChart, label: '시세 조회' },
   { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
   { to: '/settings', icon: Settings, label: '설정' },
 ]

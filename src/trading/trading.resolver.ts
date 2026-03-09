@@ -9,13 +9,15 @@ import { GqlAuthGuard } from '../auth/auth.guard';
 import { StrategyRegistryService } from './strategy/strategy-registry.service';
 import { MarketRegimeService } from './market-regime.service';
 import { RiskManagementService } from './risk-management.service';
-import { Market } from '@prisma/client';
 import {
   StrategyInfo,
   StrategyAllocationType,
   MarketRegimeType,
   RiskStateType,
   SetStrategyAllocationInput,
+  StrategyAllocationsFilterInput,
+  MarketRegimeFilterInput,
+  RiskStateFilterInput,
 } from './dto';
 
 @Resolver()
@@ -39,10 +41,10 @@ export class TradingResolver {
 
   @Query(() => [StrategyAllocationType], { name: 'strategyAllocations' })
   async getStrategyAllocations(
-    @Args('market', { type: () => Market }) market: Market,
+    @Args('input') input: StrategyAllocationsFilterInput,
   ): Promise<StrategyAllocationType[]> {
     const allocations = await this.strategyRegistry.getAllocations(
-      market as 'DOMESTIC' | 'OVERSEAS',
+      input.market as 'DOMESTIC' | 'OVERSEAS',
     );
     return allocations.map((a) => ({
       id: a.id,
@@ -55,21 +57,20 @@ export class TradingResolver {
 
   @Query(() => MarketRegimeType, { name: 'marketRegime' })
   async getMarketRegime(
-    @Args('market', { type: () => Market }) market: Market,
-    @Args('exchangeCode') exchangeCode: string,
+    @Args('input') input: MarketRegimeFilterInput,
   ): Promise<MarketRegimeType> {
     const regime = await this.marketRegimeService.getRegime(
-      market as 'DOMESTIC' | 'OVERSEAS',
-      exchangeCode,
+      input.market as 'DOMESTIC' | 'OVERSEAS',
+      input.exchangeCode,
     );
-    return { regime, market, exchangeCode };
+    return { regime, market: input.market, exchangeCode: input.exchangeCode };
   }
 
   @Query(() => RiskStateType, { name: 'riskState' })
   async getRiskState(
-    @Args('market', { type: () => Market }) market: Market,
+    @Args('input') input: RiskStateFilterInput,
   ): Promise<RiskStateType> {
-    return this.riskManagement.evaluateRisk(market as 'DOMESTIC' | 'OVERSEAS');
+    return this.riskManagement.evaluateRisk(input.market as 'DOMESTIC' | 'OVERSEAS');
   }
 
   @Mutation(() => StrategyAllocationType)

@@ -16,7 +16,7 @@ export function useAuth(): UseAuthReturn {
     async (username: string, password: string) => {
       setError(null)
       try {
-        const { data } = await loginMutation({ variables: { username, password } })
+        const { data } = await loginMutation({ variables: { input: { username, password } } })
         if (data?.login.success) {
           setAuthenticated(true)
           navigate('/')

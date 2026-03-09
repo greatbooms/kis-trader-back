@@ -272,14 +272,15 @@ export class TradingScheduler implements OnModuleInit {
             }
           }
 
-          const existing = await this.prisma.strategyExecution.findUnique({
+          // 오늘 해당 종목+전략으로 이미 체결된 매매가 있는지 확인
+          const todayStart = new Date(today + 'T00:00:00');
+          const todayEnd = new Date(today + 'T23:59:59');
+          const existingTrade = await this.prisma.tradeRecord.findFirst({
             where: {
-              market_stockCode_strategyName_executedDate: {
-                market: market as Market,
-                stockCode: ws.stockCode,
-                strategyName,
-                executedDate: today,
-              },
+              stockCode: ws.stockCode,
+              strategyName,
+              status: 'FILLED',
+              createdAt: { gte: todayStart, lte: todayEnd },
             },
           });
 
@@ -314,7 +315,7 @@ export class TradingScheduler implements OnModuleInit {
               currentPrice: Number(pos.currentPrice),
               totalInvested: Number(pos.totalInvested),
             } : undefined,
-            alreadyExecutedToday: !!existing,
+            alreadyExecutedToday: !!existingTrade,
             marketCondition,
             stockIndicators,
             fundamentals,

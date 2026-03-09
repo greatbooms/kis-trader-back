@@ -1,6 +1,7 @@
 import { Resolver, Mutation, Args, Context } from '@nestjs/graphql';
 import { AuthService } from './auth.service';
 import { AuthPayload } from './dto/auth.object';
+import { LoginInput } from './dto/login.input';
 import { Response } from 'express';
 
 const COOKIE_NAME = 'access_token';
@@ -12,11 +13,10 @@ export class AuthResolver {
 
   @Mutation(() => AuthPayload)
   async login(
-    @Args('username') username: string,
-    @Args('password') password: string,
+    @Args('input') input: LoginInput,
     @Context() ctx: { res: Response },
   ): Promise<AuthPayload> {
-    const { accessToken } = await this.authService.login(username, password);
+    const { accessToken } = await this.authService.login(input.username, input.password);
 
     ctx.res.cookie(COOKIE_NAME, accessToken, {
       httpOnly: true,

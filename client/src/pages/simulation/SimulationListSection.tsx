@@ -28,7 +28,7 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
   const [showModal, setShowModal] = useState(false)
 
   const { data, loading } = useGetSimulationSessionsQuery({
-    variables: { status: statusFilter ?? undefined },
+    variables: { input: statusFilter ? { status: statusFilter } : undefined },
   })
   const sessions = data?.simulationSessions ?? []
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
@@ -164,7 +164,7 @@ function CreateSimulationModal({
   const market = selectedCountry?.market ?? 'DOMESTIC'
 
   const [createMutation] = useCreateSimulationMutation({
-    refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { status: statusFilter ?? undefined } }],
+    refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { input: statusFilter ? { status: statusFilter } : undefined } }],
   })
 
   const handleCreate = async () => {

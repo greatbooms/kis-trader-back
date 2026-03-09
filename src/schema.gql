@@ -122,16 +122,13 @@ type DashboardSummaryType {
   winRate: Float!
 }
 
-type StrategyExecutionType {
-  id: ID!
-  market: Market!
-  stockCode: String!
-  strategyName: String!
-  executedDate: String!
-  progress: Float!
-  signalCount: Int!
-  details: String
-  createdAt: DateTime!
+type AccountSummaryType {
+  cashBalance: Float!
+  totalInvested: Float!
+  totalAssets: Float!
+  totalProfitLoss: Float!
+  profitRate: Float!
+  positionCount: Int!
 }
 
 type WatchStockType {
@@ -324,29 +321,96 @@ type ScreeningDateSummary {
 
 type Query {
   availableStrategies: [StrategyInfo!]!
-  strategyAllocations(market: Market!): [StrategyAllocationType!]!
-  marketRegime(market: Market!, exchangeCode: String!): MarketRegimeType!
-  riskState(market: Market!): RiskStateType!
-  trades(market: Market, side: Side, limit: Int, offset: Int): [TradeRecordType!]!
+  strategyAllocations(input: StrategyAllocationsFilterInput!): [StrategyAllocationType!]!
+  marketRegime(input: MarketRegimeFilterInput!): MarketRegimeType!
+  riskState(input: RiskStateFilterInput!): RiskStateType!
+  trades(input: TradeFilterInput): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
-  positions(market: Market): [PositionType!]!
+  positions(input: PositionsFilterInput): [PositionType!]!
   quote(stockCode: String!): StockPriceType
-  overseasQuote(exchangeCode: String!, symbol: String!): StockPriceType
+  overseasQuote(input: OverseasQuoteInput!): StockPriceType
+  accountSummary: AccountSummaryType!
   dashboardSummary: DashboardSummaryType!
-  strategyExecutions(stockCode: String, strategyName: String, limit: Int): [StrategyExecutionType!]!
-  watchStocks(market: Market): [WatchStockType!]!
-  simulationSessions(status: SimulationStatus): [SimulationSessionType!]!
+  watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
+  simulationSessions(input: SimulationSessionsFilterInput): [SimulationSessionType!]!
   simulationSession(id: String!): SimulationSessionType
   simulationPositions(sessionId: String!): [SimulationPositionType!]!
-  simulationTrades(sessionId: String!, limit: Int, offset: Int): [SimulationTradeType!]!
+  simulationTrades(input: SimulationTradesFilterInput!): [SimulationTradeType!]!
   simulationSnapshots(sessionId: String!): [SimulationSnapshotType!]!
   simulationMetrics(sessionId: String!): SimulationMetricsType!
-  searchStocks(keyword: String!, market: Market, limit: Int, exchangeCode: String): [StockSearchResult!]!
-  stockRecommendations(date: String, market: String, limit: Float = 20): [StockRecommendationType!]!
-  screeningDates(limit: Float = 10): [String!]!
-  screeningDateSummaries(limit: Float = 10): [ScreeningDateSummary!]!
-  runScreeningNow(market: String!, exchangeCode: String): Boolean!
+  searchStocks(input: SearchStocksInput!): [StockSearchResult!]!
+  stockRecommendations(input: StockRecommendationsFilterInput): [StockRecommendationType!]!
+  screeningDates(input: ScreeningListFilterInput): [String!]!
+  screeningDateSummaries(input: ScreeningListFilterInput): [ScreeningDateSummary!]!
+  runScreeningNow(input: RunScreeningInput!): Boolean!
   screeningSettings: ScreeningSettingsType!
+}
+
+input StrategyAllocationsFilterInput {
+  market: Market!
+}
+
+input MarketRegimeFilterInput {
+  market: Market!
+  exchangeCode: String!
+}
+
+input RiskStateFilterInput {
+  market: Market!
+}
+
+input TradeFilterInput {
+  market: Market
+  side: Side
+  dateFrom: String
+  dateTo: String
+  limit: Int
+  offset: Int
+}
+
+input PositionsFilterInput {
+  market: Market
+}
+
+input OverseasQuoteInput {
+  exchangeCode: String!
+  symbol: String!
+}
+
+input WatchStocksFilterInput {
+  market: Market
+}
+
+input SimulationSessionsFilterInput {
+  status: SimulationStatus
+}
+
+input SimulationTradesFilterInput {
+  sessionId: String!
+  limit: Int
+  offset: Int
+}
+
+input SearchStocksInput {
+  keyword: String!
+  market: Market
+  limit: Int
+  exchangeCode: String
+}
+
+input StockRecommendationsFilterInput {
+  date: String
+  market: String
+  limit: Float
+}
+
+input ScreeningListFilterInput {
+  limit: Float
+}
+
+input RunScreeningInput {
+  market: String!
+  exchangeCode: String
 }
 
 type Mutation {
@@ -354,12 +418,12 @@ type Mutation {
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
-  login(username: String!, password: String!): AuthPayload!
+  login(input: LoginInput!): AuthPayload!
   logout: AuthPayload!
   createSimulation(input: CreateSimulationInput!): SimulationSessionType!
   addSimulationWatchStock(input: AddSimulationWatchStockInput!): SimulationWatchStockType!
   removeSimulationWatchStock(id: String!): Boolean!
-  updateSimulationStatus(id: String!, status: SimulationStatus!): SimulationSessionType!
+  updateSimulationStatus(input: UpdateSimulationStatusInput!): SimulationSessionType!
   resetSimulation(id: String!): SimulationSessionType!
   deleteSimulation(id: String!): Boolean!
   updateScreeningSettings(input: UpdateScreeningSettingsInput!): ScreeningSettingsType!
@@ -398,6 +462,11 @@ input UpdateWatchStockInput {
   strategyParams: String
 }
 
+input LoginInput {
+  username: String!
+  password: String!
+}
+
 input CreateSimulationInput {
   name: String!
   description: String
@@ -429,6 +498,11 @@ input AddSimulationWatchStockInput {
   stopLossRate: Float
   maxPortfolioRate: Float
   strategyParams: String
+}
+
+input UpdateSimulationStatusInput {
+  id: String!
+  status: SimulationStatus!
 }
 
 input UpdateScreeningSettingsInput {

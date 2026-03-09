@@ -1,5 +1,5 @@
-query GetWatchStocks($market: Market) {
-  watchStocks(market: $market) {
+query GetWatchStocks($input: WatchStocksFilterInput) {
+  watchStocks(input: $input) {
     id
     market
     exchangeCode

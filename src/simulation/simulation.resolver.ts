@@ -1,8 +1,7 @@
-import { Resolver, Query, Mutation, Args, Int } from '@nestjs/graphql';
+import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import { SimulationService } from './simulation.service';
-import { SimulationStatus } from '@prisma/client';
 import {
   SimulationSessionType,
   SimulationTradeType,
@@ -12,6 +11,9 @@ import {
   SimulationWatchStockType,
   CreateSimulationInput,
   AddSimulationWatchStockInput,
+  SimulationSessionsFilterInput,
+  SimulationTradesFilterInput,
+  UpdateSimulationStatusInput,
 } from './dto';
 
 @Resolver()
@@ -21,9 +23,9 @@ export class SimulationResolver {
 
   @Query(() => [SimulationSessionType], { name: 'simulationSessions' })
   async getSessions(
-    @Args('status', { type: () => SimulationStatus, nullable: true }) status?: SimulationStatus,
+    @Args('input', { nullable: true }) input?: SimulationSessionsFilterInput,
   ): Promise<SimulationSessionType[]> {
-    const sessions = await this.simulationService.getSessions(status);
+    const sessions = await this.simulationService.getSessions(input?.status);
     return sessions.map((s) => this.mapSession(s));
   }
 
@@ -58,11 +60,9 @@ export class SimulationResolver {
 
   @Query(() => [SimulationTradeType], { name: 'simulationTrades' })
   async getTrades(
-    @Args('sessionId') sessionId: string,
-    @Args('limit', { type: () => Int, nullable: true }) limit?: number,
-    @Args('offset', { type: () => Int, nullable: true }) offset?: number,
+    @Args('input') input: SimulationTradesFilterInput,
   ): Promise<SimulationTradeType[]> {
-    const trades = await this.simulationService.getTrades(sessionId, limit, offset);
+    const trades = await this.simulationService.getTrades(input.sessionId, input.limit, input.offset);
     return trades.map((t) => ({
       id: t.id,
       sessionId: t.sessionId,
@@ -134,10 +134,9 @@ export class SimulationResolver {
 
   @Mutation(() => SimulationSessionType)
   async updateSimulationStatus(
-    @Args('id') id: string,
-    @Args('status', { type: () => SimulationStatus }) status: SimulationStatus,
+    @Args('input') input: UpdateSimulationStatusInput,
   ): Promise<SimulationSessionType> {
-    const session = await this.simulationService.updateStatus(id, status);
+    const session = await this.simulationService.updateStatus(input.id, input.status);
     return this.mapSession(session);
   }
 

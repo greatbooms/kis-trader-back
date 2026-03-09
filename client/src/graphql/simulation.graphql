@@ -1,5 +1,5 @@
-query GetSimulationSessions($status: SimulationStatus) {
-  simulationSessions(status: $status) {
+query GetSimulationSessions($input: SimulationSessionsFilterInput) {
+  simulationSessions(input: $input) {
     id
     name
     description
@@ -75,8 +75,8 @@ query GetSimulationPositions($sessionId: String!) {
   }
 }
 
-query GetSimulationTrades($sessionId: String!, $limit: Int, $offset: Int) {
-  simulationTrades(sessionId: $sessionId, limit: $limit, offset: $offset) {
+query GetSimulationTrades($input: SimulationTradesFilterInput!) {
+  simulationTrades(input: $input) {
     id
     market
     exchangeCode
@@ -153,8 +153,8 @@ mutation RemoveSimulationWatchStock($id: String!) {
   removeSimulationWatchStock(id: $id)
 }
 
-mutation UpdateSimulationStatus($id: String!, $status: SimulationStatus!) {
-  updateSimulationStatus(id: $id, status: $status) {
+mutation UpdateSimulationStatus($input: UpdateSimulationStatusInput!) {
+  updateSimulationStatus(input: $input) {
     id
     status
     stoppedAt

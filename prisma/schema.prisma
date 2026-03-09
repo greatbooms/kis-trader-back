@@ -68,35 +68,7 @@ model WatchStock {
   @@map("watch_stocks")
 }
 
-model StrategyExecution {
-  id           String   @id @default(uuid())
-  market       Market
-  stockCode    String   @map("stock_code")
-  strategyName String   @map("strategy_name")
-  executedDate String   @map("executed_date")
-  progress     Decimal  @map("progress") @db.Decimal(8, 2)
-  signalCount  Int      @map("signal_count")
-  details      String?
-  createdAt    DateTime @default(now()) @map("created_at")
 
-  @@unique([market, stockCode, strategyName, executedDate])
-  @@map("strategy_executions")
-}
-
-model MarketRegimeSnapshot {
-  id           String       @id @default(uuid())
-  market       Market
-  exchangeCode String       @map("exchange_code")
-  regime       MarketRegime
-  adx          Decimal      @db.Decimal(8, 4)
-  ma20         Decimal      @db.Decimal(16, 4)
-  ma60         Decimal      @db.Decimal(16, 4)
-  indexPrice   Decimal      @map("index_price") @db.Decimal(16, 4)
-  details      String?
-  createdAt    DateTime     @default(now()) @map("created_at")
-
-  @@map("market_regime_snapshots")
-}
 
 model RiskSnapshot {
   id             String   @id @default(uuid())
@@ -297,11 +269,6 @@ enum OrderStatus {
   FAILED
 }
 
-enum MarketRegime {
-  TRENDING_UP
-  SIDEWAYS
-  TRENDING_DOWN
-}
 
 enum SimulationStatus {
   RUNNING

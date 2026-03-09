@@ -24,7 +24,7 @@ export function StockSearchInput({ market, exchangeCode, placeholder = '종목�
   const { data, loading } = useQuery<SearchStocksQuery, SearchStocksQueryVariables>(
     SearchStocksDocument,
     {
-      variables: { keyword: debouncedKeyword || '', market: market ?? undefined, limit: 15, exchangeCode: exchangeCode ?? undefined },
+      variables: { input: { keyword: debouncedKeyword || '', market: market ?? undefined, limit: 15, exchangeCode: exchangeCode ?? undefined } },
       skip: shouldSkip,
     },
   )

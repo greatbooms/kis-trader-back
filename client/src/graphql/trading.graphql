@@ -15,16 +15,16 @@ query GetAvailableStrategies {
   }
 }
 
-query GetMarketRegime($market: Market!, $exchangeCode: String!) {
-  marketRegime(market: $market, exchangeCode: $exchangeCode) {
+query GetMarketRegime($input: MarketRegimeFilterInput!) {
+  marketRegime(input: $input) {
     regime
     market
     exchangeCode
   }
 }
 
-query GetRiskState($market: Market!) {
-  riskState(market: $market) {
+query GetRiskState($input: RiskStateFilterInput!) {
+  riskState(input: $input) {
     buyBlocked
     liquidateAll
     positionCount

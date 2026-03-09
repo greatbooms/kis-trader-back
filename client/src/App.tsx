@@ -9,6 +9,7 @@ import { PortfolioPage } from '@/pages/PortfolioPage'
 import { StrategyGuidePage } from '@/pages/StrategyGuidePage'
 import { ScreeningPage } from '@/pages/ScreeningPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { QuotePage } from '@/pages/QuotePage'
 
 const SimulationPage = lazy(() =>
   import('@/pages/SimulationPage').then((m) => ({ default: m.SimulationPage }))
@@ -32,6 +33,7 @@ function App() {
           <Route path="/strategy-guide" element={<StrategyGuidePage />} />
           <Route path="/simulation" element={<Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>}><SimulationPage /></Suspense>} />
           <Route path="/screening" element={<ScreeningPage />} />
+          <Route path="/quote" element={<QuotePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

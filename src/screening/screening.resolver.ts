@@ -1,7 +1,15 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
-import { StockRecommendationType, ScreeningSettingsType, UpdateScreeningSettingsInput, ScreeningDateSummary } from './dto';
+import {
+  StockRecommendationType,
+  ScreeningSettingsType,
+  UpdateScreeningSettingsInput,
+  ScreeningDateSummary,
+  StockRecommendationsFilterInput,
+  ScreeningListFilterInput,
+  RunScreeningInput,
+} from './dto';
 import { PrismaService } from '../prisma.service';
 
 const SCREENING_SETTINGS_KEY = 'screening-countries';
@@ -25,11 +33,11 @@ export class ScreeningResolver {
 
   @Query(() => [StockRecommendationType])
   async stockRecommendations(
-    @Args('date', { nullable: true }) date?: string,
-    @Args('market', { nullable: true }) market?: string,
-    @Args('limit', { nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('input', { nullable: true }) input?: StockRecommendationsFilterInput,
   ): Promise<StockRecommendationType[]> {
-    let targetDate = date;
+    let targetDate = input?.date;
+    const market = input?.market;
+    const limit = input?.limit ?? 20;
     if (!targetDate) {
       const dates = await this.screeningService.getScreeningDates(1);
       targetDate = dates[0];
@@ -62,27 +70,26 @@ export class ScreeningResolver {
 
   @Query(() => [String])
   async screeningDates(
-    @Args('limit', { nullable: true, defaultValue: 10 }) limit?: number,
+    @Args('input', { nullable: true }) input?: ScreeningListFilterInput,
   ): Promise<string[]> {
-    return this.screeningService.getScreeningDates(limit);
+    return this.screeningService.getScreeningDates(input?.limit ?? 10);
   }
 
   @Query(() => [ScreeningDateSummary])
   async screeningDateSummaries(
-    @Args('limit', { nullable: true, defaultValue: 10 }) limit?: number,
+    @Args('input', { nullable: true }) input?: ScreeningListFilterInput,
   ): Promise<ScreeningDateSummary[]> {
-    return this.screeningService.getScreeningDateSummaries(limit);
+    return this.screeningService.getScreeningDateSummaries(input?.limit ?? 10);
   }
 
   @Query(() => Boolean)
   async runScreeningNow(
-    @Args('market') market: string,
-    @Args('exchangeCode', { nullable: true }) exchangeCode?: string,
+    @Args('input') input: RunScreeningInput,
   ): Promise<boolean> {
-    if (market === 'DOMESTIC') {
+    if (input.market === 'DOMESTIC') {
       await this.screeningScheduler.runDomesticScreening();
-    } else if (exchangeCode) {
-      await this.screeningScheduler.runOverseasScreening([exchangeCode]);
+    } else if (input.exchangeCode) {
+      await this.screeningScheduler.runOverseasScreening([input.exchangeCode]);
     } else {
       await this.screeningScheduler.runOverseasScreening(['NASD', 'NYSE', 'AMEX']);
     }

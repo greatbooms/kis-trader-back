@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MarketRegimeService } from './market-regime.service';
 import { MarketAnalysisService } from './market-analysis.service';
-import { PrismaService } from '../prisma.service';
 
 describe('MarketRegimeService', () => {
   let service: MarketRegimeService;
@@ -12,18 +11,11 @@ describe('MarketRegimeService', () => {
     calculateADX: jest.fn(),
   };
 
-  const mockPrisma = {
-    marketRegimeSnapshot: {
-      create: jest.fn(),
-    },
-  };
-
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MarketRegimeService,
         { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
-        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -50,7 +42,6 @@ describe('MarketRegimeService', () => {
         return 0;
       });
       mockMarketAnalysis.calculateADX.mockReturnValue(30); // > 25
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       const result = await service.getRegime('DOMESTIC', 'KRX');
 
@@ -69,7 +60,6 @@ describe('MarketRegimeService', () => {
         return 0;
       });
       mockMarketAnalysis.calculateADX.mockReturnValue(30);
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       const result = await service.getRegime('DOMESTIC', 'KRX');
       expect(result).toBe('TRENDING_DOWN');
@@ -84,7 +74,6 @@ describe('MarketRegimeService', () => {
         return 0;
       });
       mockMarketAnalysis.calculateADX.mockReturnValue(20); // <= 25
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       const result = await service.getRegime('DOMESTIC', 'KRX');
       expect(result).toBe('SIDEWAYS');
@@ -94,7 +83,6 @@ describe('MarketRegimeService', () => {
       mockMarketAnalysis.fetchIndexDailyPrices.mockResolvedValue(
         generateMockPrices(30), // < 60
       );
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       const result = await service.getRegime('DOMESTIC', 'KRX');
       expect(result).toBe('SIDEWAYS');
@@ -105,7 +93,6 @@ describe('MarketRegimeService', () => {
       mockMarketAnalysis.fetchIndexDailyPrices.mockResolvedValue(prices);
       mockMarketAnalysis.calculateMA.mockReturnValue(100);
       mockMarketAnalysis.calculateADX.mockReturnValue(20);
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       await service.getRegime('DOMESTIC', 'KRX');
       await service.getRegime('DOMESTIC', 'KRX');
@@ -127,7 +114,6 @@ describe('MarketRegimeService', () => {
       mockMarketAnalysis.fetchIndexDailyPrices.mockResolvedValue(prices);
       mockMarketAnalysis.calculateMA.mockReturnValue(100);
       mockMarketAnalysis.calculateADX.mockReturnValue(20);
-      mockPrisma.marketRegimeSnapshot.create.mockResolvedValue({});
 
       const result = await service.detectAndSave('DOMESTIC', 'KRX');
       expect(result).toBe('SIDEWAYS');
