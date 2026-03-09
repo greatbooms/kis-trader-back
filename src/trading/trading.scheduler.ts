@@ -239,6 +239,19 @@ export class TradingScheduler implements OnModuleInit {
           stockIndicators.investCautionYn = price.investCautionYn;
           stockIndicators.marketWarnCode = price.marketWarnCode;
           stockIndicators.shortOverheatYn = price.shortOverheatYn;
+          // 가격 위치 지표
+          stockIndicators.d250High = price.d250High;
+          stockIndicators.d250Low = price.d250Low;
+          stockIndicators.d250HighRate = price.d250HighRate;
+          stockIndicators.d250LowRate = price.d250LowRate;
+          stockIndicators.yearHigh = price.yearHigh;
+          stockIndicators.yearLow = price.yearLow;
+          stockIndicators.yearHighRate = price.yearHighRate;
+          stockIndicators.yearLowRate = price.yearLowRate;
+          // 시가총액/리스크
+          stockIndicators.marketCap = price.marketCap;
+          stockIndicators.loanBalanceRate = price.loanBalanceRate;
+          stockIndicators.shortSellable = price.shortSellable;
 
           let buyableAmount = 0;
           if (market === 'DOMESTIC') {

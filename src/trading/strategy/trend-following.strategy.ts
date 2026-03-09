@@ -151,12 +151,21 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         !riskState?.buyBlocked
       ) {
         const quota = watchStock.quota || 0;
-        const pyramidAmount = Math.min(quota * params.pyramidingRatio, ctx.buyableAmount);
+        let pyramidRatio = params.pyramidingRatio;
+
+        // 250일/연중 최고가 근접 시 피라미딩 비율 확대 (추세 강도 보강)
+        if (stockIndicators.d250HighRate !== undefined && stockIndicators.d250HighRate >= -5) {
+          pyramidRatio = Math.min(pyramidRatio * 1.3, 0.8);
+        }
+
+        const pyramidAmount = Math.min(quota * pyramidRatio, ctx.buyableAmount);
         const pyramidQty = Math.floor(pyramidAmount / curPrice);
 
         if (pyramidQty > 0) {
+          const highProximity = stockIndicators.d250HighRate !== undefined && stockIndicators.d250HighRate >= -5
+            ? `, 250d고점근접` : '';
           this.logger.log(
-            `[${watchStock.stockCode}] PYRAMIDING: profit=${(profitRate * 100).toFixed(1)}%, ADX=${adx14.toFixed(1)}`,
+            `[${watchStock.stockCode}] PYRAMIDING: profit=${(profitRate * 100).toFixed(1)}%, ADX=${adx14.toFixed(1)}${highProximity}`,
           );
           signals.push({
             market,
@@ -165,7 +174,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
             side: 'BUY',
             quantity: pyramidQty,
             price: roundPrice(curPrice),
-            reason: `피라미딩: +${(profitRate * 100).toFixed(1)}%, ADX=${adx14.toFixed(1)}`,
+            reason: `피라미딩: +${(profitRate * 100).toFixed(1)}%, ADX=${adx14.toFixed(1)}${highProximity}`,
           });
         }
       }

@@ -168,6 +168,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       details.quotaAdjust_rsi = true;
     }
 
+    // 융자잔고 10% 초과 시 quota 30% 감소 (레버리지 청산 위험)
+    if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 10) {
+      adjustedQuota *= 0.7;
+      details.quotaAdjust_loanBalance = true;
+    }
+
     // 개선 D: 가용자금 한도
     adjustedQuota = Math.min(adjustedQuota, ctx.buyableAmount);
 

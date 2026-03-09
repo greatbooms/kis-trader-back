@@ -186,6 +186,12 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
       if (stockIndicators.investCautionYn) return signals;
       if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
 
+      // 융자잔고 15% 초과 시 진입 차단 (레버리지 청산 리스크)
+      if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 15) {
+        this.logger.debug(`[${watchStock.stockCode}] Loan balance too high: ${stockIndicators.loanBalanceRate.toFixed(1)}%`);
+        return signals;
+      }
+
       // 진입 조건: BB 하단 터치
       if (bollingerLower === undefined || rsi14 === undefined) return signals;
       if (macdHistogram === undefined || macdPrevHistogram === undefined) return signals;
@@ -201,7 +207,15 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
 
       // 모든 조건 충족 → 그리드 1단계 매수
       const quota = watchStock.quota || 0;
-      const buyAmount = Math.min(quota, ctx.buyableAmount);
+      let buyAmount = Math.min(quota, ctx.buyableAmount);
+
+      // 250일 저점 대비 +10% 이내면 비중 30% 확대 (바닥 근접, 반등 확률 높음)
+      if (stockIndicators.d250LowRate !== undefined && stockIndicators.d250LowRate <= 10) {
+        buyAmount *= 1.3;
+        buyAmount = Math.min(buyAmount, ctx.buyableAmount);
+        this.logger.log(`[${watchStock.stockCode}] 250d low proximity (+${stockIndicators.d250LowRate.toFixed(0)}%), grid amount +30%`);
+      }
+
       const gridRatios: number[] = params.gridRatios;
       const firstGridAmount = buyAmount * gridRatios[0];
       const buyQty = Math.floor(firstGridAmount / curPrice);

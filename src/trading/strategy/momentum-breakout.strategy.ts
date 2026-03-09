@@ -209,8 +209,12 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       const buyQty = Math.floor(buyAmount / curPrice);
 
       if (buyQty > 0) {
+        // 연중 최고가 근접/돌파 시 reason에 표기 (추가 확신 시그널)
+        const yearHighNote = stockIndicators.yearHighRate !== undefined && stockIndicators.yearHighRate >= -3
+          ? `, 연중최고근접` : '';
+
         this.logger.log(
-          `[${watchStock.stockCode}] BUY signal: price=${curPrice}, MA20=${ma20.toFixed(2)}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, breakout=${breakoutPrice.toFixed(2)}`,
+          `[${watchStock.stockCode}] BUY signal: price=${curPrice}, MA20=${ma20.toFixed(2)}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, breakout=${breakoutPrice.toFixed(2)}${yearHighNote}`,
         );
         signals.push({
           market,
@@ -219,7 +223,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `모멘텀돌파: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, K돌파=${breakoutPrice.toFixed(0)}`,
+          reason: `모멘텀돌파: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, K돌파=${breakoutPrice.toFixed(0)}${yearHighNote}`,
         });
       }
     }

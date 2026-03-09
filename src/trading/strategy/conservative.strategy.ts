@@ -143,15 +143,24 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
       // 거래량 >= 2배
       if (volumeRatio < params.volumeThreshold) return signals;
 
-      // 보수적 모드: 자금의 30%만 사용
+      // 보수적 모드: 기본 자금의 30%만 사용
       const quota = watchStock.quota || 0;
-      const availableRate = 1 - params.cashRate; // 0.3
+      let availableRate = 1 - params.cashRate; // 0.3
+
+      // 공매도 불가 + 융자잔고 낮음 → 하방 방어력 높아 cashRate 완화 (40% 사용)
+      const isDefensive = stockIndicators.shortSellable === false
+        && (stockIndicators.loanBalanceRate === undefined || stockIndicators.loanBalanceRate < 3);
+      if (isDefensive) {
+        availableRate = Math.min(availableRate + 0.1, 0.5);
+      }
+
       const buyAmount = Math.min(quota * availableRate, ctx.buyableAmount);
       const buyQty = Math.floor(buyAmount / curPrice);
 
       if (buyQty > 0) {
+        const defensiveNote = isDefensive ? ', 하방방어력+' : '';
         this.logger.log(
-          `[${watchStock.stockCode}] CONSERVATIVE BUY: price=${curPrice}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x`,
+          `[${watchStock.stockCode}] CONSERVATIVE BUY: price=${curPrice}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, rate=${(availableRate * 100).toFixed(0)}%${defensiveNote}`,
         );
         signals.push({
           market,
@@ -160,7 +169,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `보수적매수: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, 자금 ${(availableRate * 100).toFixed(0)}%`,
+          reason: `보수적매수: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, 자금 ${(availableRate * 100).toFixed(0)}%${defensiveNote}`,
         });
       }
     }
