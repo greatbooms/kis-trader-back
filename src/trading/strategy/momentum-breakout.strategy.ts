@@ -44,6 +44,11 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     '- 단기 매매에 적합 (보유기간 1~3일)',
     '- 손절 폭이 작아 리스크 관리에 유리',
     '- 강한 추세가 있는 종목에서 효과적',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고/단기과열 종목은 진입 차단',
+    '- 단일 종목 포트폴리오 비중 15% 초과 시 추가 매수 차단',
+    '- 연중 최고가 근접 시 돌파 확인 시그널 추가 표기',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'high',

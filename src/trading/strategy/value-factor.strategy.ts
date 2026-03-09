@@ -59,6 +59,10 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '- 저평가 우량주에 집중 투자',
     '- 재무 건전성을 기반으로 종목 필터링',
     '- 하루 1회 실행 (국내 15시, 해외 05시)',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고 종목은 진입 차단',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'low',

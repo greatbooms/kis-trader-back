@@ -38,6 +38,11 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
     '- 진입 조건이 매우 엄격하여 매매 빈도가 낮음',
     '- 작은 수익을 자주 실현하는 스타일',
     '- 큰 손실 위험이 적어 초보자에게 적합',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고 종목은 진입 차단',
+    '- 공매도 불가 + 융자잔고 3% 미만 종목은 하방 방어력이 높아 투자 비중 40%로 완화',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'very-low',

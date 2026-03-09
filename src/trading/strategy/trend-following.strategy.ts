@@ -45,6 +45,11 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     '- 수주~수개월 보유하는 중장기 전략',
     '- 강한 추세를 따라가며 수익을 극대화',
     '- 모멘텀 돌파와 달리 추세 소멸 시점까지 보유',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고 종목은 진입 차단',
+    '- 250일 최고가 근접(-5% 이내) 시 피라미딩 비율 30% 확대 (추세 강도 보강)',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',

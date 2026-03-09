@@ -49,6 +49,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
     '- 시초가 변동 안정 후 주문하여 적정 가격에 진입',
     '- Buy2 지정가는 장 마감까지 체결 기회를 가짐',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고 종목은 신규 진입 차단',
+    '- 융자잔고 10% 초과 시 매수금액 30% 축소 (레버리지 청산 리스크 방어)',
+    '- 지수 MA200 하회 시 매수 중단, 매도만 허용',
+    '- 금리 급등 시 매수금액 50% 축소',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',

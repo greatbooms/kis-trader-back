@@ -41,6 +41,12 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
     '- 횡보장/박스권 종목에 적합',
     '- 급락 시 분할 매수로 평균단가를 효과적으로 낮춤',
     '- 추세가 강한 하락장에서는 손절 주의',
+    '',
+    '【안전장치】',
+    '- 투자유의/시장경고 종목은 진입 차단',
+    '- 융자잔고 15% 초과 시 진입 차단 (레버리지 청산 리스크)',
+    '- 250일 저점 대비 +10% 이내 시 매수 비중 30% 확대 (바닥권 반등 확률 반영)',
+    '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
