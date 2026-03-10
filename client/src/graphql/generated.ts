@@ -538,6 +538,7 @@ export type StockRecommendationType = {
   fundamentalScore: Scalars["Float"]["output"];
   id: Scalars["String"]["output"];
   indicators: Scalars["String"]["output"];
+  isEtf: Scalars["Boolean"]["output"];
   market: Scalars["String"]["output"];
   marketCap: Scalars["Float"]["output"];
   momentumScore: Scalars["Float"]["output"];
@@ -738,6 +739,7 @@ export type GetStockRecommendationsQuery = {
     changeRate: number;
     volume: number;
     marketCap: number;
+    isEtf: boolean;
     createdAt: any;
     suggestedStrategies: Array<{
       __typename?: "SuggestedStrategyType";
@@ -1477,6 +1479,7 @@ export const GetStockRecommendationsDocument = gql`
       changeRate
       volume
       marketCap
+      isEtf
       createdAt
     }
   }

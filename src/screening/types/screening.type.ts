@@ -48,6 +48,39 @@ export interface StockScore {
   changeRate: number;
   volume: number;
   marketCap: number;
+  isEtf: boolean;
+}
+
+/** ETF/ETN/펀드 판별 키워드 */
+const ETF_NAME_KEYWORDS = [
+  // 해외 ETF
+  'ETF', 'ISHARES', 'SPDR', 'VANGUARD', 'PROSHARES', 'DIREXION',
+  'INVESCO', 'WISDOMTREE', 'VANECK', 'SCHWAB', 'FIRST TRUST',
+  'GLOBAL X', 'ARK ', 'AMPLIFY', 'GRANITESHARES',
+  'SELECT SECTOR', 'ULTRA ', 'LEVERAGED',
+  // 국내 ETF
+  'KODEX', 'TIGER', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'ACE',
+  'KOSEF', 'KINDEX', 'TIMEFOLIO', 'WOORI',
+  // ETN
+  'ETN', '레버리지', '인버스',
+  // 액티브펀드
+  'KOACT', 'TIME ', '액티브',
+  // SPAC
+  '스팩',
+];
+
+/** 종목코드 패턴 기반 ETF/ETN 판별 (국내) */
+const ETF_CODE_PATTERNS = [
+  /^[0-9]{3}[A-Z][0-9]/, // ETN: 예) Q530031
+  /^[0-9]{4}[A-Z][0-9]/, // 액티브펀드: 예) 0162Y0
+];
+
+/** 종목명 + 종목코드 기반 ETF/ETN/펀드 판별 */
+export function detectEtf(stockName: string, stockCode?: string): boolean {
+  const upper = stockName.toUpperCase();
+  if (ETF_NAME_KEYWORDS.some((kw) => upper.includes(kw))) return true;
+  if (stockCode && ETF_CODE_PATTERNS.some((p) => p.test(stockCode))) return true;
+  return false;
 }
 
 export interface StockIndicatorDetail {

@@ -23,6 +23,7 @@ query GetStockRecommendations($input: StockRecommendationsFilterInput) {
     changeRate
     volume
     marketCap
+    isEtf
     createdAt
   }
 }

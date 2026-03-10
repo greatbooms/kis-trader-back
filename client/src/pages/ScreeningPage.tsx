@@ -236,19 +236,24 @@ function StockDetailView({
   onBack: () => void
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [tab, setTab] = useState<'stock' | 'etf'>('stock')
   const countryOption = COUNTRY_OPTIONS.find((c) => c.value === country)
   const countryLabel = countryOption?.label || country
   const marketFilter = countryOption?.market ?? undefined
 
   const { data, loading } = useGetStockRecommendationsQuery({
-    variables: { input: { date, market: marketFilter, limit: 50 } },
+    variables: { input: { date, market: marketFilter, limit: 100 } },
   })
 
   const allRecommendations = data?.stockRecommendations ?? []
-  const recommendations = allRecommendations.filter((r) => {
+  const countryFiltered = allRecommendations.filter((r) => {
     if (!countryOption) return true
     return countryOption.exchanges.includes(r.exchangeCode)
   })
+
+  const stockRecs = countryFiltered.filter((r) => !r.isEtf)
+  const etfRecs = countryFiltered.filter((r) => r.isEtf)
+  const recommendations = tab === 'stock' ? stockRecs : etfRecs
 
   return (
     <>
@@ -266,9 +271,23 @@ function StockDetailView({
           <h3 className="text-lg font-semibold">{countryLabel} 종목 추천</h3>
           <p className="text-sm text-muted-foreground">{formatScreeningDate(date)}</p>
         </div>
-        <Badge variant="outline" className="ml-auto">
-          {recommendations.length}개 종목
-        </Badge>
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          variant={tab === 'stock' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => { setTab('stock'); setExpandedId(null) }}
+        >
+          개별주 ({stockRecs.length})
+        </Button>
+        <Button
+          variant={tab === 'etf' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => { setTab('etf'); setExpandedId(null) }}
+        >
+          ETF ({etfRecs.length})
+        </Button>
       </div>
 
       {loading ? (
@@ -277,7 +296,9 @@ function StockDetailView({
         <Card>
           <CardContent className="py-12 text-center">
             <Search className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">추천 종목이 없습니다</p>
+            <p className="text-muted-foreground">
+              {tab === 'stock' ? '추천 개별주가 없습니다' : '추천 ETF가 없습니다'}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -321,6 +342,7 @@ interface RecommendationCardProps {
     changeRate: number
     volume: number
     marketCap: number
+    isEtf: boolean
     reasons: string
     indicators: string
     suggestedStrategies: SuggestedStrategy[]

@@ -300,6 +300,7 @@ type StockRecommendationType {
   changeRate: Float!
   volume: Float!
   marketCap: Float!
+  isEtf: Boolean!
   createdAt: DateTime!
 }
 

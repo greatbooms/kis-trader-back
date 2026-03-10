@@ -28,5 +28,6 @@ export class StockRecommendationType {
   @Field(() => Float) changeRate: number;
   @Field(() => Float) volume: number;
   @Field(() => Float) marketCap: number;
+  @Field() isEtf: boolean;
   @Field() createdAt: Date;
 }

@@ -106,17 +106,26 @@ export class ScreeningScheduler implements OnModuleInit {
     this.isRunning = true;
     try {
       const date = this.todayStr();
+      const allScores: Awaited<ReturnType<typeof this.screeningService.screenOverseas>> = [];
+
       for (const exchange of filteredExchanges) {
         try {
           const scores = await this.screeningService.screenOverseas(exchange);
           if (scores.length > 0) {
-            await this.screeningService.saveResults(date, scores);
-            this.logger.log(`${exchange} screening saved: ${scores.length} stocks`);
-            await this.slackService.sendScreeningResult('OVERSEAS', date, scores);
+            allScores.push(...scores);
+            this.logger.log(`${exchange} screening done: ${scores.length} stocks`);
           }
         } catch (e) {
           this.logger.error(`${exchange} screening error: ${e.message}`);
         }
+      }
+
+      if (allScores.length > 0) {
+        // 전체 거래소 결과를 통합 정렬 후 저장 (rank 중복 방지)
+        allScores.sort((a, b) => b.totalScore - a.totalScore);
+        await this.screeningService.saveResults(date, allScores);
+        this.logger.log(`Overseas screening saved: ${allScores.length} stocks total`);
+        await this.slackService.sendScreeningResult('OVERSEAS', date, allScores);
       }
     } catch (e) {
       this.logger.error(`Overseas screening error: ${e.message}`);

@@ -64,6 +64,7 @@ export class ScreeningResolver {
       changeRate: Number(r.changeRate),
       volume: Number(r.volume),
       marketCap: Number(r.marketCap),
+      isEtf: r.isEtf,
       createdAt: r.createdAt,
     }));
   }

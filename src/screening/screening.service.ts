@@ -4,7 +4,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP } from '../kis/types/kis-config.types';
-import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy } from './types';
+import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy, detectEtf } from './types';
 
 // 거래소별 최소 시가총액 (단위: 천, 각국 통화) — 약 2000억원 상당
 const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
@@ -88,55 +88,50 @@ export class ScreeningService {
     return scores.slice(0, 20);
   }
 
-  /** 스크리닝 결과를 DB에 저장 */
+  /** 스크리닝 결과를 DB에 저장 (기존 결과 삭제 후 새로 저장, ETF/개별주 분리 rank) */
   async saveResults(date: string, scores: StockScore[]): Promise<void> {
-    for (let i = 0; i < scores.length; i++) {
-      const s = scores[i];
-      await this.prisma.stockRecommendation.upsert({
-        where: {
-          screeningDate_market_stockCode: {
+    if (scores.length === 0) return;
+
+    // 해당 날짜+마켓의 기존 결과 삭제
+    const market = scores[0].market;
+    await this.prisma.stockRecommendation.deleteMany({
+      where: { screeningDate: date, market: market as any },
+    });
+
+    // ETF와 개별주를 분리하여 각각 독립 rank 부여
+    const etfs = scores.filter((s) => s.isEtf).sort((a, b) => b.totalScore - a.totalScore);
+    const stocks = scores.filter((s) => !s.isEtf).sort((a, b) => b.totalScore - a.totalScore);
+
+    const saveGroup = async (group: StockScore[]) => {
+      for (let i = 0; i < group.length; i++) {
+        const s = group[i];
+        await this.prisma.stockRecommendation.create({
+          data: {
             screeningDate: date,
             market: s.market,
+            exchangeCode: s.exchangeCode,
             stockCode: s.stockCode,
+            stockName: s.stockName,
+            totalScore: s.totalScore,
+            technicalScore: s.technicalScore,
+            fundamentalScore: s.fundamentalScore,
+            momentumScore: s.momentumScore,
+            rank: i + 1,
+            reasons: s.reasons as any,
+            indicators: s.indicators as any,
+            suggestedStrategies: s.suggestedStrategies as any,
+            currentPrice: s.currentPrice,
+            changeRate: s.changeRate,
+            volume: s.volume,
+            marketCap: s.marketCap,
+            isEtf: s.isEtf,
           },
-        },
-        update: {
-          totalScore: s.totalScore,
-          technicalScore: s.technicalScore,
-          fundamentalScore: s.fundamentalScore,
-          momentumScore: s.momentumScore,
-          rank: i + 1,
-          reasons: s.reasons as any,
-          indicators: s.indicators as any,
-          suggestedStrategies: s.suggestedStrategies as any,
-          currentPrice: s.currentPrice,
-          changeRate: s.changeRate,
-          volume: s.volume,
-          marketCap: s.marketCap,
-          exchangeCode: s.exchangeCode,
-          stockName: s.stockName,
-        },
-        create: {
-          screeningDate: date,
-          market: s.market,
-          exchangeCode: s.exchangeCode,
-          stockCode: s.stockCode,
-          stockName: s.stockName,
-          totalScore: s.totalScore,
-          technicalScore: s.technicalScore,
-          fundamentalScore: s.fundamentalScore,
-          momentumScore: s.momentumScore,
-          rank: i + 1,
-          reasons: s.reasons as any,
-          indicators: s.indicators as any,
-          suggestedStrategies: s.suggestedStrategies as any,
-          currentPrice: s.currentPrice,
-          changeRate: s.changeRate,
-          volume: s.volume,
-          marketCap: s.marketCap,
-        },
-      });
-    }
+        });
+      }
+    };
+
+    await saveGroup(stocks);
+    await saveGroup(etfs);
   }
 
   /** 추천 결과 조회 */
@@ -385,6 +380,8 @@ export class ScreeningService {
       indicators.yearLowRate = priceDetail.yearLowRate;
       indicators.loanBalanceRate = priceDetail.loanBalanceRate;
       indicators.shortSellable = priceDetail.shortSellable;
+      if (priceDetail.per !== undefined) indicators.per = priceDetail.per;
+      if (priceDetail.pbr !== undefined) indicators.pbr = priceDetail.pbr;
     } catch {
       // 현재가 상세 조회 실패 시 무시
     }
@@ -394,8 +391,6 @@ export class ScreeningService {
       const finData = await this.kisDomestic.getFinancialRatio(candidate.stockCode);
       if (finData.length > 0) {
         const latest = finData[0];
-        indicators.per = parseFloat(latest.per) || undefined;
-        indicators.pbr = parseFloat(latest.pbr) || undefined;
         indicators.roe = parseFloat(latest.roe_val) || undefined;
         indicators.eps = parseFloat(latest.eps) || undefined;
         indicators.bps = parseFloat(latest.bps) || undefined;
@@ -421,6 +416,7 @@ export class ScreeningService {
       reasons: [...techReasons, ...fundReasons, ...momentumReasons],
       indicators,
       suggestedStrategies,
+      isEtf: detectEtf(candidate.stockName, candidate.stockCode),
     };
   }
 
@@ -438,6 +434,7 @@ export class ScreeningService {
     try {
       const priceDetail = await this.kisOverseas.getPrice(candidate.exchangeCode, candidate.stockCode);
       if (priceDetail.marketCap) candidate.marketCap = priceDetail.marketCap;
+      if (priceDetail.per !== undefined) indicators.per = priceDetail.per;
       if (priceDetail.pbr !== undefined) indicators.pbr = priceDetail.pbr;
       if (priceDetail.sector) indicators.sector = priceDetail.sector;
       if (priceDetail.prevDayVolume && priceDetail.prevDayVolume > 0 && candidate.volume > 0) {
@@ -467,6 +464,7 @@ export class ScreeningService {
       reasons: [...techReasons, ...fundReasons, ...momentumReasons],
       indicators,
       suggestedStrategies,
+      isEtf: detectEtf(candidate.stockName, candidate.stockCode),
     };
   }
 

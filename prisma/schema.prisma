@@ -129,11 +129,13 @@ model StockRecommendation {
   changeRate          Decimal  @map("change_rate") @db.Decimal(8, 4)
   volume              BigInt   @default(0)
   marketCap           BigInt   @default(0) @map("market_cap")
+  isEtf               Boolean  @default(false) @map("is_etf")
   createdAt           DateTime @default(now()) @map("created_at")
   suggestedStrategies Json?    @map("suggested_strategies")
 
   @@unique([screeningDate, market, stockCode])
   @@index([screeningDate, market])
+  @@index([screeningDate, market, isEtf])
   @@map("stock_recommendations")
 }
 
