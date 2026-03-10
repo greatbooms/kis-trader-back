@@ -50,3 +50,18 @@ export interface FilterLogContext {
   reason: string;
   details: Record<string, any>;
 }
+
+export interface StopLossApprovalRequest {
+  approvalId: string;
+  tradeRecordId: string;
+  stockCode: string;
+  stockName: string;
+  exchangeCode?: string;
+  market: string;
+  strategyName?: string;
+  quantity: number;
+  currentPrice: number;
+  avgPrice: number;
+  lossRate: number;
+  timeoutMinutes: number;
+}

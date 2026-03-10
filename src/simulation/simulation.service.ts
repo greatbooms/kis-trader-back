@@ -161,8 +161,8 @@ export class SimulationService {
           await this.virtualExecute(sessionId, signal, price.currentPrice);
         }
 
-        // 무한매수법: 매수금액 부족 시 다음 사이클로 누적 (1일 1회만)
-        if (session.strategyName === 'infinite-buy' && !todayTrade) {
+        // 분할매수 전략: 매수금액 부족 시 다음 사이클로 누적 (1일 1회만)
+        if (['infinite-buy', 'daily-dca'].includes(session.strategyName) && !todayTrade) {
           const params = (ws.strategyParams as Record<string, any>) || {};
           const hasBuySignal = signals.some((s) => s.side === 'BUY');
           const perCycleQuota = ws.quota ? Number(ws.quota) / ws.maxCycles : 0;

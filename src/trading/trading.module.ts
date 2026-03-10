@@ -12,6 +12,7 @@ import { GridMeanReversionStrategy } from './strategy/grid-mean-reversion.strate
 import { ConservativeStrategy } from './strategy/conservative.strategy';
 import { TrendFollowingStrategy } from './strategy/trend-following.strategy';
 import { ValueFactorStrategy } from './strategy/value-factor.strategy';
+import { DailyDcaStrategy } from './strategy/daily-dca.strategy';
 import { KisModule } from '../kis/kis.module';
 import { PrismaService } from '../prisma.service';
 import { NotificationModule } from '../notification/notification.module';
@@ -32,6 +33,7 @@ import { NotificationModule } from '../notification/notification.module';
     ConservativeStrategy,
     TrendFollowingStrategy,
     ValueFactorStrategy,
+    DailyDcaStrategy,
     PrismaService,
   ],
   exports: [TradingService, TradingScheduler, MarketAnalysisService, StrategyRegistryService, RiskManagementService],

@@ -25,6 +25,7 @@ model TradeRecord {
   reason        String?
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
+  stopLossApprovals StopLossApproval[]
 
   @@map("trade_records")
 }
@@ -267,6 +268,38 @@ enum OrderStatus {
   PARTIAL
   CANCELLED
   FAILED
+  AWAITING_APPROVAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model StopLossApproval {
+  id             String         @id @default(uuid())
+  tradeRecordId  String         @map("trade_record_id")
+  market         Market
+  exchangeCode   String?        @map("exchange_code")
+  stockCode      String         @map("stock_code")
+  stockName      String         @map("stock_name")
+  strategyName   String?        @map("strategy_name")
+  signal         Json
+  currentPrice   Decimal        @map("current_price") @db.Decimal(16, 4)
+  avgPrice       Decimal        @map("avg_price") @db.Decimal(16, 4)
+  quantity       Int
+  lossRate       Decimal        @map("loss_rate") @db.Decimal(8, 6)
+  status         ApprovalStatus @default(PENDING)
+  slackMessageTs String?        @map("slack_message_ts")
+  slackChannel   String?        @map("slack_channel")
+  requestedAt    DateTime       @default(now()) @map("requested_at")
+  respondedAt    DateTime?      @map("responded_at")
+  timeoutMinutes Int            @default(5) @map("timeout_minutes")
+  tradeRecord    TradeRecord    @relation(fields: [tradeRecordId], references: [id])
+
+  @@map("stop_loss_approvals")
 }
 
 

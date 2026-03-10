@@ -1,4 +1,4 @@
-import { Resolver, Query, Args, ID } from '@nestjs/graphql';
+import { Resolver, Query, Mutation, Args, ID } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { TradeRecordService } from './trade-record.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
@@ -13,6 +13,8 @@ import {
   TradeFilterInput,
   OverseasQuoteInput,
   PositionsFilterInput,
+  ManualSellInput,
+  ManualSellResult,
 } from './dto';
 
 @Resolver()
@@ -59,4 +61,8 @@ export class TradeRecordResolver {
     return this.tradeRecordService.getDashboardSummary();
   }
 
+  @Mutation(() => ManualSellResult, { name: 'manualSell' })
+  async manualSell(@Args('input') input: ManualSellInput): Promise<ManualSellResult> {
+    return this.tradeRecordService.manualSell(input);
+  }
 }

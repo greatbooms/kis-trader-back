@@ -84,6 +84,7 @@ enum OrderStatus {
   PARTIAL
   CANCELLED
   FAILED
+  AWAITING_APPROVAL
 }
 
 """
@@ -129,6 +130,12 @@ type AccountSummaryType {
   totalProfitLoss: Float!
   profitRate: Float!
   positionCount: Int!
+}
+
+type ManualSellResult {
+  success: Boolean!
+  message: String
+  orderNo: String
 }
 
 type WatchStockType {
@@ -415,6 +422,7 @@ input RunScreeningInput {
 
 type Mutation {
   setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
+  manualSell(input: ManualSellInput!): ManualSellResult!
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
@@ -434,6 +442,15 @@ input SetStrategyAllocationInput {
   strategyName: String!
   allocationRate: Float!
   isActive: Boolean
+}
+
+input ManualSellInput {
+  stockCode: String!
+  market: String!
+  exchangeCode: String
+
+  """매도 수량 (미지정 시 전량)"""
+  quantity: Float
 }
 
 input CreateWatchStockInput {

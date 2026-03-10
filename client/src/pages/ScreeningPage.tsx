@@ -324,6 +324,7 @@ interface RecommendationCardProps {
     reasons: string
     indicators: string
     suggestedStrategies: SuggestedStrategy[]
+    createdAt: string
   }
   expanded: boolean
   onToggle: () => void
@@ -357,6 +358,9 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
                   <Badge variant="outline" className="text-xs">
                     {EXCHANGE_LABELS[rec.exchangeCode] || rec.exchangeCode}
                   </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(rec.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                   <span className={`text-sm font-medium ${rec.changeRate >= 0 ? 'text-success' : 'text-danger'}`}>
                     {rec.changeRate >= 0 ? '+' : ''}{rec.changeRate.toFixed(2)}%
                   </span>

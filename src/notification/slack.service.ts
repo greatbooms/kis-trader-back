@@ -7,6 +7,7 @@ import {
   TradeAlertContext,
   DailySummaryContext,
   FilterLogContext,
+  StopLossApprovalRequest,
 } from './types/notification.types';
 
 @Injectable()
@@ -239,6 +240,111 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       this.logger.error(`Failed to send screening result: ${e.message}`);
       this.handleSendError(e);
+    }
+  }
+
+  /** 손절 승인 요청 메시지 전송 (버튼 포함) — 메시지 ts 반환 */
+  async sendStopLossApproval(req: StopLossApprovalRequest): Promise<{ ts: string; channel: string } | null> {
+    if (!await this.ensureConnected()) return null;
+
+    try {
+      const exchange = req.exchangeCode || 'KRX';
+      const lossPercent = (req.lossRate * 100).toFixed(1);
+      const blocks: KnownBlock[] = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:rotating_light: *손절 승인 요청 | ${exchange}:${req.stockCode}* (${req.stockName})`,
+          },
+        },
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: [
+              `*현재가:* ${this.fmtPrice(req.currentPrice, req.market)}`,
+              `*평균단가:* ${this.fmtPrice(req.avgPrice, req.market)}`,
+              `*손실률:* -${lossPercent}%`,
+              `*매도 수량:* ${req.quantity}주`,
+              `*전략:* ${req.strategyName || 'N/A'}`,
+            ].join('\n'),
+          },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: `:clock3: ${req.timeoutMinutes}분 내 미응답 시 자동 스킵됩니다.` }],
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: '승인 (손절 실행)' },
+              style: 'danger',
+              action_id: 'stop_loss_approve',
+              value: req.approvalId,
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: '거절 (스킵)' },
+              action_id: 'stop_loss_reject',
+              value: req.approvalId,
+            },
+          ],
+        },
+      ];
+
+      const result = await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks,
+        text: `손절 승인 요청 | ${exchange}:${req.stockCode} | -${lossPercent}%`,
+      });
+
+      return result.ts ? { ts: result.ts, channel: result.channel as string } : null;
+    } catch (e) {
+      this.logger.error(`Failed to send stop-loss approval: ${e.message}`);
+      this.handleSendError(e);
+      return null;
+    }
+  }
+
+  /** 손절 승인 메시지 업데이트 (버튼 제거 + 결과 표시) */
+  async updateStopLossApprovalMessage(
+    channel: string,
+    ts: string,
+    stockCode: string,
+    status: 'APPROVED' | 'REJECTED' | 'EXPIRED',
+  ): Promise<void> {
+    if (!this.app || !this.connected) return;
+
+    const emoji = status === 'APPROVED' ? ':white_check_mark:' : status === 'REJECTED' ? ':no_entry_sign:' : ':hourglass:';
+    const label = status === 'APPROVED' ? '승인됨 — 손절 실행' : status === 'REJECTED' ? '거절됨 — 스킵' : '시간 초과 — 자동 스킵';
+
+    try {
+      const blocks: KnownBlock[] = [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `${emoji} *손절 ${label} | ${stockCode}*` },
+        },
+      ];
+
+      if (status === 'EXPIRED') {
+        blocks.push({
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '사이트 포트폴리오 페이지에서 현재 상태를 확인하고 수동 매도할 수 있습니다.' }],
+        });
+      }
+
+      await this.app.client.chat.update({
+        channel,
+        ts,
+        blocks,
+        text: `손절 ${label} | ${stockCode}`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to update stop-loss message: ${e.message}`);
     }
   }
 

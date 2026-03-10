@@ -97,6 +97,21 @@ export type LoginInput = {
   username: Scalars["String"]["input"];
 };
 
+export type ManualSellInput = {
+  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  market: Scalars["String"]["input"];
+  /** 매도 수량 (미지정 시 전량) */
+  quantity?: InputMaybe<Scalars["Float"]["input"]>;
+  stockCode: Scalars["String"]["input"];
+};
+
+export type ManualSellResult = {
+  __typename?: "ManualSellResult";
+  message?: Maybe<Scalars["String"]["output"]>;
+  orderNo?: Maybe<Scalars["String"]["output"]>;
+  success: Scalars["Boolean"]["output"];
+};
+
 export type Market = "DOMESTIC" | "OVERSEAS";
 
 export type MarketRegimeFilterInput = {
@@ -120,6 +135,7 @@ export type Mutation = {
   deleteWatchStock: Scalars["Boolean"]["output"];
   login: AuthPayload;
   logout: AuthPayload;
+  manualSell: ManualSellResult;
   removeSimulationWatchStock: Scalars["Boolean"]["output"];
   resetSimulation: SimulationSessionType;
   setStrategyAllocation: StrategyAllocationType;
@@ -152,6 +168,10 @@ export type MutationLoginArgs = {
   input: LoginInput;
 };
 
+export type MutationManualSellArgs = {
+  input: ManualSellInput;
+};
+
 export type MutationRemoveSimulationWatchStockArgs = {
   id: Scalars["String"]["input"];
 };
@@ -178,6 +198,7 @@ export type MutationUpdateWatchStockArgs = {
 };
 
 export type OrderStatus =
+  | "AWAITING_APPROVAL"
   | "CANCELLED"
   | "FAILED"
   | "FILLED"
@@ -1192,6 +1213,20 @@ export type GetDashboardSummaryQuery = {
     totalTradeCount: number;
     todayTradeCount: number;
     winRate: number;
+  };
+};
+
+export type ManualSellMutationVariables = Exact<{
+  input: ManualSellInput;
+}>;
+
+export type ManualSellMutation = {
+  __typename?: "Mutation";
+  manualSell: {
+    __typename?: "ManualSellResult";
+    success: boolean;
+    message?: string | null;
+    orderNo?: string | null;
   };
 };
 
@@ -3630,6 +3665,48 @@ export type GetDashboardSummaryLazyQueryHookResult = ReturnType<
 >;
 export type GetDashboardSummarySuspenseQueryHookResult = ReturnType<
   typeof useGetDashboardSummarySuspenseQuery
+>;
+export const ManualSellDocument = gql`
+  mutation ManualSell($input: ManualSellInput!) {
+    manualSell(input: $input) {
+      success
+      message
+      orderNo
+    }
+  }
+`;
+
+/**
+ * __useManualSellMutation__
+ *
+ * To run a mutation, you first call `useManualSellMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useManualSellMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [manualSellMutation, { data, loading, error }] = useManualSellMutation({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useManualSellMutation(
+  baseOptions?: ApolloReactHooks.MutationHookOptions<
+    ManualSellMutation,
+    ManualSellMutationVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useMutation<
+    ManualSellMutation,
+    ManualSellMutationVariables
+  >(ManualSellDocument, options);
+}
+export type ManualSellMutationHookResult = ReturnType<
+  typeof useManualSellMutation
 >;
 export const GetAvailableStrategiesDocument = gql`
   query GetAvailableStrategies {

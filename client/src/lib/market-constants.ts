@@ -9,12 +9,12 @@ export interface CountryOption {
 }
 
 export const COUNTRY_OPTIONS: CountryOption[] = [
-  { value: 'KR', label: '한국', market: 'DOMESTIC', exchanges: ['KRX'], regimeExchangeCode: '0001' },
-  { value: 'US', label: '미국', market: 'OVERSEAS', exchanges: ['NASD', 'NYSE', 'AMEX'], regimeExchangeCode: 'NAS' },
-  { value: 'HK', label: '홍콩', market: 'OVERSEAS', exchanges: ['SEHK'], regimeExchangeCode: 'HKS' },
-  { value: 'CN', label: '중국', market: 'OVERSEAS', exchanges: ['SHAA', 'SZAA'], regimeExchangeCode: 'SHS' },
-  { value: 'JP', label: '일본', market: 'OVERSEAS', exchanges: ['TKSE'], regimeExchangeCode: 'TSE' },
-  { value: 'VN', label: '베트남', market: 'OVERSEAS', exchanges: ['HASE', 'VNSE'], regimeExchangeCode: 'HSX' },
+  { value: 'KR', label: '한국', market: 'DOMESTIC', exchanges: ['KRX'], regimeExchangeCode: 'KRX' },
+  { value: 'US', label: '미국', market: 'OVERSEAS', exchanges: ['NASD', 'NYSE', 'AMEX'], regimeExchangeCode: 'NASD' },
+  { value: 'HK', label: '홍콩', market: 'OVERSEAS', exchanges: ['SEHK'], regimeExchangeCode: 'SEHK' },
+  { value: 'CN', label: '중국', market: 'OVERSEAS', exchanges: ['SHAA', 'SZAA'], regimeExchangeCode: 'SHAA' },
+  { value: 'JP', label: '일본', market: 'OVERSEAS', exchanges: ['TKSE'], regimeExchangeCode: 'TKSE' },
+  { value: 'VN', label: '베트남', market: 'OVERSEAS', exchanges: ['HASE', 'VNSE'], regimeExchangeCode: 'HASE' },
 ]
 
 export const EXCHANGE_LABELS: Record<string, string> = {

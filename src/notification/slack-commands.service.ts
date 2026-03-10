@@ -1,9 +1,10 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Inject, Logger, OnModuleInit, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { TradeRecordService } from '../trade-record/trade-record.service';
+import { TradingService } from '../trading/trading.service';
 import { SlackService } from './slack.service';
 import { PositionInfo, DailySummaryContext } from './types/notification.types';
-import { Market } from '@prisma/client';
+import { Market, ApprovalStatus, OrderStatus } from '@prisma/client';
 
 @Injectable()
 export class SlackCommandsService implements OnModuleInit {
@@ -12,6 +13,7 @@ export class SlackCommandsService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private tradeRecordService: TradeRecordService,
+    @Inject(forwardRef(() => TradingService)) private tradingService: TradingService,
     private slackService: SlackService,
   ) {}
 
@@ -71,6 +73,93 @@ export class SlackCommandsService implements OnModuleInit {
       } catch (e) {
         this.logger.error(`/종목 command error: ${e.message}`);
         await respond({ text: `:x: 종목 조회 실패: ${e.message}` });
+      }
+    });
+
+    // 손절 승인 버튼
+    app.action('stop_loss_approve', async ({ ack, body, respond }) => {
+      await ack();
+      try {
+        const approvalId = (body as any).actions?.[0]?.value;
+        if (!approvalId) return;
+
+        const approval = await this.prisma.stopLossApproval.findUnique({ where: { id: approvalId } }).catch(() => null);
+        if (!approval) {
+          await respond({ text: ':warning: 존재하지 않는 요청입니다.', replace_original: false });
+          return;
+        }
+        if (approval.status !== ApprovalStatus.PENDING) {
+          if (approval.status === ApprovalStatus.EXPIRED) {
+            await respond({ text: ':hourglass: 만료된 요청입니다. 사이트에서 현재 상태를 확인해주세요.', replace_original: false });
+          } else {
+            const statusLabel = approval.status === ApprovalStatus.APPROVED ? '승인' : '거절';
+            await respond({ text: `:information_source: 이미 처리된 요청입니다. (${statusLabel})`, replace_original: false });
+          }
+          return;
+        }
+
+        await this.prisma.stopLossApproval.update({
+          where: { id: approvalId },
+          data: { status: ApprovalStatus.APPROVED, respondedAt: new Date() },
+        });
+
+        // 메시지 업데이트 (버튼 제거)
+        if (approval.slackMessageTs && approval.slackChannel) {
+          await this.slackService.updateStopLossApprovalMessage(
+            approval.slackChannel, approval.slackMessageTs, approval.stockCode, 'APPROVED',
+          );
+        }
+
+        // 주문 실행
+        await this.tradingService.executeApprovedStopLoss(approvalId);
+        this.logger.log(`Stop-loss approved: ${approval.stockCode} (${approvalId})`);
+      } catch (e) {
+        this.logger.error(`Stop-loss approve error: ${e.message}`);
+        await respond({ text: `:x: 승인 처리 실패: ${e.message}`, replace_original: false });
+      }
+    });
+
+    // 손절 거절 버튼
+    app.action('stop_loss_reject', async ({ ack, body, respond }) => {
+      await ack();
+      try {
+        const approvalId = (body as any).actions?.[0]?.value;
+        if (!approvalId) return;
+
+        const approval = await this.prisma.stopLossApproval.findUnique({ where: { id: approvalId } }).catch(() => null);
+        if (!approval) {
+          await respond({ text: ':warning: 존재하지 않는 요청입니다.', replace_original: false });
+          return;
+        }
+        if (approval.status !== ApprovalStatus.PENDING) {
+          if (approval.status === ApprovalStatus.EXPIRED) {
+            await respond({ text: ':hourglass: 만료된 요청입니다. 사이트에서 현재 상태를 확인해주세요.', replace_original: false });
+          } else {
+            const statusLabel = approval.status === ApprovalStatus.APPROVED ? '승인' : '거절';
+            await respond({ text: `:information_source: 이미 처리된 요청입니다. (${statusLabel})`, replace_original: false });
+          }
+          return;
+        }
+
+        await this.prisma.stopLossApproval.update({
+          where: { id: approvalId },
+          data: { status: ApprovalStatus.REJECTED, respondedAt: new Date() },
+        });
+        await this.prisma.tradeRecord.update({
+          where: { id: approval.tradeRecordId },
+          data: { status: OrderStatus.CANCELLED, reason: 'Stop-loss rejected by user' },
+        });
+
+        if (approval.slackMessageTs && approval.slackChannel) {
+          await this.slackService.updateStopLossApprovalMessage(
+            approval.slackChannel, approval.slackMessageTs, approval.stockCode, 'REJECTED',
+          );
+        }
+
+        this.logger.log(`Stop-loss rejected: ${approval.stockCode} (${approvalId})`);
+      } catch (e) {
+        this.logger.error(`Stop-loss reject error: ${e.message}`);
+        await respond({ text: `:x: 거절 처리 실패: ${e.message}`, replace_original: false });
       }
     });
 

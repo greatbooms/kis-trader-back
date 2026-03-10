@@ -10,6 +10,7 @@ import {
   useGetPositionsQuery,
   useGetTradesQuery,
   useGetAccountSummaryQuery,
+  useManualSellMutation,
   type Market,
   type Side,
 } from '@/graphql/generated'
@@ -143,9 +144,63 @@ function AccountSummaryCard() {
 // ── 보유 포지션 ──
 
 function PositionsCard({ market, countryFilter }: { market: Market | null; countryFilter: string | null }) {
-  const { data, loading } = useGetPositionsQuery({ variables: { input: { market } } })
+  const { data, loading, refetch } = useGetPositionsQuery({ variables: { input: { market } } })
   const allPositions = data?.positions ?? []
   const positions = filterByCountry(allPositions, countryFilter)
+  const [sellTarget, setSellTarget] = useState<string | null>(null)
+  const [sellQty, setSellQty] = useState<string>('')
+  const [sellStep, setSellStep] = useState<'input' | 'confirm'>('input')
+  const [manualSell, { loading: sellLoading }] = useManualSellMutation()
+
+  const openSellPanel = (posId: string, maxQty: number) => {
+    if (sellTarget === posId) {
+      closeSellPanel()
+      return
+    }
+    setSellTarget(posId)
+    setSellQty(String(maxQty))
+    setSellStep('input')
+  }
+
+  const closeSellPanel = () => {
+    setSellTarget(null)
+    setSellQty('')
+    setSellStep('input')
+  }
+
+  const handleSell = async (pos: typeof positions[0]) => {
+    if (sellStep === 'input') {
+      setSellStep('confirm')
+      return
+    }
+    const qty = parseInt(sellQty, 10)
+    if (!qty || qty <= 0 || qty > pos.quantity) {
+      alert(`1 ~ ${pos.quantity} 사이의 수량을 입력해주세요.`)
+      setSellStep('input')
+      return
+    }
+    try {
+      const { data: result } = await manualSell({
+        variables: {
+          input: {
+            stockCode: pos.stockCode,
+            market: pos.market,
+            exchangeCode: pos.exchangeCode ?? undefined,
+            quantity: qty,
+          },
+        },
+      })
+      if (result?.manualSell.success) {
+        alert(result.manualSell.message || '매도 완료')
+        refetch()
+      } else {
+        alert(result?.manualSell.message || '매도 실패')
+      }
+    } catch (e: any) {
+      alert(`매도 실패: ${e.message}`)
+    }
+    closeSellPanel()
+  }
 
   return (
     <Card>
@@ -169,6 +224,7 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
                 <TableHead className="text-right">투자금</TableHead>
                 <TableHead className="text-right">손익</TableHead>
                 <TableHead className="text-right">수익률</TableHead>
+                <TableHead className="text-center">매도</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -192,6 +248,44 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
                   </TableCell>
                   <TableCell className="text-right">
                     <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>{formatPercent(pos.profitRate)}</Badge>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {sellTarget === pos.id ? (
+                      <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={pos.quantity}
+                            value={sellQty}
+                            onChange={(e) => { setSellQty(e.target.value); setSellStep('input') }}
+                            className="w-20 h-7 text-sm text-center"
+                          />
+                          <Button variant="outline" size="sm" className="h-7 px-1.5 text-xs" onClick={() => setSellQty(String(pos.quantity))}>
+                            전량
+                          </Button>
+                        </div>
+                        <span className="text-xs text-muted-foreground">최대 {formatNumber(pos.quantity)}주</span>
+                        <div className="flex gap-1">
+                          <Button
+                            variant={sellStep === 'confirm' ? 'danger' : 'default'}
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={sellLoading}
+                            onClick={() => handleSell(pos)}
+                          >
+                            {sellStep === 'confirm' ? '확인' : '매도'}
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={closeSellPanel}>
+                            취소
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => openSellPanel(pos.id, pos.quantity)}>
+                        매도
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

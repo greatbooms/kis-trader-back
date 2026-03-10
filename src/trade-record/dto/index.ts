@@ -6,3 +6,5 @@ export { AccountSummaryType } from './account-summary.object';
 export { TradeFilterInput } from './trade-filter.input';
 export { OverseasQuoteInput } from './overseas-quote.input';
 export { PositionsFilterInput } from './positions-filter.input';
+export { ManualSellInput } from './manual-sell.input';
+export { ManualSellResult } from './manual-sell-result.object';
