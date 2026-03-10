@@ -86,6 +86,7 @@ query GetAccountSummary {
     totalInvested
     totalAssets
     totalProfitLoss
+    realizedPnL
     profitRate
     positionCount
   }

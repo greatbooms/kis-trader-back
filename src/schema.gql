@@ -127,7 +127,12 @@ type AccountSummaryType {
   cashBalance: Float!
   totalInvested: Float!
   totalAssets: Float!
+
+  """미실현 손익 (보유 포지션 평가 손익)"""
   totalProfitLoss: Float!
+
+  """실현 손익 (매도 완료된 거래의 손익 합계)"""
+  realizedPnL: Float!
   profitRate: Float!
   positionCount: Int!
 }
@@ -192,6 +197,9 @@ type SimulationSessionType {
   status: SimulationStatus!
   initialCapital: Float!
   currentCash: Float!
+
+  """포지션 평가금 합계"""
+  portfolioValue: Float
   startedAt: DateTime!
   stoppedAt: DateTime
   createdAt: DateTime!
@@ -255,6 +263,12 @@ type SimulationSnapshotType {
 type SimulationMetricsType {
   totalReturn: Float!
   totalReturnAmount: Float!
+
+  """실현 손익 (매도 완료된 거래의 손익 합계)"""
+  realizedPnL: Float!
+
+  """미실현 손익 (보유 포지션의 평가 손익 합계)"""
+  unrealizedPnL: Float!
   maxDrawdown: Float!
   winRate: Float!
   totalTrades: Int!
@@ -513,6 +527,7 @@ input AddSimulationWatchStockInput {
   stockCode: String!
   stockName: String!
   quota: Float
+  maxCycles: Int
   stopLossRate: Float
   maxPortfolioRate: Float
   strategyParams: String

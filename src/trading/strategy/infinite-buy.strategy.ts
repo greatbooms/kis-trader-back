@@ -41,9 +41,19 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 미체결 시 장 마감 후 자동 취소, 다음 날 새 가격으로 재주문',
     '',
     '【매도 조건】',
-    '- Sell1: 평균단가 +3%에 보유량의 1/3 매도 (1차 익절)',
-    '- Sell2: 평균단가 +5~10%에 나머지 전량 매도 (T<10: +5%, T<20: +7%, T>=20: +10%)',
+    '- Sell1: 보유량의 1/3을 평균단가 +max(10-T/2, 3)%에 매도',
+    '- Sell2: 나머지 2/3를 평균단가 +max(15-T/3, 8)%에 매도',
+    '- T가 높을수록 목표가가 낮아져 빠르게 탈출 (물린 구간 대응)',
     '- 손절: 평균단가 대비 설정 손절률(기본 30%) 하회 시 전량 매도',
+    '',
+    '  T   | Sell1(1/3) | Sell2(2/3) | 가중평균',
+    '  ----+------------+------------+---------',
+    '   0  |   +10.0%   |   +15.0%   |  +13.3%',
+    '   4  |    +8.0%   |   +13.7%   |  +11.8%',
+    '  10  |    +5.0%   |   +11.7%   |   +9.4%',
+    '  14  |    +3.0%   |   +10.3%   |   +7.9%',
+    '  20  |    +3.0%   |    +8.3%   |   +6.6%',
+    '  30  |    +3.0%   |    +8.0%   |   +6.3%',
     '',
     '【특징】',
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
@@ -58,7 +68,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
-    expectedReturn: '사이클당 +3~10%',
+    expectedReturn: '사이클당 +3~15% (T에 따라 동적)',
     maxLoss: '-30% (손절 기본값)',
     investmentPeriod: '3개월~1년',
     tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 02시)',
@@ -266,9 +276,15 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
       if (holdQty > 0) {
-        // Sell1: 평균단가 +3%에 보유량의 1/3 매도 (1차 익절)
+        // 동적 익절률: T가 높을수록 목표가 낮아져 빠르게 탈출
+        // Sell1: max(10 - T/2, 3)%  — 초기 10% → T=14부터 3% 바닥
+        // Sell2: max(15 - T/3, 8)%  — 초기 15% → T=21부터 8% 바닥
+        const sell1Rate = Math.max(10 - T / 2, 3) / 100;
+        const sell2Rate = Math.max(15 - T / 3, 8) / 100;
+
+        // Sell1: 보유량의 1/3 매도 (1차 익절)
         const sell1Qty = Math.max(1, Math.round(holdQty / 3));
-        const sell1Price = roundPrice(avgPrice * 1.03);
+        const sell1Price = roundPrice(avgPrice * (1 + sell1Rate));
 
         if (sell1Price > 0) {
           signals.push({
@@ -278,21 +294,15 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             side: 'SELL',
             quantity: sell1Qty,
             price: sell1Price,
-            reason: `Sell1: T=${T.toFixed(1)}, +3%, ${sell1Qty}주 @ ${sell1Price}`,
+            reason: `Sell1: T=${T.toFixed(1)}, +${(sell1Rate * 100).toFixed(1)}%, ${sell1Qty}주 @ ${sell1Price}`,
             orderDivision: '00',
           });
         }
 
-        // Sell2: 평균단가 +5~10%에 나머지 전량 매도 (2차 익절)
+        // Sell2: 나머지 전량 매도 (2차 익절)
         const sell2Qty = holdQty - sell1Qty;
         if (sell2Qty > 0) {
-          // T가 낮을수록 빠르게 익절, T가 높을수록 더 기다림
-          let targetRate: number;
-          if (T < 10) targetRate = 1.05;
-          else if (T < 20) targetRate = 1.07;
-          else targetRate = 1.10;
-
-          const sell2Price = roundPrice(avgPrice * targetRate);
+          const sell2Price = roundPrice(avgPrice * (1 + sell2Rate));
 
           if (sell2Price > 0) {
             signals.push({
@@ -302,8 +312,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
               side: 'SELL',
               quantity: sell2Qty,
               price: sell2Price,
-              reason: `Sell2: T=${T.toFixed(1)}, target=${((targetRate - 1) * 100).toFixed(0)}%, ${sell2Qty}주 @ ${sell2Price}`,
-              orderDivision: '00', // sell2는 지정가
+              reason: `Sell2: T=${T.toFixed(1)}, +${(sell2Rate * 100).toFixed(1)}%, ${sell2Qty}주 @ ${sell2Price}`,
+              orderDivision: '00',
             });
           }
         }

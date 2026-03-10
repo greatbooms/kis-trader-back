@@ -33,6 +33,9 @@ export class SimulationSessionType {
   @Field(() => Float)
   currentCash: number;
 
+  @Field(() => Float, { nullable: true, description: '포지션 평가금 합계' })
+  portfolioValue?: number;
+
   @Field()
   startedAt: Date;
 

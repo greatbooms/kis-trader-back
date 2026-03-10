@@ -152,6 +152,7 @@ function AddWatchStockModal({
   onSave: (input: {
     market: Market; stockCode: string; stockName: string; exchangeCode?: string
     strategyName?: string; quota?: number; maxCycles?: number; stopLossRate?: number
+    strategyParams?: string
   }) => Promise<void>
   onClose: () => void
 }) {
@@ -162,6 +163,8 @@ function AddWatchStockModal({
   const [quota, setQuota] = useState('')
   const [maxCycles, setMaxCycles] = useState('40')
   const [stopLossRate, setStopLossRate] = useState('30')
+  const [sell1Rate, setSell1Rate] = useState('')
+  const [sell2Rate, setSell2Rate] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -174,6 +177,8 @@ function AddWatchStockModal({
       const newMeta = STRATEGY_META[value] ?? DEFAULT_STRATEGY_META
       setStopLossRate(String(newMeta.defaultStopLoss))
       if (newMeta.hasMaxCycles) setMaxCycles('40')
+      setSell1Rate('')
+      setSell2Rate('')
       setStep(4)
     }
   }
@@ -195,6 +200,11 @@ function AddWatchStockModal({
     setError('')
     setSubmitting(true)
     try {
+      // strategyParams 구성 (익절률 커스텀)
+      const params: Record<string, number> = {}
+      if (sell1Rate && Number(sell1Rate) > 0) params.sell1Rate = Number(sell1Rate) / 100
+      if (sell2Rate && Number(sell2Rate) > 0) params.sell2Rate = Number(sell2Rate) / 100
+
       await onSave({
         market: (selectedStock.market as Market) || selectedCountry?.market || 'DOMESTIC',
         stockCode: selectedStock.stockCode,
@@ -204,6 +214,7 @@ function AddWatchStockModal({
         quota: Number(quota),
         maxCycles: meta.hasMaxCycles && maxCycles ? Number(maxCycles) : undefined,
         stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
+        strategyParams: Object.keys(params).length > 0 ? JSON.stringify(params) : undefined,
       })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '추가 중 오류가 발생했습니다')
@@ -334,9 +345,40 @@ function AddWatchStockModal({
                 </div>
               )}
 
+              {meta.hasSellRates && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      {meta.hasMaxCycles ? '6' : '5'}. 1차 익절률 (%)
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">기본: 동적 max(10-T/2, 3)%</span>
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-1.5">고정 익절률을 지정합니다. 비워두면 T에 따라 동적 계산 (초기 10% → 후반 3%).</p>
+                    <Input
+                      placeholder="예: 5"
+                      type="number"
+                      value={sell1Rate}
+                      onChange={(e) => setSell1Rate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      {meta.hasMaxCycles ? '7' : '6'}. 2차 익절률 (%)
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">기본: 동적 max(15-T/3, 8)%</span>
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-1.5">고정 익절률을 지정합니다. 비워두면 T에 따라 동적 계산 (초기 15% → 후반 8%).</p>
+                    <Input
+                      placeholder="예: 10"
+                      type="number"
+                      value={sell2Rate}
+                      onChange={(e) => setSell2Rate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">
-                  {meta.hasMaxCycles ? '6' : '5'}. 손절률 (%)
+                  {meta.hasSellRates ? (meta.hasMaxCycles ? '8' : '7') : (meta.hasMaxCycles ? '6' : '5')}. 손절률 (%)
                   <span className="ml-2 text-xs font-normal text-muted-foreground">기본값: {meta.defaultStopLoss}%</span>
                 </label>
                 <p className="text-xs text-muted-foreground mb-1.5">{meta.stopLossDesc}</p>
@@ -378,6 +420,7 @@ interface WatchStockItem {
   cycle: number
   maxCycles: number
   stopLossRate: number
+  strategyParams?: string | null
   lastExecutionStatus?: string | null
   lastExecutionDate?: string | null
 }
@@ -453,42 +496,49 @@ function WatchStockRow({
 const STRATEGY_META: Record<string, {
   defaultStopLoss: number
   hasMaxCycles: boolean
+  hasSellRates: boolean
   quotaDesc: string
   stopLossDesc: string
 }> = {
   'infinite-buy': {
     defaultStopLoss: 30,
     hasMaxCycles: true,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 총 투자 금액입니다. 최대 사이클에 걸쳐 분할 매수합니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 전량 손절 매도합니다.',
   },
   'grid-mean-reversion': {
     defaultStopLoss: 8,
     hasMaxCycles: false,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 그리드 3단계(-2%, -4%, -6%)로 분할 매수합니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절 매도합니다.',
   },
   'momentum-breakout': {
     defaultStopLoss: 3,
     hasMaxCycles: false,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 돌파 시그널 발생 시 한 번에 매수합니다.',
     stopLossDesc: '진입가 대비 이 비율만큼 하락하면 손절합니다. 단기 전략이므로 낮은 손절률을 권장합니다.',
   },
   'conservative': {
     defaultStopLoss: 5,
     hasMaxCycles: false,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 극단적 과매도 시 투자금의 30%만 사용합니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절합니다.',
   },
   'trend-following': {
     defaultStopLoss: 7,
     hasMaxCycles: false,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 추세 진입 시 한 번에 매수하고, 수익 5% 이상 시 50%를 추가 매수(피라미딩)합니다.',
     stopLossDesc: '진입가 대비 이 비율만큼 하락하면 손절합니다. 추세 소멸(데드크로스, ADX<20) 시에도 자동 청산됩니다.',
   },
   'value-factor': {
     defaultStopLoss: 10,
     hasMaxCycles: false,
+    hasSellRates: false,
     quotaDesc: '이 종목에 배정할 투자 금액입니다. 재무 지표(PER, PBR, EPS, ROE, 부채비율, EV/EBITDA 등) 조건 충족 시 매수합니다. 해외 종목은 PER+PBR+EPS+RSI로 판단하며, ROE/부채비율/EV/EBITDA/증가율 지표는 국내 전용입니다. 투자유의/시장경고 종목은 자동 차단됩니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절합니다. +15% 수익 또는 RSI > 70 과열 시에도 자동 청산됩니다.',
   },
@@ -497,6 +547,7 @@ const STRATEGY_META: Record<string, {
 const DEFAULT_STRATEGY_META = {
   defaultStopLoss: 30,
   hasMaxCycles: false,
+  hasSellRates: false,
   quotaDesc: '이 종목에 배정할 최대 투자 금액입니다.',
   stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절 매도합니다.',
 }
@@ -518,6 +569,9 @@ function EditWatchStockModal({
   const [quota, setQuota] = useState(String(stock.quota ?? ''))
   const [maxCycles, setMaxCycles] = useState(String(stock.maxCycles))
   const [stopLossRate, setStopLossRate] = useState(String(Math.round(stock.stopLossRate * 100)))
+  const existingParams = stock.strategyParams ? JSON.parse(stock.strategyParams) : {}
+  const [sell1Rate, setSell1Rate] = useState(existingParams.sell1Rate ? String(Math.round(existingParams.sell1Rate * 100)) : '')
+  const [sell2Rate, setSell2Rate] = useState(existingParams.sell2Rate ? String(Math.round(existingParams.sell2Rate * 100)) : '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -527,9 +581,20 @@ function EditWatchStockModal({
     setError('')
     setSubmitting(true)
     try {
+      // 기존 strategyParams 유지하면서 sell rate만 업데이트
+      const params = { ...existingParams }
+      if (meta.hasSellRates) {
+        if (sell1Rate && Number(sell1Rate) > 0) params.sell1Rate = Number(sell1Rate) / 100
+        else delete params.sell1Rate
+        if (sell2Rate && Number(sell2Rate) > 0) params.sell2Rate = Number(sell2Rate) / 100
+        else delete params.sell2Rate
+      }
+      const strategyParams = Object.keys(params).length > 0 ? JSON.stringify(params) : undefined
+
       await onSave({
         quota: quota ? Number(quota) : undefined,
         stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
+        strategyParams,
       })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '수정 중 오류가 발생했습니다')
@@ -592,6 +657,37 @@ function EditWatchStockModal({
                 value={maxCycles}
                 onChange={(e) => setMaxCycles(e.target.value)}
               />
+            </div>
+          )}
+
+          {meta.hasSellRates && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">
+                  1차 익절률 (%)
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">기본: 동적 max(10-T/2, 3)%</span>
+                </label>
+                <p className="text-xs text-muted-foreground mb-1.5">고정 익절률을 지정합니다. 비워두면 T에 따라 동적 계산 (초기 10% → 후반 3%).</p>
+                <Input
+                  placeholder="예: 5"
+                  type="number"
+                  value={sell1Rate}
+                  onChange={(e) => setSell1Rate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">
+                  2차 익절률 (%)
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">기본: 동적 max(15-T/3, 8)%</span>
+                </label>
+                <p className="text-xs text-muted-foreground mb-1.5">평균단가 대비 이 비율 상승 시 나머지 전량을 매도합니다. 비워두면 사이클(T)에 따라 자동 적용.</p>
+                <Input
+                  placeholder="예: 10"
+                  type="number"
+                  value={sell2Rate}
+                  onChange={(e) => setSell2Rate(e.target.value)}
+                />
+              </div>
             </div>
           )}
 

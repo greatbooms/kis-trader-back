@@ -91,14 +91,60 @@ export class TradeRecordService {
     const cashBalance = latestSnapshots.reduce((sum, s) => sum + Number(s.cashBalance), 0);
     const totalAssets = cashBalance + totalInvested + totalProfitLoss;
 
+    // 실현 손익: 매도 거래의 (매도가 - 평균매수가) × 수량
+    const realizedPnL = await this.calculateRealizedPnL();
+
     return {
       cashBalance,
       totalInvested,
       totalAssets,
       totalProfitLoss,
+      realizedPnL,
       profitRate: totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0,
       positionCount: positions.length,
     };
+  }
+
+  /** 실현 손익 계산: 매도 거래별 (매도가 - 가중평균매수가) × 수량 */
+  private async calculateRealizedPnL(): Promise<number> {
+    const trades = await this.prisma.tradeRecord.findMany({
+      where: { status: 'FILLED' },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const sellTrades = trades.filter((t) => t.side === 'SELL');
+    let realizedPnL = 0;
+
+    for (const sellTrade of sellTrades) {
+      const buyTrades = trades.filter(
+        (t) => t.side === 'BUY' && t.stockCode === sellTrade.stockCode && t.createdAt <= sellTrade.createdAt,
+      );
+      const sellsBefore = trades.filter(
+        (t) => t.side === 'SELL' && t.stockCode === sellTrade.stockCode && t.createdAt < sellTrade.createdAt,
+      );
+
+      let totalBuyQty = 0;
+      let totalBuyCost = 0;
+      for (const bt of buyTrades) {
+        const qty = bt.executedQty || bt.quantity;
+        const price = Number(bt.executedPrice ?? bt.price);
+        totalBuyQty += qty;
+        totalBuyCost += qty * price;
+      }
+      let totalSoldQty = 0;
+      for (const st of sellsBefore) {
+        totalSoldQty += st.executedQty || st.quantity;
+      }
+
+      const remainingQty = totalBuyQty - totalSoldQty;
+      const avgBuyPrice = remainingQty > 0 ? totalBuyCost / totalBuyQty : 0;
+
+      const sellPrice = Number(sellTrade.executedPrice ?? sellTrade.price);
+      const sellQty = sellTrade.executedQty || sellTrade.quantity;
+      realizedPnL += (sellPrice - avgBuyPrice) * sellQty;
+    }
+
+    return realizedPnL;
   }
 
   /** 수동 매도 */

@@ -47,6 +47,18 @@
             "deprecationReason": null
           },
           {
+            "name": "realizedPnL",
+            "description": "실현 손익 (매도 완료된 거래의 손익 합계)",
+            "args": [],
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "SCALAR", "name": "Float", "ofType": null }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "totalAssets",
             "description": null,
             "args": [],
@@ -72,7 +84,7 @@
           },
           {
             "name": "totalProfitLoss",
-            "description": null,
+            "description": "미실현 손익 (보유 포지션 평가 손익)",
             "args": [],
             "type": {
               "kind": "NON_NULL",
@@ -111,6 +123,14 @@
               "name": null,
               "ofType": { "kind": "ENUM", "name": "Market", "ofType": null }
             },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "maxCycles",
+            "description": null,
+            "type": { "kind": "SCALAR", "name": "Int", "ofType": null },
             "defaultValue": null,
             "isDeprecated": false,
             "deprecationReason": null
@@ -2861,6 +2881,18 @@
             "deprecationReason": null
           },
           {
+            "name": "realizedPnL",
+            "description": "실현 손익 (매도 완료된 거래의 손익 합계)",
+            "args": [],
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "SCALAR", "name": "Float", "ofType": null }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "sharpeRatio",
             "description": null,
             "args": [],
@@ -2904,6 +2936,18 @@
               "kind": "NON_NULL",
               "name": null,
               "ofType": { "kind": "SCALAR", "name": "Int", "ofType": null }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "unrealizedPnL",
+            "description": "미실현 손익 (보유 포지션의 평가 손익 합계)",
+            "args": [],
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "SCALAR", "name": "Float", "ofType": null }
             },
             "isDeprecated": false,
             "deprecationReason": null
@@ -3181,6 +3225,14 @@
               "name": null,
               "ofType": { "kind": "SCALAR", "name": "String", "ofType": null }
             },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "portfolioValue",
+            "description": "포지션 평가금 합계",
+            "args": [],
+            "type": { "kind": "SCALAR", "name": "Float", "ofType": null },
             "isDeprecated": false,
             "deprecationReason": null
           },

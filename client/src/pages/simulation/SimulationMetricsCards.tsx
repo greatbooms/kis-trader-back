@@ -47,6 +47,20 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
           <p className={`text-xs mt-1 ${metrics.totalReturnAmount >= 0 ? 'text-success' : 'text-danger'}`}>
             {formatCurrency(metrics.totalReturnAmount, market)}
           </p>
+          <div className="flex gap-3 mt-2 pt-2 border-t border-border text-xs">
+            <div>
+              <span className="text-muted-foreground">실현 </span>
+              <span className={metrics.realizedPnL >= 0 ? 'text-success' : 'text-danger'}>
+                {formatCurrency(metrics.realizedPnL, market)}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">미실현 </span>
+              <span className={metrics.unrealizedPnL >= 0 ? 'text-success' : 'text-danger'}>
+                {formatCurrency(metrics.unrealizedPnL, market)}
+              </span>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

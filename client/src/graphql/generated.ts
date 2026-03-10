@@ -39,14 +39,18 @@ export type AccountSummaryType = {
   cashBalance: Scalars["Float"]["output"];
   positionCount: Scalars["Int"]["output"];
   profitRate: Scalars["Float"]["output"];
+  /** 실현 손익 (매도 완료된 거래의 손익 합계) */
+  realizedPnL: Scalars["Float"]["output"];
   totalAssets: Scalars["Float"]["output"];
   totalInvested: Scalars["Float"]["output"];
+  /** 미실현 손익 (보유 포지션 평가 손익) */
   totalProfitLoss: Scalars["Float"]["output"];
 };
 
 export type AddSimulationWatchStockInput = {
   exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
   market: Market;
+  maxCycles?: InputMaybe<Scalars["Int"]["input"]>;
   maxPortfolioRate?: InputMaybe<Scalars["Float"]["input"]>;
   quota?: InputMaybe<Scalars["Float"]["input"]>;
   sessionId: Scalars["String"]["input"];
@@ -413,10 +417,14 @@ export type SimulationMetricsType = {
   lossTrades: Scalars["Int"]["output"];
   maxDrawdown: Scalars["Float"]["output"];
   profitFactor: Scalars["Float"]["output"];
+  /** 실현 손익 (매도 완료된 거래의 손익 합계) */
+  realizedPnL: Scalars["Float"]["output"];
   sharpeRatio: Scalars["Float"]["output"];
   totalReturn: Scalars["Float"]["output"];
   totalReturnAmount: Scalars["Float"]["output"];
   totalTrades: Scalars["Int"]["output"];
+  /** 미실현 손익 (보유 포지션의 평가 손익 합계) */
+  unrealizedPnL: Scalars["Float"]["output"];
   winRate: Scalars["Float"]["output"];
   winTrades: Scalars["Int"]["output"];
 };
@@ -447,6 +455,8 @@ export type SimulationSessionType = {
   initialCapital: Scalars["Float"]["output"];
   market: Market;
   name: Scalars["String"]["output"];
+  /** 포지션 평가금 합계 */
+  portfolioValue?: Maybe<Scalars["Float"]["output"]>;
   startedAt: Scalars["DateTime"]["output"];
   status: SimulationStatus;
   stoppedAt?: Maybe<Scalars["DateTime"]["output"]>;
@@ -831,6 +841,7 @@ export type GetSimulationSessionsQuery = {
     status: SimulationStatus;
     initialCapital: number;
     currentCash: number;
+    portfolioValue?: number | null;
     startedAt: any;
     stoppedAt?: any | null;
     createdAt: any;
@@ -868,6 +879,7 @@ export type GetSimulationSessionQuery = {
     status: SimulationStatus;
     initialCapital: number;
     currentCash: number;
+    portfolioValue?: number | null;
     startedAt: any;
     stoppedAt?: any | null;
     createdAt: any;
@@ -966,6 +978,8 @@ export type GetSimulationMetricsQuery = {
     __typename?: "SimulationMetricsType";
     totalReturn: number;
     totalReturnAmount: number;
+    realizedPnL: number;
+    unrealizedPnL: number;
     maxDrawdown: number;
     winRate: number;
     totalTrades: number;
@@ -1011,6 +1025,9 @@ export type AddSimulationWatchStockMutation = {
     market: Market;
     exchangeCode?: string | null;
     quota?: number | null;
+    maxCycles: number;
+    stopLossRate: number;
+    strategyParams?: string | null;
     isActive: boolean;
   };
 };
@@ -1200,6 +1217,7 @@ export type GetAccountSummaryQuery = {
     totalInvested: number;
     totalAssets: number;
     totalProfitLoss: number;
+    realizedPnL: number;
     profitRate: number;
     positionCount: number;
   };
@@ -1921,6 +1939,7 @@ export const GetSimulationSessionsDocument = gql`
       status
       initialCapital
       currentCash
+      portfolioValue
       startedAt
       stoppedAt
       createdAt
@@ -2040,6 +2059,7 @@ export const GetSimulationSessionDocument = gql`
       status
       initialCapital
       currentCash
+      portfolioValue
       startedAt
       stoppedAt
       createdAt
@@ -2485,6 +2505,8 @@ export const GetSimulationMetricsDocument = gql`
     simulationMetrics(sessionId: $sessionId) {
       totalReturn
       totalReturnAmount
+      realizedPnL
+      unrealizedPnL
       maxDrawdown
       winRate
       totalTrades
@@ -2645,6 +2667,9 @@ export const AddSimulationWatchStockDocument = gql`
       market
       exchangeCode
       quota
+      maxCycles
+      stopLossRate
+      strategyParams
       isActive
     }
   }
@@ -3480,6 +3505,7 @@ export const GetAccountSummaryDocument = gql`
       totalInvested
       totalAssets
       totalProfitLoss
+      realizedPnL
       profitRate
       positionCount
     }

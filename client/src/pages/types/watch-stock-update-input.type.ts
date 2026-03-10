@@ -3,4 +3,5 @@ export interface WatchStockUpdateInput {
   strategyName?: string
   quota?: number
   stopLossRate?: number
+  strategyParams?: string
 }

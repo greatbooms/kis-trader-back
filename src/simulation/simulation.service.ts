@@ -286,10 +286,10 @@ export class SimulationService {
         });
       }
 
-      // Update cash
+      // Update cash (decrement으로 race condition 방지)
       await this.prisma.simulationSession.update({
         where: { id: sessionId },
-        data: { currentCash: new Prisma.Decimal(Number(session.currentCash) - totalAmount) },
+        data: { currentCash: { decrement: new Prisma.Decimal(totalAmount) } },
       });
 
       this.logger.log(`[SIM] BUY ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
@@ -344,10 +344,10 @@ export class SimulationService {
         });
       }
 
-      // Update cash
+      // Update cash (increment로 race condition 방지)
       await this.prisma.simulationSession.update({
         where: { id: sessionId },
-        data: { currentCash: new Prisma.Decimal(Number(session.currentCash) + totalAmount) },
+        data: { currentCash: { increment: new Prisma.Decimal(totalAmount) } },
       });
 
       this.logger.log(`[SIM] SELL ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
@@ -515,9 +515,17 @@ export class SimulationService {
     // Profit factor
     const profitFactor = totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0;
 
+    // Realized PnL: net profit from all completed sell trades
+    const realizedPnL = totalProfit - totalLoss;
+
+    // Unrealized PnL: sum of open position profit/loss
+    const unrealizedPnL = positions.reduce((sum, p) => sum + Number(p.profitLoss), 0);
+
     return {
       totalReturn,
       totalReturnAmount,
+      realizedPnL,
+      unrealizedPnL,
       maxDrawdown,
       winRate,
       totalTrades,
@@ -617,6 +625,7 @@ export class SimulationService {
         stockCode: input.stockCode,
         stockName: input.stockName,
         quota: input.quota ? new Prisma.Decimal(input.quota) : null,
+        maxCycles: input.maxCycles ?? 40,
         stopLossRate: input.stopLossRate ? new Prisma.Decimal(input.stopLossRate) : new Prisma.Decimal(0.3),
         maxPortfolioRate: input.maxPortfolioRate ? new Prisma.Decimal(input.maxPortfolioRate) : new Prisma.Decimal(0.2),
         strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
@@ -645,7 +654,7 @@ export class SimulationService {
     const where = status ? { status } : {};
     return this.prisma.simulationSession.findMany({
       where,
-      include: { watchStocks: true },
+      include: { watchStocks: true, positions: true },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -653,7 +662,7 @@ export class SimulationService {
   async getSession(id: string) {
     return this.prisma.simulationSession.findUnique({
       where: { id },
-      include: { watchStocks: true },
+      include: { watchStocks: true, positions: true },
     });
   }
 

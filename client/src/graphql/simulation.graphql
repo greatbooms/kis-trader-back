@@ -9,6 +9,7 @@ query GetSimulationSessions($input: SimulationSessionsFilterInput) {
     status
     initialCapital
     currentCash
+    portfolioValue
     startedAt
     stoppedAt
     createdAt
@@ -39,6 +40,7 @@ query GetSimulationSession($id: String!) {
     status
     initialCapital
     currentCash
+    portfolioValue
     startedAt
     stoppedAt
     createdAt
@@ -112,6 +114,8 @@ query GetSimulationMetrics($sessionId: String!) {
   simulationMetrics(sessionId: $sessionId) {
     totalReturn
     totalReturnAmount
+    realizedPnL
+    unrealizedPnL
     maxDrawdown
     winRate
     totalTrades
@@ -145,6 +149,9 @@ mutation AddSimulationWatchStock($input: AddSimulationWatchStockInput!) {
     market
     exchangeCode
     quota
+    maxCycles
+    stopLossRate
+    strategyParams
     isActive
   }
 }

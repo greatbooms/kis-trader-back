@@ -1,4 +1,4 @@
-import { InputType, Field, Float } from '@nestjs/graphql';
+import { InputType, Field, Float, Int } from '@nestjs/graphql';
 import { Market } from '@prisma/client';
 
 @InputType()
@@ -20,6 +20,9 @@ export class AddSimulationWatchStockInput {
 
   @Field(() => Float, { nullable: true })
   quota?: number;
+
+  @Field(() => Int, { nullable: true })
+  maxCycles?: number;
 
   @Field(() => Float, { nullable: true })
   stopLossRate?: number;

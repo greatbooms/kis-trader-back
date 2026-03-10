@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
-import { Wallet, TrendingUp, PiggyBank, BarChart3, Info } from 'lucide-react'
+import { Wallet, TrendingUp, TrendingDown, PiggyBank, BarChart3, Info } from 'lucide-react'
 import {
   useGetPositionsQuery,
   useGetTradesQuery,
@@ -79,7 +79,7 @@ function AccountSummaryCard() {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
       <Card>
         <CardContent className="pt-5 pb-4">
           <div className="flex items-center gap-2 mb-2">
@@ -124,8 +124,8 @@ function AccountSummaryCard() {
         <CardContent className="pt-5 pb-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">평가 손익</span>
-            <Tooltip text="보유 종목의 매입가 대비 현재가 차이로 계산한 미실현 손익입니다.">
+            <span className="text-sm text-muted-foreground">미실현 손익</span>
+            <Tooltip text="보유 종목의 매입가 대비 현재가 차이로 계산한 평가 손익입니다. 아직 매도하지 않은 보유 포지션의 손익입니다.">
               <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
             </Tooltip>
           </div>
@@ -134,6 +134,21 @@ function AccountSummaryCard() {
           </p>
           <p className={`text-xs mt-1 ${summary.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
             {summary.profitRate >= 0 ? '+' : ''}{summary.profitRate.toFixed(2)}%
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">실현 손익</span>
+            <Tooltip text="매도 완료된 거래에서 발생한 확정 손익입니다. (매도가 - 평균매수가) × 수량의 합계입니다.">
+              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+            </Tooltip>
+          </div>
+          <p className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-success' : 'text-danger'}`}>
+            {formatCurrency(summary.realizedPnL)}
           </p>
         </CardContent>
       </Card>

@@ -67,7 +67,8 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((session) => {
             const status = statusConfig[session.status] ?? { label: session.status, variant: 'outline' as const }
-            const pnl = session.currentCash - session.initialCapital
+            const totalAssets = session.currentCash + (session.portfolioValue ?? 0)
+            const pnl = totalAssets - session.initialCapital
             return (
               <Card
                 key={session.id}

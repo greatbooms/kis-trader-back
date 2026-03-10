@@ -156,6 +156,10 @@ export class SimulationResolver {
   }
 
   private mapSession(session: any): SimulationSessionType {
+    const portfolioValue = session.positions
+      ? session.positions.reduce((sum: number, p: any) => sum + p.quantity * Number(p.currentPrice), 0)
+      : undefined;
+
     return {
       id: session.id,
       name: session.name,
@@ -166,6 +170,7 @@ export class SimulationResolver {
       status: session.status,
       initialCapital: Number(session.initialCapital),
       currentCash: Number(session.currentCash),
+      portfolioValue,
       startedAt: session.startedAt,
       stoppedAt: session.stoppedAt || undefined,
       createdAt: session.createdAt,
