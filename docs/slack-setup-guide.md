@@ -129,7 +129,7 @@ SLACK_ENABLED=true
 ## 6단계: 서버 시작 및 확인
 
 ```bash
-npm run start:dev
+yarn start:dev
 ```
 
 정상 연결되면 로그에 다음이 표시됩니다:

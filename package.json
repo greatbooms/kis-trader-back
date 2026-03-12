@@ -17,11 +17,11 @@
     "prisma:migrate:prod": "prisma migrate deploy",
     "prisma:reset": "prisma migrate reset --force",
     "prisma:studio": "prisma studio",
-    "client:install": "cd client && npm ci",
-    "client:build": "cd client && npm run build",
-    "client:dev": "export $(grep -sE '^(PORT|CLIENT_PORT)=' .env) 2>/dev/null; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && npm run dev",
-    "client:codegen": "cd client && npm run codegen",
-    "build:all": "npm run client:build && npm run build"
+    "client:install": "cd client && yarn install",
+    "client:build": "cd client && yarn build",
+    "client:dev": "export $(grep -sE '^(PORT|CLIENT_PORT)=' .env) 2>/dev/null; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && yarn dev",
+    "client:codegen": "cd client && yarn codegen",
+    "build:all": "yarn client:build && yarn build"
   },
   "keywords": [],
   "author": "",

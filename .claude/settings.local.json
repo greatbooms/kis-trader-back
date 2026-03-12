@@ -9,7 +9,14 @@
       "Write(path:/Users/shinsanghoon/workspace/kis-trader-front/*)",
       "Edit(path:/Users/shinsanghoon/workspace/kis-trader-front/*)",
       "Write(path:/Users/shinsanghoon/workspace/kis-trader-back/*)",
-      "Edit(path:/Users/shinsanghoon/workspace/kis-trader-back/*)"
+      "Edit(path:/Users/shinsanghoon/workspace/kis-trader-back/*)",
+      "Bash(npm outdated:*)",
+      "mcp__filesystem__list_directory",
+      "mcp__filesystem__directory_tree",
+      "Bash(python3:*)",
+      "mcp__filesystem__read_text_file",
+      "Bash(ls:*)",
+      "mcp__filesystem__list_allowed_directories"
     ],
     "additionalDirectories": [
       "/Users/shinsanghoon/workspace/kis-trader-front"
