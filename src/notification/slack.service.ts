@@ -7,6 +7,7 @@ import {
   TradeAlertContext,
   DailySummaryContext,
   FilterLogContext,
+  RiskAlertContext,
   StopLossApprovalRequest,
 } from './types/notification.types';
 
@@ -198,6 +199,23 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     if (msg.includes('disconnect') || msg.includes('socket') || msg.includes('websocket') || msg.includes('not connected')) {
       this.connected = false;
       this.scheduleReconnect();
+    }
+  }
+
+  async sendRiskAlert(ctx: RiskAlertContext): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const blocks = this.formatRiskAlert(ctx);
+      const marketLabel = ctx.market === 'DOMESTIC' ? '국내' : '해외';
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks,
+        text: `🚨 리스크 경고 | ${marketLabel} | ${ctx.reasons.join(', ')}`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send risk alert: ${e.message}`);
+      this.handleSendError(e);
     }
   }
 
@@ -661,6 +679,79 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         text: { type: 'mrkdwn', text: lines.join('\n') },
       },
     ];
+  }
+
+  formatRiskAlert(ctx: RiskAlertContext): KnownBlock[] {
+    const marketLabel = ctx.market === 'DOMESTIC' ? '국내' : '해외';
+    const d = ctx.details;
+
+    const isLiquidate = ctx.riskType === 'MDD_LIQUIDATE';
+    const emoji = isLiquidate ? ':rotating_light:' : ':warning:';
+    const title = isLiquidate ? '전량 청산 발동' : '매수 차단 경고';
+
+    const lines: string[] = [];
+
+    if (d.drawdown !== undefined) {
+      lines.push(`*MDD (최대 낙폭):* ${(d.drawdown * 100).toFixed(1)}%`);
+      lines.push(
+        `> MDD란 운용 이후 최고점 대비 현재 포트폴리오가 얼마나 하락했는지를 나타냅니다.`,
+      );
+    }
+    if (d.peakValue !== undefined) {
+      lines.push(`*역대 최고 가치:* ${this.fmtMoney(d.peakValue, ctx.market)}`);
+    }
+    if (d.currentValue !== undefined) {
+      lines.push(`*현재 포트폴리오 가치:* ${this.fmtMoney(d.currentValue, ctx.market)}`);
+    }
+    if (d.peakValue !== undefined && d.currentValue !== undefined) {
+      const loss = d.currentValue - d.peakValue;
+      lines.push(`*고점 대비 손실:* ${this.fmtMoney(loss, ctx.market)}`);
+    }
+    if (d.dailyPnlRate !== undefined) {
+      lines.push(`*일간 손익률:* ${(d.dailyPnlRate * 100).toFixed(1)}%`);
+    }
+    if (d.positionCount !== undefined) {
+      lines.push(`*보유 종목 수:* ${d.positionCount}개`);
+    }
+    if (d.investedRate !== undefined) {
+      lines.push(`*투자비율:* ${(d.investedRate * 100).toFixed(1)}%`);
+    }
+
+    const blocks: KnownBlock[] = [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${emoji} *${title} | ${marketLabel}*` },
+      },
+      { type: 'divider' },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: lines.join('\n') },
+      },
+    ];
+
+    if (ctx.reasons.length > 0) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `:exclamation: *발동 사유*\n${ctx.reasons.map((r) => `• ${r}`).join('\n')}`,
+        },
+      });
+    }
+
+    if (isLiquidate) {
+      blocks.push({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: ':information_source: MDD ≤ -15% 규칙에 따라 모든 보유 포지션을 자동 청산합니다. 청산 완료 후 개별 매도 알림이 전송됩니다.',
+          },
+        ],
+      });
+    }
+
+    return blocks;
   }
 
   // --- Helpers ---

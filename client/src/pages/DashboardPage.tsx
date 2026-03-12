@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { TrendingUp, Activity, Wallet, BarChart3, ShieldAlert } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
+import { TrendingUp, Activity, Wallet, BarChart3, ShieldAlert, Info } from 'lucide-react'
 import {
   useGetDashboardSummaryQuery,
   useGetPositionsQuery,
@@ -181,27 +182,47 @@ function RiskStateCard({ market }: { market: Market }) {
                 <span className="text-muted-foreground">전량 청산</span>
                 <Badge variant={risk.liquidateAll ? 'danger' : 'success'}>{risk.liquidateAll ? 'YES' : 'NO'}</Badge>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">포지션 수</span>
-                <span className="font-medium">{risk.positionCount}</span>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  포지션 수
+                  <Tooltip text="6개 이상 보유 시 신규 매수 차단">
+                    <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                  </Tooltip>
+                </span>
+                <span className={`font-medium ${risk.positionCount >= 6 ? 'text-danger' : ''}`}>{risk.positionCount} / 6</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">투자비율</span>
-                <span className="font-medium">{formatPercent(risk.investedRate)}</span>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  투자비율
+                  <Tooltip text="80% 이상이면 신규 매수 차단">
+                    <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                  </Tooltip>
+                </span>
+                <span className={`font-medium ${risk.investedRate >= 0.8 ? 'text-danger' : ''}`}>{formatPercent(risk.investedRate)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">일간 PnL</span>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  일간 PnL
+                  <Tooltip text="-2% 이하면 당일 신규 매수 차단">
+                    <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                  </Tooltip>
+                </span>
                 <span className={`font-medium ${risk.dailyPnlRate >= 0 ? 'text-success' : 'text-danger'}`}>
                   {formatPercent(risk.dailyPnlRate)}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">낙폭</span>
-                <span className="font-medium text-danger">{formatPercent(risk.drawdown)}</span>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  낙폭
+                  <Tooltip text="전략별 MDD 임계값이 다르게 적용됩니다. 전략 가이드에서 확인하세요.">
+                    <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                  </Tooltip>
+                </span>
+                <span className={`font-medium ${risk.drawdown <= -0.1 ? 'text-danger' : 'text-warning'}`}>{formatPercent(risk.drawdown)}</span>
               </div>
             </div>
             {risk.reasons.length > 0 && (
-              <div className="mt-2 rounded-lg bg-red-50 p-2">
+              <div className="mt-2 rounded-lg bg-red-50 dark:bg-red-950/30 p-2">
                 <p className="text-xs font-medium text-danger mb-1">경고 사유:</p>
                 {risk.reasons.map((r, i) => (
                   <p key={i} className="text-xs text-danger/80">- {r}</p>

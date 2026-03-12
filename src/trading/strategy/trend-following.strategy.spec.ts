@@ -141,8 +141,8 @@ describe('TrendFollowingStrategy', () => {
           positionCount: 1,
           investedRate: 0.5,
           dailyPnlRate: -0.05,
-          drawdown: -0.16,
-          reasons: ['MDD -16%'],
+          drawdown: -0.21,
+          reasons: ['MDD -21%'],
         },
       });
 
@@ -161,7 +161,7 @@ describe('TrendFollowingStrategy', () => {
           positionCount: 0,
           investedRate: 0,
           dailyPnlRate: 0,
-          drawdown: -0.16,
+          drawdown: -0.21,
           reasons: [],
         },
       });

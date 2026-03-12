@@ -5,6 +5,7 @@ import {
   TradingSignal,
   ExecutionMode,
   StrategyMeta,
+  evaluateStrategyMdd,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -53,6 +54,8 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
+    mddBuyBlock: -0.15,
+    mddLiquidate: -0.20,
     expectedReturn: '연 15~40%',
     maxLoss: '-7% (손절)',
     investmentPeriod: '수주~수개월',
@@ -79,8 +82,9 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       ? (p: number) => Math.round(p * 100) / 100
       : (p: number) => Math.round(p);
 
-    // 리스크 체크: 전량 청산 시그널 (alreadyExecutedToday 무관하게 항상 체크)
-    if (riskState?.liquidateAll && hasPosition) {
+    // 리스크 체크: 전략별 MDD 기준 전량 청산
+    const mddCheck = riskState ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate) : undefined;
+    if (mddCheck?.liquidateAll && hasPosition) {
       signals.push({
         market,
         exchangeCode: isOverseas ? exchangeCode : undefined,
@@ -88,7 +92,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         side: 'SELL',
         quantity: position!.quantity,
         price: roundPrice(curPrice),
-        reason: `리스크 전량청산: MDD ${(riskState.drawdown * 100).toFixed(1)}%`,
+        reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
       return signals;
     }
@@ -153,7 +157,8 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         profitRate > params.pyramidingProfitRate &&
         goldenCross &&
         strongTrend &&
-        !riskState?.buyBlocked
+        !riskState?.buyBlocked &&
+        !mddCheck?.buyBlocked
       ) {
         const quota = watchStock.quota || 0;
         let pyramidRatio = params.pyramidingRatio;
@@ -190,9 +195,9 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       if (ctx.alreadyExecutedToday) return signals;
 
       // 리스크 체크
-      if (riskState?.buyBlocked) {
+      if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
         this.logger.debug(
-          `[${watchStock.stockCode}] Buy blocked by risk: ${riskState.reasons.join(', ')}`,
+          `[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`,
         );
         return signals;
       }

@@ -6,7 +6,8 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { WatchStockService } from '../watch-stock/watch-stock.service';
 import { Market, Side, SimulationStatus, Prisma } from '@prisma/client';
-import { StockStrategyContext, WatchStockConfig, StockFundamentals } from '../trading/types';
+import { StockStrategyContext, WatchStockConfig, StockFundamentals, RiskState, MarketRegimeLabel } from '../trading/types';
+import { MarketRegimeService } from '../trading/market-regime.service';
 import { StockPriceResult } from '../kis/types/kis-api.types';
 import { SimulationMetrics, SimulationPendingOrder } from './types';
 import { CreateSimulationInput } from './dto';
@@ -22,6 +23,7 @@ export class SimulationService {
     private prisma: PrismaService,
     private strategyRegistry: StrategyRegistryService,
     private marketAnalysis: MarketAnalysisService,
+    private marketRegimeService: MarketRegimeService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private watchStockService: WatchStockService,
@@ -92,6 +94,13 @@ export class SimulationService {
 
     const today = new Date().toISOString().slice(0, 10);
 
+    // 공통 데이터: 세션 단위로 1회만 조회 (실거래 스케줄러와 동일)
+    const primaryExchangeCode = session.watchStocks[0]?.exchangeCode
+      || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+    const market = session.market as 'DOMESTIC' | 'OVERSEAS';
+    const marketRegime = await this.marketRegimeService.getRegime(market, primaryExchangeCode);
+    const riskState = await this.evaluateSimulationRisk(sessionId, positions, Number(session.currentCash));
+
     for (const ws of session.watchStocks) {
       try {
         const exchangeCode = ws.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
@@ -103,11 +112,31 @@ export class SimulationService {
 
         // Get indicators
         const stockIndicators = await this.marketAnalysis.getStockIndicators(
-          session.market as 'DOMESTIC' | 'OVERSEAS',
+          market,
           exchangeCode,
           ws.stockCode,
           price.currentPrice,
         );
+
+        // 현재가 API에서 제공되는 추가 지표를 stockIndicators에 병합 (실거래와 동일)
+        stockIndicators.foreignHoldRate = price.foreignHoldRate;
+        stockIndicators.foreignNetBuyQty = price.foreignNetBuyQty;
+        stockIndicators.w52High = price.w52High;
+        stockIndicators.w52Low = price.w52Low;
+        stockIndicators.investCautionYn = price.investCautionYn;
+        stockIndicators.marketWarnCode = price.marketWarnCode;
+        stockIndicators.shortOverheatYn = price.shortOverheatYn;
+        stockIndicators.d250High = price.d250High;
+        stockIndicators.d250Low = price.d250Low;
+        stockIndicators.d250HighRate = price.d250HighRate;
+        stockIndicators.d250LowRate = price.d250LowRate;
+        stockIndicators.yearHigh = price.yearHigh;
+        stockIndicators.yearLow = price.yearLow;
+        stockIndicators.yearHighRate = price.yearHighRate;
+        stockIndicators.yearLowRate = price.yearLowRate;
+        stockIndicators.marketCap = price.marketCap;
+        stockIndicators.loanBalanceRate = price.loanBalanceRate;
+        stockIndicators.shortSellable = price.shortSellable;
 
         // Get market condition
         const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
@@ -168,6 +197,8 @@ export class SimulationService {
           fundamentals,
           buyableAmount: Number(session.currentCash),
           totalPortfolioValue,
+          marketRegime,
+          riskState,
         };
 
         const signals = await strategy.evaluateStock(ctx);
@@ -821,6 +852,83 @@ export class SimulationService {
       where: { sessionId },
       orderBy: { snapshotDate: 'asc' },
     });
+  }
+
+  /** 시뮬레이션용 리스크 상태 평가 (실거래 RiskManagementService.evaluateRisk와 동일 로직) */
+  private async evaluateSimulationRisk(
+    sessionId: string,
+    positions: { stockCode: string; quantity: number; avgPrice: any; currentPrice: any }[],
+    currentCash: number,
+  ): Promise<RiskState> {
+    const reasons: string[] = [];
+
+    const positionCount = positions.length;
+    const totalCurrentValue = positions.reduce(
+      (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
+      0,
+    );
+    const totalInvested = positions.reduce(
+      (sum, p) => sum + Number(p.quantity) * Number(p.avgPrice),
+      0,
+    );
+
+    const totalValue = totalCurrentValue + currentCash;
+    const investedRate = totalValue > 0 ? totalCurrentValue / totalValue : 0;
+
+    // 일일 PnL
+    const dailyPnl = totalCurrentValue - totalInvested;
+    const dailyPnlRate = totalInvested > 0 ? dailyPnl / totalInvested : 0;
+
+    // MDD 계산: 시뮬레이션 스냅샷에서 peakValue 참조
+    const latestSnapshot = await this.prisma.simulationSnapshot.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // MDD는 총 자산(포지션 + 현금) 기준으로 계산해야 정확
+    const peakValue = latestSnapshot
+      ? Math.max(Number(latestSnapshot.peakValue), totalValue)
+      : totalValue;
+    const drawdown = peakValue > 0 ? (totalValue - peakValue) / peakValue : 0;
+
+    let buyBlocked = false;
+    let liquidateAll = false;
+
+    // 규칙: 보유 종목 >= 6개 → 신규 매수 차단
+    if (positionCount >= 6) {
+      buyBlocked = true;
+      reasons.push(`보유 종목 ${positionCount}개 >= 6개`);
+    }
+
+    // 규칙: 투자비중 >= 80% → 신규 매수 차단
+    if (investedRate >= 0.8) {
+      buyBlocked = true;
+      reasons.push(`투자비중 ${(investedRate * 100).toFixed(1)}% >= 80%`);
+    }
+
+    // 규칙: 일일 손실 <= -2% → 당일 신규 매수 차단
+    if (dailyPnlRate <= -0.02) {
+      buyBlocked = true;
+      reasons.push(`일일 손실 ${(dailyPnlRate * 100).toFixed(1)}% <= -2%`);
+    }
+
+    // MDD 관련 규칙은 전략별 riskLevel에 따라 다르게 적용됨
+    // → evaluateStrategyMdd() 참조 (각 전략의 meta.mddBuyBlock/mddLiquidate)
+    // 여기서는 drawdown 값만 전달하고, 전략 evaluateStock()에서 판단
+
+    if (reasons.length > 0) {
+      this.logger.warn(`[SIM] Risk state: ${reasons.join(', ')}`);
+    }
+
+    return {
+      buyBlocked,
+      liquidateAll,
+      positionCount,
+      investedRate,
+      dailyPnlRate,
+      drawdown,
+      reasons,
+    };
   }
 
   /** 재무 데이터 조회 (밸류 팩터 전략용) */

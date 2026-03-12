@@ -4547,6 +4547,30 @@
             "deprecationReason": null
           },
           {
+            "name": "mddBuyBlock",
+            "description": "MDD 매수차단 임계값 (예: -0.10 = -10%)",
+            "args": [],
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "SCALAR", "name": "Float", "ofType": null }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "mddLiquidate",
+            "description": "MDD 전량청산 임계값 (예: -0.15 = -15%)",
+            "args": [],
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "SCALAR", "name": "Float", "ofType": null }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "riskLevel",
             "description": null,
             "args": [],

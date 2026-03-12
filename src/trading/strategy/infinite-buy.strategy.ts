@@ -68,6 +68,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
+    mddBuyBlock: -0.25,
+    mddLiquidate: -0.35,
     expectedReturn: '사이클당 +3~15% (T에 따라 동적)',
     maxLoss: '-30% (손절 기본값)',
     investmentPeriod: '3개월~1년',

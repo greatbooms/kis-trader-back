@@ -42,6 +42,8 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'low',
+    mddBuyBlock: -0.20,
+    mddLiquidate: -0.30,
     expectedReturn: '시장 수익률 추종',
     maxLoss: '-30% (손절 기본값)',
     investmentPeriod: '6개월~수년',

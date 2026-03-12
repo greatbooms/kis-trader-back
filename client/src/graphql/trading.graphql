@@ -5,6 +5,8 @@ query GetAvailableStrategies {
     description
     meta {
       riskLevel
+      mddBuyBlock
+      mddLiquidate
       expectedReturn
       maxLoss
       investmentPeriod

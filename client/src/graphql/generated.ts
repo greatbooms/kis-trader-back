@@ -604,6 +604,10 @@ export type StrategyMetaType = {
   expectedReturn: Scalars["String"]["output"];
   investmentPeriod: Scalars["String"]["output"];
   maxLoss: Scalars["String"]["output"];
+  /** MDD 매수차단 임계값 (예: -0.10 = -10%) */
+  mddBuyBlock: Scalars["Float"]["output"];
+  /** MDD 전량청산 임계값 (예: -0.15 = -15%) */
+  mddLiquidate: Scalars["Float"]["output"];
   riskLevel: Scalars["String"]["output"];
   suitableFor: Array<Scalars["String"]["output"]>;
   tags: Array<Scalars["String"]["output"]>;
@@ -1264,6 +1268,8 @@ export type GetAvailableStrategiesQuery = {
     meta: {
       __typename?: "StrategyMetaType";
       riskLevel: string;
+      mddBuyBlock: number;
+      mddLiquidate: number;
       expectedReturn: string;
       maxLoss: string;
       investmentPeriod: string;
@@ -3745,6 +3751,8 @@ export const GetAvailableStrategiesDocument = gql`
       description
       meta {
         riskLevel
+        mddBuyBlock
+        mddLiquidate
         expectedReturn
         maxLoss
         investmentPeriod

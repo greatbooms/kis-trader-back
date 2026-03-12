@@ -4,7 +4,7 @@ import { WatchStockConfig } from './watch-stock-config.type';
 import { MarketCondition } from './market-condition.type';
 import { StockIndicators } from './stock-indicators.type';
 import { StockFundamentals } from './stock-fundamentals.type';
-import { MarketRegimeLabel, RiskState } from './risk-state.type';
+import { MarketRegimeLabel, RiskLevel, RiskState } from './risk-state.type';
 
 export interface StockStrategyContext {
   watchStock: WatchStockConfig;
@@ -41,10 +41,14 @@ export type ExecutionMode =
       };
     };
 
-export type RiskLevel = 'very-low' | 'low' | 'medium' | 'high' | 'very-high';
+export type { RiskLevel };
 
 export interface StrategyMeta {
   riskLevel: RiskLevel;
+  /** MDD 매수차단 임계값 (예: -0.10 = -10%) */
+  mddBuyBlock: number;
+  /** MDD 전량청산 임계값 (예: -0.15 = -15%) */
+  mddLiquidate: number;
   expectedReturn: string;
   maxLoss: string;
   investmentPeriod: string;

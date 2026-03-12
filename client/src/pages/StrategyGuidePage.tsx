@@ -35,6 +35,53 @@ export function StrategyGuidePage() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-warning" />
+            <CardTitle>공통 리스크 관리</CardTitle>
+          </div>
+          <CardDescription>모든 전략에 공통으로 적용되는 리스크 관리 규칙입니다. 조건 충족 시 자동으로 매수 차단 또는 전량 청산이 실행됩니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-border/50">
+                <Badge variant="danger" className="shrink-0 mt-0.5">차단</Badge>
+                <div>
+                  <p className="text-sm font-medium">보유 종목 수 ≥ 6개</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">포지션이 6개 이상이면 신규 매수를 차단합니다.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-border/50">
+                <Badge variant="danger" className="shrink-0 mt-0.5">차단</Badge>
+                <div>
+                  <p className="text-sm font-medium">투자비율 ≥ 80%</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">총 자산 대비 투자 비율이 80% 이상이면 신규 매수를 차단합니다.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-border/50">
+                <Badge variant="danger" className="shrink-0 mt-0.5">차단</Badge>
+                <div>
+                  <p className="text-sm font-medium">일간 손익률 ≤ -2%</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">당일 손익률이 -2% 이하이면 당일 신규 매수를 차단합니다.</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20">
+              <Badge variant="warning" className="shrink-0 mt-0.5">MDD</Badge>
+              <div>
+                <p className="text-sm font-medium">최대 낙폭(MDD) — 전략별 차등 적용</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  MDD(Maximum Drawdown)는 운용 이후 최고점 대비 현재 포트폴리오가 얼마나 하락했는지를 나타냅니다.
+                  전략마다 매수차단/전량청산 임계값이 다르게 설정되어 있습니다. 각 전략 상세에서 확인하세요.
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-primary-500" />
             <CardTitle>사용 가능한 전략</CardTitle>
           </div>
@@ -117,6 +164,14 @@ export function StrategyGuidePage() {
                               </div>
                             </div>
                           </div>
+                        </div>
+
+                        {/* MDD 임계값 */}
+                        <div className="flex items-center gap-3 p-2.5 rounded-md bg-red-50 dark:bg-red-950/20 text-xs">
+                          <ShieldAlert size={14} className="shrink-0 text-danger" />
+                          <span className="text-muted-foreground">MDD 매수차단: <span className="font-medium text-foreground">{(strategy.meta.mddBuyBlock * 100).toFixed(0)}%</span></span>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-muted-foreground">MDD 전량청산: <span className="font-medium text-danger">{(strategy.meta.mddLiquidate * 100).toFixed(0)}%</span></span>
                         </div>
 
                         {/* 태그 */}

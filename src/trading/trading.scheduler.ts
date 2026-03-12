@@ -26,6 +26,8 @@ export class TradingScheduler implements OnModuleInit {
 
   // 휴장일 캐시 (일 1회)
   private holidayCache: { date: string; domestic: HolidayItem[]; overseas: HolidayItem[] } | null = null;
+  // 리스크 알림 중복 방지 (market → 마지막 알림 날짜)
+  private lastRiskAlertDate: Record<string, string> = {};
 
   constructor(
     private tradingService: TradingService,
@@ -167,6 +169,32 @@ export class TradingScheduler implements OnModuleInit {
     // 2. 공통 데이터 한 번만 조회
     const regime = await this.marketRegimeService.getRegime(market, exchangeCode);
     const riskState = await this.riskManagement.evaluateRisk(market);
+
+    // 리스크 경고 Slack 알림 (같은 시장은 하루 1회만)
+    const alertDate = new Date().toISOString().slice(0, 10);
+    if (riskState.reasons.length > 0 && this.slackService?.isEnabled() && this.lastRiskAlertDate[market] !== alertDate) {
+      this.lastRiskAlertDate[market] = alertDate;
+      const latestSnapshot = await this.prisma.riskSnapshot.findFirst({
+        where: { market: market as Market },
+        orderBy: { createdAt: 'desc' },
+      });
+      this.slackService.sendRiskAlert({
+        market,
+        riskType: riskState.liquidateAll ? 'MDD_LIQUIDATE' : 'MDD_BUY_BLOCK',
+        reasons: riskState.reasons,
+        details: {
+          drawdown: riskState.drawdown,
+          peakValue: latestSnapshot ? Number(latestSnapshot.peakValue) : undefined,
+          currentValue: latestSnapshot
+            ? Number(latestSnapshot.portfolioValue)
+            : undefined,
+          dailyPnlRate: riskState.dailyPnlRate,
+          positionCount: riskState.positionCount,
+          investedRate: riskState.investedRate,
+        },
+      });
+    }
+
     const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
 
     // 잔고 동기화

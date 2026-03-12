@@ -75,17 +75,9 @@ export class RiskManagementService {
       reasons.push(`일일 손실 ${(dailyPnlRate * 100).toFixed(1)}% <= -2%`);
     }
 
-    // 규칙: MDD <= -10% → 신규 매수 중지
-    if (drawdown <= -0.10) {
-      buyBlocked = true;
-      reasons.push(`MDD ${(drawdown * 100).toFixed(1)}% <= -10%`);
-    }
-
-    // 규칙: MDD <= -15% → 전량 청산 시그널
-    if (drawdown <= -0.15) {
-      liquidateAll = true;
-      reasons.push(`MDD ${(drawdown * 100).toFixed(1)}% <= -15%, 전량 청산`);
-    }
+    // MDD 관련 규칙은 전략별 riskLevel에 따라 다르게 적용됨
+    // → evaluateStrategyMdd() 참조 (risk-state.type.ts)
+    // 여기서는 drawdown 값만 전달하고, 전략 evaluateStock()에서 판단
 
     const riskState: RiskState = {
       buyBlocked,

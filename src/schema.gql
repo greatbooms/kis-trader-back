@@ -4,6 +4,12 @@
 
 type StrategyMetaType {
   riskLevel: String!
+
+  """MDD 매수차단 임계값 (예: -0.10 = -10%)"""
+  mddBuyBlock: Float!
+
+  """MDD 전량청산 임계값 (예: -0.15 = -15%)"""
+  mddLiquidate: Float!
   expectedReturn: String!
   maxLoss: String!
   investmentPeriod: String!

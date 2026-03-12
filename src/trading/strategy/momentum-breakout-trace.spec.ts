@@ -518,8 +518,8 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
         positionCount: 1,
         investedRate: 0.5,
         dailyPnlRate: -0.1,
-        drawdown: 0.15,
-        reasons: ['MDD 15% 초과'],
+        drawdown: -0.13,
+        reasons: ['MDD -13% 초과'],
       },
     });
     ctx.price.currentPrice = 71000;

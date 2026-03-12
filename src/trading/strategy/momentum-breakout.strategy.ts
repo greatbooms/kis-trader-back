@@ -5,6 +5,7 @@ import {
   TradingSignal,
   ExecutionMode,
   StrategyMeta,
+  evaluateStrategyMdd,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -52,6 +53,8 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'high',
+    mddBuyBlock: -0.08,
+    mddLiquidate: -0.12,
     expectedReturn: '건당 +5~8%',
     maxLoss: '-3% (손절) / -2% (트레일링)',
     investmentPeriod: '1~3일',
@@ -78,8 +81,9 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       ? (p: number) => Math.round(p * 100) / 100
       : (p: number) => Math.round(p);
 
-    // 리스크 체크: 전량 청산 시그널
-    if (riskState?.liquidateAll && hasPosition) {
+    // 리스크 체크: 전략별 MDD 기준 전량 청산
+    const mddCheck = riskState ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate) : undefined;
+    if (mddCheck?.liquidateAll && hasPosition) {
       signals.push({
         market,
         exchangeCode: isOverseas ? exchangeCode : undefined,
@@ -87,7 +91,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
         side: 'SELL',
         quantity: position!.quantity,
         price: roundPrice(curPrice),
-        reason: `리스크 전량청산: MDD ${(riskState.drawdown * 100).toFixed(1)}%`,
+        reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
       return signals;
     }
@@ -168,8 +172,8 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       // --- 포지션 없음: 진입 조건 ---
 
       // 리스크 체크: 매수 차단
-      if (riskState?.buyBlocked) {
-        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState.reasons.join(', ')}`);
+      if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`);
         return signals;
       }
 

@@ -498,8 +498,8 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
         positionCount: 1,
         investedRate: 0.5,
         dailyPnlRate: -0.05,
-        drawdown: 0.15,
-        reasons: ['MDD 15% 초과'],
+        drawdown: -0.26,
+        reasons: ['MDD -26% 초과'],
       },
     });
     ctx.price.currentPrice = 62000;

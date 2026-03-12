@@ -559,8 +559,8 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
         positionCount: 1,
         investedRate: 0.5,
         dailyPnlRate: -0.1,
-        drawdown: 0.15,
-        reasons: ['MDD 15%'],
+        drawdown: -0.26,
+        reasons: ['MDD -26%'],
       },
     });
     ctx.price.currentPrice = 58000;

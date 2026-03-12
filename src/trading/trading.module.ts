@@ -36,6 +36,6 @@ import { NotificationModule } from '../notification/notification.module';
     DailyDcaStrategy,
     PrismaService,
   ],
-  exports: [TradingService, TradingScheduler, MarketAnalysisService, StrategyRegistryService, RiskManagementService],
+  exports: [TradingService, TradingScheduler, MarketAnalysisService, MarketRegimeService, StrategyRegistryService, RiskManagementService],
 })
 export class TradingModule {}

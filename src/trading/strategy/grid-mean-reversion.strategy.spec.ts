@@ -104,8 +104,8 @@ describe('GridMeanReversionStrategy', () => {
           positionCount: 1,
           investedRate: 0.5,
           dailyPnlRate: -0.05,
-          drawdown: -0.16,
-          reasons: ['MDD -16%'],
+          drawdown: -0.26,
+          reasons: ['MDD -26%'],
         },
       });
 
@@ -124,7 +124,7 @@ describe('GridMeanReversionStrategy', () => {
           positionCount: 0,
           investedRate: 0,
           dailyPnlRate: 0,
-          drawdown: -0.16,
+          drawdown: -0.26,
           reasons: [],
         },
       });

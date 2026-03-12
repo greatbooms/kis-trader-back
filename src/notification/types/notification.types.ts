@@ -51,6 +51,20 @@ export interface FilterLogContext {
   details: Record<string, any>;
 }
 
+export interface RiskAlertContext {
+  market: string;
+  riskType: 'MDD_LIQUIDATE' | 'MDD_BUY_BLOCK' | 'DAILY_PNL' | 'POSITION_LIMIT' | 'INVESTED_RATE';
+  reasons: string[];
+  details: {
+    drawdown?: number;
+    peakValue?: number;
+    currentValue?: number;
+    dailyPnlRate?: number;
+    positionCount?: number;
+    investedRate?: number;
+  };
+}
+
 export interface StopLossApprovalRequest {
   approvalId: string;
   tradeRecordId: string;

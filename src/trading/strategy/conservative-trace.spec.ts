@@ -276,8 +276,8 @@ describe('ConservativeStrategy — Realistic Trace', () => {
         positionCount: 1,
         investedRate: 0.3,
         dailyPnlRate: -0.05,
-        drawdown: 0.15,
-        reasons: ['MDD 15%'],
+        drawdown: -0.16,
+        reasons: ['MDD -16%'],
       },
     });
     ctx.price.currentPrice = 68000;
