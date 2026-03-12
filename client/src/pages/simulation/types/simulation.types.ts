@@ -5,11 +5,14 @@ export interface SimulationDetailSectionProps {
 
 export interface SimulationEquityChartProps {
   sessionId: string
+  market: string
+  exchangeCode?: string
 }
 
 export interface SimulationMetricsCardsProps {
   sessionId: string
   market: string
+  exchangeCode?: string
 }
 
 export interface SimulationPositionsTableProps {
@@ -29,6 +32,7 @@ export interface SimulationCapitalSummaryProps {
   initialCapital: number
   currentCash: number
   market: string
+  exchangeCode?: string
   watchStocks: Array<{
     id: string
     stockName: string

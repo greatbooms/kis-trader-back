@@ -5,7 +5,7 @@ import { useGetSimulationPositionsQuery } from '@/graphql/generated'
 import { formatCurrency } from '@/lib/utils'
 import type { SimulationCapitalSummaryProps } from '@/pages/simulation/types'
 
-export function SimulationCapitalSummary({ sessionId, initialCapital, currentCash, market, watchStocks }: SimulationCapitalSummaryProps) {
+export function SimulationCapitalSummary({ sessionId, initialCapital, currentCash, market, exchangeCode, watchStocks }: SimulationCapitalSummaryProps) {
   const { data } = useGetSimulationPositionsQuery({
     variables: { sessionId },
   })
@@ -32,30 +32,30 @@ export function SimulationCapitalSummary({ sessionId, initialCapital, currentCas
             <Wallet className="h-5 w-5 text-primary-500 mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">초기자본</p>
-              <p className="text-sm font-semibold">{formatCurrency(initialCapital, market)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(initialCapital, market, exchangeCode)}</p>
             </div>
           </div>
           <div className="flex items-start gap-3">
             <CircleDollarSign className="h-5 w-5 text-success mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">현재 현금</p>
-              <p className="text-sm font-semibold">{formatCurrency(currentCash, market)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(currentCash, market, exchangeCode)}</p>
             </div>
           </div>
           <div className="flex items-start gap-3">
             <PiggyBank className="h-5 w-5 text-warning mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">총 배정액 (quota)</p>
-              <p className="text-sm font-semibold">{formatCurrency(totalQuota, market)}</p>
-              <p className="text-xs text-muted-foreground">미배정: {formatCurrency(unallocated, market)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(totalQuota, market, exchangeCode)}</p>
+              <p className="text-xs text-muted-foreground">미배정: {formatCurrency(unallocated, market, exchangeCode)}</p>
             </div>
           </div>
           <div className="flex items-start gap-3">
             <BarChart3 className="h-5 w-5 text-info mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">총 투자금 (포지션)</p>
-              <p className="text-sm font-semibold">{formatCurrency(totalInvested, market)}</p>
-              <p className="text-xs text-muted-foreground">평가액: {formatCurrency(totalPortfolioValue, market)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(totalInvested, market, exchangeCode)}</p>
+              <p className="text-xs text-muted-foreground">평가액: {formatCurrency(totalPortfolioValue, market, exchangeCode)}</p>
             </div>
           </div>
         </div>
@@ -68,7 +68,7 @@ export function SimulationCapitalSummary({ sessionId, initialCapital, currentCas
                 <div key={ws.id} className="flex items-center justify-between rounded border border-border/50 px-3 py-2">
                   <span className="text-xs font-medium truncate mr-2">{ws.stockName}</span>
                   <span className="text-xs text-muted-foreground shrink-0">
-                    {ws.quota ? formatCurrency(ws.quota, market) : '-'}
+                    {ws.quota ? formatCurrency(ws.quota, market, exchangeCode) : '-'}
                   </span>
                 </div>
               ))}

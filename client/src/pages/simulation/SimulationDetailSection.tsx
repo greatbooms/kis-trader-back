@@ -25,6 +25,9 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
     return <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">세션을 찾을 수 없습니다</div>
   }
 
+  const exchangeCodes = [...new Set((session.watchStocks ?? []).map((ws) => ws.exchangeCode).filter((c): c is string => !!c))]
+  const primaryExchangeCode = exchangeCodes[0]
+
   return (
     <div className="space-y-6">
       <SimulationControls
@@ -33,19 +36,20 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
         sessionName={session.name}
         strategyDisplayName={strategies.find((s) => s.name === session.strategyName)?.displayName ?? session.strategyName}
         market={session.market}
-        exchangeCodes={[...new Set((session.watchStocks ?? []).map((ws) => ws.exchangeCode).filter((c): c is string => !!c))]}
+        exchangeCodes={exchangeCodes}
         onBack={onBack}
         onStatusChange={() => refetch()}
       />
-      <SimulationMetricsCards sessionId={sessionId} market={session.market} />
+      <SimulationMetricsCards sessionId={sessionId} market={session.market} exchangeCode={primaryExchangeCode} />
       <SimulationCapitalSummary
         sessionId={sessionId}
         initialCapital={session.initialCapital}
         currentCash={session.currentCash}
         market={session.market}
+        exchangeCode={primaryExchangeCode}
         watchStocks={session.watchStocks ?? []}
       />
-      <SimulationEquityChart sessionId={sessionId} />
+      <SimulationEquityChart sessionId={sessionId} market={session.market} exchangeCode={primaryExchangeCode} />
       <SimulationWatchStocks sessionId={sessionId} />
       <SimulationPositionsTable sessionId={sessionId} />
       <SimulationTradesTable sessionId={sessionId} />

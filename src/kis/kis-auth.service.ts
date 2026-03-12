@@ -9,6 +9,7 @@ export class KisAuthService implements OnModuleInit {
   private readonly logger = new Logger(KisAuthService.name);
   private accessToken: string | null = null;
   private tokenExpiry: Date | null = null;
+  private ensureTokenPromise: Promise<void> | null = null;
 
   private appKey: string;
   private appSecret: string;
@@ -64,6 +65,20 @@ export class KisAuthService implements OnModuleInit {
       return;
     }
 
+    // 이미 다른 호출에서 토큰 발급/로드 중이면 그 Promise를 재사용 (중복 발급 방지)
+    if (this.ensureTokenPromise) {
+      return this.ensureTokenPromise;
+    }
+
+    this.ensureTokenPromise = this.doEnsureToken();
+    try {
+      await this.ensureTokenPromise;
+    } finally {
+      this.ensureTokenPromise = null;
+    }
+  }
+
+  private async doEnsureToken(): Promise<void> {
     // 메모리에 없으면 DB에서 로드 시도
     const saved = await this.loadTokenFromDb();
     if (saved) {

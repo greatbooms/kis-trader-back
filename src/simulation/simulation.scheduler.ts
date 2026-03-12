@@ -147,6 +147,9 @@ export class SimulationScheduler implements OnModuleInit {
           }
 
           await this.simulationService.updatePositionPrices(session.id);
+          // 1) pending order 체결 체크 (매 1분마다)
+          await this.simulationService.checkPendingOrders(session.id);
+          // 2) 전략 실행 → 새 신호 생성 (전략별 once-daily 등 자체 제어)
           await this.simulationService.executeSimulationTick(session.id);
         } catch (e) {
           this.logger.error(`Simulation tick error for session ${session.id}: ${e.message}`);
@@ -167,6 +170,8 @@ export class SimulationScheduler implements OnModuleInit {
 
       for (const session of sessions) {
         try {
+          // 장 마감: 미체결 pending order 취소 후 스냅샷
+          this.simulationService.cancelPendingOrders(session.id);
           await this.simulationService.takeSnapshot(session.id);
         } catch (e) {
           this.logger.error(`Snapshot error for session ${session.id}: ${e.message}`);
@@ -185,6 +190,8 @@ export class SimulationScheduler implements OnModuleInit {
 
       for (const session of sessions) {
         try {
+          // 장 마감: 미체결 pending order 취소 후 스냅샷
+          this.simulationService.cancelPendingOrders(session.id);
           await this.simulationService.takeSnapshot(session.id);
         } catch (e) {
           this.logger.error(`Snapshot error for session ${session.id}: ${e.message}`);

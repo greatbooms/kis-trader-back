@@ -14,7 +14,7 @@ import { useGetSimulationSnapshotsQuery } from '@/graphql/generated'
 import { formatCurrency } from '@/lib/utils'
 import type { SimulationEquityChartProps } from '@/pages/simulation/types'
 
-export function SimulationEquityChart({ sessionId }: SimulationEquityChartProps) {
+export function SimulationEquityChart({ sessionId, market, exchangeCode }: SimulationEquityChartProps) {
   const { data, loading } = useGetSimulationSnapshotsQuery({
     variables: { sessionId },
   })
@@ -56,7 +56,7 @@ export function SimulationEquityChart({ sessionId }: SimulationEquityChartProps)
               <YAxis
                 tick={{ fontSize: 12 }}
                 stroke="var(--color-muted-foreground)"
-                tickFormatter={(v) => formatCurrency(v)}
+                tickFormatter={(v) => formatCurrency(v, market, exchangeCode)}
               />
               <Tooltip
                 contentStyle={{
@@ -67,7 +67,7 @@ export function SimulationEquityChart({ sessionId }: SimulationEquityChartProps)
                 }}
                 formatter={(value, name) => {
                   const label = name === 'totalValue' ? '총 자산' : '현금'
-                  return [formatCurrency(value as number), label]
+                  return [formatCurrency(value as number, market, exchangeCode), label]
                 }}
                 labelFormatter={(label) => `날짜: ${label}`}
               />

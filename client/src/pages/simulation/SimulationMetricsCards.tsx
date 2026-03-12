@@ -16,7 +16,7 @@ function MetricTitle({ label, tooltip }: { label: string; tooltip: string }) {
   )
 }
 
-export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsCardsProps) {
+export function SimulationMetricsCards({ sessionId, market, exchangeCode }: SimulationMetricsCardsProps) {
   const { data, loading } = useGetSimulationMetricsQuery({
     variables: { sessionId },
   })
@@ -45,19 +45,19 @@ export function SimulationMetricsCards({ sessionId, market }: SimulationMetricsC
             {formatPercent(metrics.totalReturn)}
           </div>
           <p className={`text-xs mt-1 ${metrics.totalReturnAmount >= 0 ? 'text-success' : 'text-danger'}`}>
-            {formatCurrency(metrics.totalReturnAmount, market)}
+            {formatCurrency(metrics.totalReturnAmount, market, exchangeCode)}
           </p>
           <div className="flex gap-3 mt-2 pt-2 border-t border-border text-xs">
             <div>
               <span className="text-muted-foreground">실현 </span>
               <span className={metrics.realizedPnL >= 0 ? 'text-success' : 'text-danger'}>
-                {formatCurrency(metrics.realizedPnL, market)}
+                {formatCurrency(metrics.realizedPnL, market, exchangeCode)}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">미실현 </span>
               <span className={metrics.unrealizedPnL >= 0 ? 'text-success' : 'text-danger'}>
-                {formatCurrency(metrics.unrealizedPnL, market)}
+                {formatCurrency(metrics.unrealizedPnL, market, exchangeCode)}
               </span>
             </div>
           </div>

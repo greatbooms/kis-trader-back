@@ -6,14 +6,17 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { WatchStockService } from '../watch-stock/watch-stock.service';
 import { Market, Side, SimulationStatus, Prisma } from '@prisma/client';
-import { StockStrategyContext, WatchStockConfig } from '../trading/types';
-import { SimulationMetrics } from './types';
+import { StockStrategyContext, WatchStockConfig, StockFundamentals } from '../trading/types';
+import { StockPriceResult } from '../kis/types/kis-api.types';
+import { SimulationMetrics, SimulationPendingOrder } from './types';
 import { CreateSimulationInput } from './dto';
 import { AddSimulationWatchStockInput } from './dto';
 
 @Injectable()
 export class SimulationService {
   private readonly logger = new Logger(SimulationService.name);
+  /** 인메모리 pending orders: sessionId → 주문 배열 */
+  private pendingOrders = new Map<string, SimulationPendingOrder[]>();
 
   constructor(
     private prisma: PrismaService,
@@ -138,6 +141,17 @@ export class SimulationService {
           strategyParams: ws.strategyParams as Record<string, any> | undefined,
         };
 
+        // 밸류 팩터 전략일 때만 재무 데이터 조회 (API 호출 최소화)
+        let fundamentals: StockFundamentals | undefined;
+        if (session.strategyName === 'value-factor') {
+          fundamentals = await this.fetchFundamentals(
+            session.market as string,
+            exchangeCode,
+            ws.stockCode,
+            price,
+          );
+        }
+
         const ctx: StockStrategyContext = {
           watchStock: watchStockConfig,
           price,
@@ -151,14 +165,48 @@ export class SimulationService {
           alreadyExecutedToday: !!todayTrade,
           marketCondition,
           stockIndicators,
+          fundamentals,
           buyableAmount: Number(session.currentCash),
           totalPortfolioValue,
         };
 
         const signals = await strategy.evaluateStock(ctx);
 
+        if (signals.length === 0) {
+          this.logger.debug(
+            `[SIM] ${ws.stockCode} no signal | price=${price.currentPrice}` +
+            ` ma20=${stockIndicators.ma20 ?? 'N/A'} ma60=${stockIndicators.ma60 ?? 'N/A'}` +
+            ` adx14=${stockIndicators.adx14 ?? 'N/A'}` +
+            ` alreadyToday=${!!todayTrade} pos=${pos ? `qty=${pos.quantity},avg=${Number(pos.avgPrice)}` : 'none'}` +
+            ` cash=${Number(session.currentCash)}`,
+          );
+        }
+
         for (const signal of signals) {
-          await this.virtualExecute(sessionId, signal, price.currentPrice);
+          const signalPrice = signal.price || 0;
+          const canFillNow = this.canFillAtPrice(signal.side, signalPrice, price.currentPrice);
+
+          if (canFillNow) {
+            this.logger.log(`[SIM] ${ws.stockCode} fill: ${signal.side} x${signal.quantity} @ ${signalPrice || price.currentPrice} | reason=${signal.reason}`);
+            await this.virtualExecute(sessionId, signal, price.currentPrice);
+          } else {
+            // 지정가 미도달 → pending order로 저장 (장중 가격 변동 시 체결)
+            const pending: SimulationPendingOrder = {
+              sessionId,
+              market: signal.market,
+              exchangeCode: signal.exchangeCode,
+              stockCode: signal.stockCode,
+              side: signal.side as 'BUY' | 'SELL',
+              quantity: signal.quantity,
+              price: signalPrice,
+              reason: signal.reason,
+              createdAt: new Date(),
+            };
+            const orders = this.pendingOrders.get(sessionId) || [];
+            orders.push(pending);
+            this.pendingOrders.set(sessionId, orders);
+            this.logger.log(`[SIM] ${ws.stockCode} pending: ${signal.side} x${signal.quantity} @ ${signalPrice} | reason=${signal.reason}`);
+          }
         }
 
         // 분할매수 전략: 매수금액 부족 시 다음 사이클로 누적 (1일 1회만)
@@ -191,6 +239,20 @@ export class SimulationService {
     }
   }
 
+  /** 지정가 체결 가능 여부 판정 */
+  private canFillAtPrice(side: string, signalPrice: number, currentMarketPrice: number): boolean {
+    // 시장가 주문 (price=0)은 항상 체결
+    if (!signalPrice || signalPrice <= 0) return true;
+
+    // BUY 지정가: 현재가가 지정가 이하이면 체결 (가격이 내려왔으면 살 수 있음)
+    if (side === 'BUY') return currentMarketPrice <= signalPrice;
+
+    // SELL 지정가: 현재가가 지정가 이상이면 체결 (가격이 올라왔으면 팔 수 있음)
+    if (side === 'SELL') return currentMarketPrice >= signalPrice;
+
+    return false;
+  }
+
   private async virtualExecute(
     sessionId: string,
     signal: { market: string; exchangeCode?: string; stockCode: string; side: string; quantity: number; price?: number; reason: string },
@@ -200,20 +262,6 @@ export class SimulationService {
     if (!session) return;
 
     const signalPrice = signal.price || 0;
-
-    // 지정가 체결 조건 체크: 현재가가 지정가에 도달했을 때만 체결
-    if (signalPrice > 0 && currentMarketPrice > 0) {
-      if (signal.side === 'BUY' && currentMarketPrice > signalPrice) {
-        // 매수 지정가: 현재가가 지정가보다 높으면 체결 불가
-        this.logger.debug(`[SIM] BUY ${signal.stockCode} skip: market ${currentMarketPrice} > limit ${signalPrice}`);
-        return;
-      }
-      if (signal.side === 'SELL' && currentMarketPrice < signalPrice) {
-        // 매도 지정가: 현재가가 지정가보다 낮으면 체결 불가
-        this.logger.debug(`[SIM] SELL ${signal.stockCode} skip: market ${currentMarketPrice} < limit ${signalPrice}`);
-        return;
-      }
-    }
 
     // 체결가: 시장가 주문이면 현재가, 지정가면 시그널 가격
     const price = signalPrice > 0 ? signalPrice : currentMarketPrice;
@@ -352,6 +400,90 @@ export class SimulationService {
 
       this.logger.log(`[SIM] SELL ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
     }
+  }
+
+  /** 매 tick(1분)마다 호출: pending order들을 현재가와 비교하여 체결 시도 */
+  async checkPendingOrders(sessionId: string): Promise<void> {
+    const orders = this.pendingOrders.get(sessionId);
+    if (!orders || orders.length === 0) return;
+
+    const session = await this.prisma.simulationSession.findUnique({
+      where: { id: sessionId },
+      include: { watchStocks: { where: { isActive: true } } },
+    });
+    if (!session || session.status !== SimulationStatus.RUNNING) {
+      this.pendingOrders.delete(sessionId);
+      return;
+    }
+
+    // 종목별 현재가 조회 (pending order에 있는 종목만)
+    const stockCodes = [...new Set(orders.map((o) => o.stockCode))];
+    const priceMap = new Map<string, number>();
+
+    for (const stockCode of stockCodes) {
+      try {
+        const ws = session.watchStocks.find((w) => w.stockCode === stockCode);
+        const exchangeCode = ws?.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+        const priceData = session.market === Market.DOMESTIC
+          ? await this.kisDomestic.getPrice(stockCode)
+          : await this.kisOverseas.getPrice(exchangeCode, stockCode);
+        priceMap.set(stockCode, priceData.currentPrice);
+      } catch (e) {
+        this.logger.error(`[SIM] Failed to get price for pending order ${stockCode}: ${e.message}`);
+      }
+    }
+
+    // 체결 가능한 주문 처리
+    const remaining: SimulationPendingOrder[] = [];
+    for (const order of orders) {
+      const currentPrice = priceMap.get(order.stockCode);
+      if (currentPrice === undefined) {
+        remaining.push(order);
+        continue;
+      }
+
+      if (this.canFillAtPrice(order.side, order.price, currentPrice)) {
+        this.logger.log(
+          `[SIM] ${order.stockCode} pending filled: ${order.side} x${order.quantity} @ ${order.price}` +
+          ` (market=${currentPrice}) | reason=${order.reason}`,
+        );
+        await this.virtualExecute(order.sessionId, {
+          market: order.market,
+          exchangeCode: order.exchangeCode,
+          stockCode: order.stockCode,
+          side: order.side,
+          quantity: order.quantity,
+          price: order.price,
+          reason: order.reason,
+        }, currentPrice);
+      } else {
+        remaining.push(order);
+      }
+    }
+
+    if (remaining.length > 0) {
+      this.pendingOrders.set(sessionId, remaining);
+    } else {
+      this.pendingOrders.delete(sessionId);
+    }
+  }
+
+  /** 장 마감 시 호출: 미체결 pending order 전량 취소 */
+  cancelPendingOrders(sessionId: string): void {
+    const orders = this.pendingOrders.get(sessionId);
+    if (!orders || orders.length === 0) return;
+
+    for (const order of orders) {
+      this.logger.log(
+        `[SIM] ${order.stockCode} pending cancelled (EOD): ${order.side} x${order.quantity} @ ${order.price} | reason=${order.reason}`,
+      );
+    }
+    this.pendingOrders.delete(sessionId);
+  }
+
+  /** 특정 세션의 pending order 개수 조회 */
+  getPendingOrderCount(sessionId: string): number {
+    return this.pendingOrders.get(sessionId)?.length ?? 0;
   }
 
   async takeSnapshot(sessionId: string): Promise<void> {
@@ -542,6 +674,7 @@ export class SimulationService {
     const session = await this.prisma.simulationSession.findUnique({ where: { id: sessionId } });
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
+    this.pendingOrders.delete(sessionId);
     await this.prisma.simulationTrade.deleteMany({ where: { sessionId } });
     await this.prisma.simulationPosition.deleteMany({ where: { sessionId } });
     await this.prisma.simulationSnapshot.deleteMany({ where: { sessionId } });
@@ -558,6 +691,7 @@ export class SimulationService {
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
+    this.pendingOrders.delete(sessionId);
     await this.prisma.simulationSession.delete({ where: { id: sessionId } });
     return true;
   }
@@ -687,5 +821,63 @@ export class SimulationService {
       where: { sessionId },
       orderBy: { snapshotDate: 'asc' },
     });
+  }
+
+  /** 재무 데이터 조회 (밸류 팩터 전략용) */
+  private async fetchFundamentals(
+    market: string,
+    exchangeCode: string,
+    stockCode: string,
+    price: StockPriceResult,
+  ): Promise<StockFundamentals | undefined> {
+    try {
+      if (market === 'DOMESTIC') {
+        const fundamentals: StockFundamentals = {
+          per: price.per,
+          pbr: price.pbr,
+        };
+
+        const rows = await this.kisDomestic.getFinancialRatio(stockCode);
+        if (rows.length > 0) {
+          const latest = rows[0];
+          fundamentals.roe = parseFloat(latest.roe_val) || undefined;
+          fundamentals.debtRatio = parseFloat(latest.lblt_rate) || undefined;
+          const eps = parseFloat(latest.eps);
+          fundamentals.eps = isNaN(eps) ? undefined : eps;
+          const grs = parseFloat(latest.grs);
+          fundamentals.salesGrowthRate = isNaN(grs) ? undefined : grs;
+          const bsopInrt = parseFloat(latest.bsop_prfi_inrt);
+          fundamentals.operatingProfitGrowthRate = isNaN(bsopInrt) ? undefined : bsopInrt;
+        }
+
+        try {
+          const otherRows = await this.kisDomestic.getOtherMajorRatios(stockCode);
+          if (otherRows.length > 0) {
+            const latest = otherRows[0];
+            const evEbitda = parseFloat(latest.ev_ebitda);
+            fundamentals.evEbitda = isNaN(evEbitda) || evEbitda === 0 ? undefined : evEbitda;
+            const payout = parseFloat(latest.payout_rate);
+            fundamentals.dividendPayoutRate = isNaN(payout) ? undefined : payout;
+          }
+        } catch (e) {
+          this.logger.debug(`Failed to fetch other-major-ratios for ${stockCode}: ${e.message}`);
+        }
+
+        return fundamentals;
+      }
+
+      // 해외: 현재가상세 API에서 PER/PBR/EPS 제공
+      if (price.per || price.pbr || price.eps) {
+        return {
+          per: price.per,
+          pbr: price.pbr,
+          eps: price.eps,
+        };
+      }
+      return undefined;
+    } catch (e) {
+      this.logger.warn(`Failed to fetch fundamentals for ${stockCode}: ${e.message}`);
+      return undefined;
+    }
   }
 }
