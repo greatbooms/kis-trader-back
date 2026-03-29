@@ -16,8 +16,8 @@ export class WatchStockType {
   @Field(() => Market)
   market: Market;
 
-  @Field({ nullable: true })
-  exchangeCode?: string;
+  @Field()
+  exchangeCode: string;
 
   @Field()
   stockCode: string;
@@ -67,8 +67,8 @@ export class CreateWatchStockInput {
   @Field(() => Market)
   market: Market;
 
-  @Field({ nullable: true })
-  exchangeCode?: string;
+  @Field()
+  exchangeCode: string;
 
   @Field()
   stockCode: string;

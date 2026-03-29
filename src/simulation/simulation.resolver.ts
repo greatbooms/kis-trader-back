@@ -46,7 +46,7 @@ export class SimulationResolver {
       id: p.id,
       sessionId: p.sessionId,
       market: p.market,
-      exchangeCode: p.exchangeCode || undefined,
+      exchangeCode: p.exchangeCode,
       stockCode: p.stockCode,
       stockName: p.stockName,
       quantity: p.quantity,
@@ -67,7 +67,7 @@ export class SimulationResolver {
       id: t.id,
       sessionId: t.sessionId,
       market: t.market,
-      exchangeCode: t.exchangeCode || undefined,
+      exchangeCode: t.exchangeCode,
       stockCode: t.stockCode,
       stockName: t.stockName,
       side: t.side,
@@ -175,20 +175,30 @@ export class SimulationResolver {
       stoppedAt: session.stoppedAt || undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      watchStocks: session.watchStocks?.map((ws: any) => this.mapWatchStock(ws)),
+      watchStocks: session.watchStocks?.map((ws: any) => this.mapWatchStock(ws, session.positions)),
     };
   }
 
-  private mapWatchStock(ws: any): SimulationWatchStockType {
+  private mapWatchStock(ws: any, positions?: any[]): SimulationWatchStockType {
+    // T(사이클)를 포지션 데이터에서 동적 계산: totalInvested / perCycleQuota
+    let cycle = ws.cycle;
+    if (ws.quota && positions) {
+      const pos = positions.find((p: any) => p.stockCode === ws.stockCode);
+      if (pos) {
+        const perCycleQuota = Number(ws.quota) / ws.maxCycles;
+        cycle = perCycleQuota > 0 ? Number(pos.totalInvested) / perCycleQuota : 0;
+      }
+    }
+
     return {
       id: ws.id,
       sessionId: ws.sessionId,
       market: ws.market,
-      exchangeCode: ws.exchangeCode || undefined,
+      exchangeCode: ws.exchangeCode,
       stockCode: ws.stockCode,
       stockName: ws.stockName,
       quota: ws.quota ? Number(ws.quota) : undefined,
-      cycle: ws.cycle,
+      cycle,
       maxCycles: ws.maxCycles,
       stopLossRate: Number(ws.stopLossRate),
       maxPortfolioRate: Number(ws.maxPortfolioRate),

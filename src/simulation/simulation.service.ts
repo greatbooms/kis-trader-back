@@ -96,14 +96,14 @@ export class SimulationService {
 
     // 공통 데이터: 세션 단위로 1회만 조회 (실거래 스케줄러와 동일)
     const primaryExchangeCode = session.watchStocks[0]?.exchangeCode
-      || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+      ?? (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
     const market = session.market as 'DOMESTIC' | 'OVERSEAS';
     const marketRegime = await this.marketRegimeService.getRegime(market, primaryExchangeCode);
     const riskState = await this.evaluateSimulationRisk(sessionId, positions, Number(session.currentCash));
 
     for (const ws of session.watchStocks) {
       try {
-        const exchangeCode = ws.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+        const exchangeCode = ws.exchangeCode;
 
         // Get price
         const price = session.market === Market.DOMESTIC
@@ -286,7 +286,7 @@ export class SimulationService {
 
   private async virtualExecute(
     sessionId: string,
-    signal: { market: string; exchangeCode?: string; stockCode: string; side: string; quantity: number; price?: number; reason: string },
+    signal: { market: string; exchangeCode: string; stockCode: string; side: string; quantity: number; price?: number; reason: string },
     currentMarketPrice: number,
   ): Promise<void> {
     const session = await this.prisma.simulationSession.findUnique({ where: { id: sessionId } });
@@ -324,7 +324,7 @@ export class SimulationService {
 
       // Upsert position (weighted avg price)
       const existingPos = await this.prisma.simulationPosition.findUnique({
-        where: { sessionId_stockCode: { sessionId, stockCode: signal.stockCode } },
+        where: { sessionId_exchangeCode_stockCode: { sessionId, exchangeCode: signal.exchangeCode, stockCode: signal.stockCode } },
       });
 
       if (existingPos) {
@@ -375,7 +375,7 @@ export class SimulationService {
     } else {
       // SELL
       const existingPos = await this.prisma.simulationPosition.findUnique({
-        where: { sessionId_stockCode: { sessionId, stockCode: signal.stockCode } },
+        where: { sessionId_exchangeCode_stockCode: { sessionId, exchangeCode: signal.exchangeCode, stockCode: signal.stockCode } },
       });
 
       if (!existingPos || existingPos.quantity < signal.quantity) {
@@ -454,7 +454,7 @@ export class SimulationService {
     for (const stockCode of stockCodes) {
       try {
         const ws = session.watchStocks.find((w) => w.stockCode === stockCode);
-        const exchangeCode = ws?.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+        const exchangeCode = ws?.exchangeCode ?? (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
         const priceData = session.market === Market.DOMESTIC
           ? await this.kisDomestic.getPrice(stockCode)
           : await this.kisOverseas.getPrice(exchangeCode, stockCode);
@@ -736,7 +736,7 @@ export class SimulationService {
 
     for (const pos of session.positions) {
       try {
-        const exchangeCode = pos.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+        const exchangeCode = pos.exchangeCode;
         const price = session.market === Market.DOMESTIC
           ? await this.kisDomestic.getPrice(pos.stockCode)
           : await this.kisOverseas.getPrice(exchangeCode, pos.stockCode);

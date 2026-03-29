@@ -30,6 +30,27 @@ export class KisDomesticService {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
 
+  private async getProdOnlyOutput(
+    apiName: string,
+    path: string,
+    trId: string,
+    params: Record<string, string>,
+  ): Promise<any[] | undefined> {
+    if (this.isPaper) {
+      this.logger.debug(`${apiName} is unavailable in paper mode`);
+      return undefined;
+    }
+
+    try {
+      const res = await this.kisBase.get(path, trId, params);
+      const output = (res.output as any[]) || (res.output1 as any[]) || (res.output2 as any[]);
+      return Array.isArray(output) ? output : output ? [output] : undefined;
+    } catch (e) {
+      this.logger.warn(`${apiName} fetch failed: ${e.message}`);
+      return undefined;
+    }
+  }
+
   /** 국내 현재가 조회 */
   async getPrice(stockCode: string): Promise<StockPriceResult> {
     const res = await this.kisBase.get<DomesticPriceOutput>(
@@ -415,6 +436,9 @@ export class KisDomesticService {
     return (res.output as any[]) || [];
   }
 
+  // TODO: FHPST01750000 (/ranking/finance-ratio)는 현재 스코어링에서 미사용이라 보류 중이다.
+  // PER/PBR/ROE 순위가 필요해지면 getFinanceRatioRanking()으로 추가한다.
+
   /** 국내 재무비율 조회 (종목별) */
   async getFinancialRatio(stockCode: string): Promise<any[]> {
     const res = await this.kisBase.get(
@@ -441,6 +465,208 @@ export class KisDomesticService {
       },
     );
     return (res.output as any[]) || [];
+  }
+
+  /** 국내 손익계산서 조회 (실전만) */
+  async getIncomeStatement(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Income statement',
+      '/uapi/domestic-stock/v1/finance/income-statement',
+      'FHKST66430200',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+  }
+
+  /** 국내 대차대조표 조회 (실전만) — 딥 분석에서 자기자본비율/순자산가치 산출에 사용 */
+  async getBalanceSheet(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Balance sheet',
+      '/uapi/domestic-stock/v1/finance/balance-sheet',
+      'FHKST66430100',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+  }
+
+  /** 국내 성장성비율 조회 (실전만) */
+  async getGrowthRatio(stockCode: string): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/finance/growth-ratio',
+      'FHKST66430800',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+    const output = (res.output as any[]) || (res.output1 as any[]) || (res.output2 as any[]);
+    return Array.isArray(output) ? output : output ? [output] : [];
+  }
+
+  /** 국내 수익성비율 조회 (실전만) */
+  async getProfitRatio(stockCode: string): Promise<any[]> {
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/finance/profit-ratio',
+      'FHKST66430400',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+    const output = (res.output as any[]) || (res.output1 as any[]) || (res.output2 as any[]);
+    return Array.isArray(output) ? output : output ? [output] : [];
+  }
+
+  /** 국내 안정성비율 조회 (실전만) */
+  async getStabilityRatio(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Stability ratio',
+      '/uapi/domestic-stock/v1/finance/stability-ratio',
+      'FHKST66430600',
+      {
+        FID_DIV_CLS_CODE: '0',
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: stockCode,
+      },
+    );
+  }
+
+  /** 국내 종목투자의견 조회 (실전만) */
+  async getInvestOpinion(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Invest opinion',
+      '/uapi/domestic-stock/v1/quotations/invest-opinion',
+      'FHKST663300C0',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_COND_SCR_DIV_CODE: '16633',
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_DATE_1: '',
+        FID_INPUT_DATE_2: '',
+      },
+    );
+  }
+
+  /** 국내 종목추정실적 조회 (실전만) */
+  async getEstimatePerform(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Estimate perform',
+      '/uapi/domestic-stock/v1/quotations/estimate-perform',
+      'HHKST668300C0',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: stockCode,
+        SHT_CD: stockCode,
+      },
+    );
+  }
+
+  /** 국내 배당률 상위 조회 (실전만) */
+  async getDividendRateRanking(): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Dividend rate ranking',
+      '/uapi/domestic-stock/v1/ranking/dividend-rate',
+      'HHKDB13470100',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_COND_SCR_DIV_CODE: '20134',
+        FID_INPUT_ISCD: '0000',
+      },
+    );
+  }
+
+  /** 국내 배당일정 조회 (실전만) */
+  async getDividendSchedule(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Dividend schedule',
+      '/uapi/domestic-stock/v1/ksdinfo/dividend',
+      'HHKDB669102C0',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: stockCode,
+        CTS: '',
+        GB1: '0',
+        F_DT: '',
+        T_DT: '',
+        SHT_CD: stockCode,
+      },
+    );
+  }
+
+  /** 국내 공매도 일별추이 조회 (실전만) */
+  async getDailyShortSale(stockCode: string): Promise<any[] | undefined> {
+    const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const today = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+    return this.getProdOnlyOutput(
+      'Daily short sale',
+      '/uapi/domestic-stock/v1/quotations/daily-short-sale',
+      'FHPST04830000',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_DATE_1: past,
+        FID_INPUT_DATE_2: today,
+      },
+    );
+  }
+
+  /** 국내 신용잔고 일별추이 조회 (실전만) */
+  async getDailyCreditBalance(stockCode: string): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Daily credit balance',
+      '/uapi/domestic-stock/v1/quotations/daily-credit-balance',
+      'FHPST04760000',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_COND_SCR_DIV_CODE: '20476',
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_DATE_1: '',
+        FID_INPUT_DATE_2: '',
+      },
+    );
+  }
+
+  /** 국내 종목별 투자자매매동향 일별 조회 (실전만) */
+  async getInvestorTradeDaily(stockCode: string): Promise<any[] | undefined> {
+    const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const today = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+    return this.getProdOnlyOutput(
+      'Investor trade daily',
+      '/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily',
+      'FHPTJ04160001',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_DATE_1: past,
+        FID_INPUT_DATE_2: today,
+        FID_ORG_ADJ_PRC: '0',
+        FID_ETC_CLS_CODE: '',
+      },
+    );
+  }
+
+  /** 국내 시가총액 상위 조회 (실전만) */
+  async getMarketCapRanking(): Promise<any[] | undefined> {
+    return this.getProdOnlyOutput(
+      'Market cap ranking',
+      '/uapi/domestic-stock/v1/ranking/market-cap',
+      'FHPST01740000',
+      {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_COND_SCR_DIV_CODE: '20174',
+        FID_INPUT_ISCD: '0000',
+      },
+    );
   }
 
   /** 국내 기관/외국인 매매 종목 가집계 */

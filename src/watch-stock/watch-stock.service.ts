@@ -38,7 +38,7 @@ export class WatchStockService {
 
   async create(data: {
     market: Market;
-    exchangeCode?: string;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     isActive?: boolean;

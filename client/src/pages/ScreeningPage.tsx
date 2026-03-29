@@ -1,13 +1,24 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  ResponsiveContainer,
+} from 'recharts'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info } from 'lucide-react'
+import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award } from 'lucide-react'
 import {
-  useGetStockRecommendationsQuery,
   useGetScreeningDateSummariesQuery,
+  useGetStockRecommendationsQuery,
+  useGetStockDeepAnalysisQuery,
+  type GetStockRecommendationsQuery,
 } from '@/graphql/generated'
 import { formatNumber } from '@/lib/utils'
 import { EXCHANGE_LABELS, COUNTRY_OPTIONS } from '@/lib/market-constants'
@@ -32,6 +43,22 @@ function formatScreeningDate(date: string): string {
   return date
 }
 
+function parseJson<T>(value?: string | null): T | undefined {
+  if (!value) return undefined
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return undefined
+  }
+}
+
+function riskBadgeVariant(riskGrade?: string | null): 'success' | 'warning' | 'danger' | 'outline' {
+  if (riskGrade === 'LOW') return 'success'
+  if (riskGrade === 'MEDIUM') return 'warning'
+  if (riskGrade === 'HIGH' || riskGrade === 'EXTREME') return 'danger'
+  return 'outline'
+}
+
 const COUNTRY_FLAG: Record<string, string> = {
   KR: '🇰🇷', US: '🇺🇸', HK: '🇭🇰', CN: '🇨🇳', JP: '🇯🇵', VN: '🇻🇳',
 }
@@ -41,6 +68,9 @@ type DateSummary = {
   totalCount: number
   countries: Array<{ country: string; label: string; count: number; avgScore: number }>
 }
+
+type ScreeningRecommendationItem = GetStockRecommendationsQuery['stockRecommendations'][number]
+type FactorScores = ScreeningRecommendationItem['factorScores']
 
 export function ScreeningPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -77,8 +107,6 @@ export function ScreeningPage() {
   )
 }
 
-// ── 날짜 목록 화면 (필터 포함) ──
-
 function DateListView({
   summaries,
   loading,
@@ -92,7 +120,6 @@ function DateListView({
   const [selectedDate, setSelectedDate] = useState<string | null>(latestDate)
   const [countryFilter, setCountryFilter] = useState<string | null>(null)
 
-  // summaries 로딩 완료 후 최신 날짜 자동 선택
   if (selectedDate === null && latestDate) {
     setSelectedDate(latestDate)
   }
@@ -113,38 +140,35 @@ function DateListView({
     )
   }
 
-  // 필터링된 summaries
   const filteredSummaries = summaries
-    .filter((s) => !selectedDate || s.date === selectedDate)
-    .map((s) => ({
-      ...s,
+    .filter((item) => !selectedDate || item.date === selectedDate)
+    .map((item) => ({
+      ...item,
       countries: countryFilter
-        ? s.countries.filter((c) => c.country === countryFilter)
-        : s.countries,
+        ? item.countries.filter((country) => country.country === countryFilter)
+        : item.countries,
     }))
-    .filter((s) => s.countries.length > 0)
+    .filter((item) => item.countries.length > 0)
 
-  // 전체 국가 목록 (필터 버튼용)
   const allCountries = new Map<string, string>()
-  for (const s of summaries) {
-    for (const c of s.countries) {
-      allCountries.set(c.country, c.label)
+  for (const summary of summaries) {
+    for (const country of summary.countries) {
+      allCountries.set(country.country, country.label)
     }
   }
 
   return (
     <>
-      {/* 필터 바 */}
       <div className="flex flex-wrap gap-3 items-center">
         <Select
           value={selectedDate || ''}
-          onChange={(e) => setSelectedDate(e.target.value || null)}
+          onChange={(event) => setSelectedDate(event.target.value || null)}
           className="w-48"
         >
           <option value="">전체 날짜</option>
-          {summaries.map((s) => (
-            <option key={s.date} value={s.date}>
-              {formatScreeningDate(s.date)} ({s.totalCount}종목)
+          {summaries.map((item) => (
+            <option key={item.date} value={item.date}>
+              {formatScreeningDate(item.date)} ({item.totalCount}종목)
             </option>
           ))}
         </Select>
@@ -170,61 +194,59 @@ function DateListView({
         </div>
       </div>
 
-      {/* 날짜별 카드 */}
       <div className="space-y-3">
-        {filteredSummaries.map((s) => (
-          <Card key={s.date}>
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-base">{formatScreeningDate(s.date)}</CardTitle>
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {s.countries.reduce((sum, c) => sum + c.count, 0)}종목
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {s.countries.map((c) => (
-                  <button
-                    key={c.country}
-                    className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/50 transition-colors cursor-pointer text-left"
-                    onClick={() => onSelect(s.date, c.country)}
-                  >
-                    <span className="text-lg">{COUNTRY_FLAG[c.country] || '🌐'}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium">{c.label}</span>
-                        <span className="text-xs text-muted-foreground">{c.count}종목</span>
-                      </div>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className="text-xs text-muted-foreground">평균</span>
-                        <span className={`text-xs font-medium ${scoreColor(c.avgScore)}`}>
-                          {c.avgScore.toFixed(1)}점
-                        </span>
-                      </div>
-                    </div>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground -rotate-90" />
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-
-        {filteredSummaries.length === 0 && (
+        {filteredSummaries.length === 0 ? (
           <Card>
-            <CardContent className="py-8 text-center">
-              <p className="text-muted-foreground text-sm">해당 조건의 스크리닝 결과가 없습니다</p>
+            <CardContent className="py-12 text-center">
+              <Search className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+              <p className="text-muted-foreground">해당 조건의 스크리닝 결과가 없습니다</p>
             </CardContent>
           </Card>
+        ) : (
+          filteredSummaries.map((item) => (
+            <Card key={item.date}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-base">{formatScreeningDate(item.date)}</CardTitle>
+                  <Badge variant="outline" className="ml-auto text-xs">
+                    {item.countries.reduce((sum, country) => sum + country.count, 0)}종목
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {item.countries.map((country) => (
+                    <button
+                      key={country.country}
+                      className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/50 transition-colors cursor-pointer text-left"
+                      onClick={() => onSelect(item.date, country.country)}
+                    >
+                      <span className="text-lg">{COUNTRY_FLAG[country.country] || '🌐'}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium">{country.label}</span>
+                          <span className="text-xs text-muted-foreground">{country.count}종목</span>
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-xs text-muted-foreground">평균</span>
+                          <span className={`text-xs font-medium ${scoreColor(country.avgScore)}`}>
+                            {country.avgScore.toFixed(1)}점
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground -rotate-90" />
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))
         )}
       </div>
     </>
   )
 }
-
-// ── 종목 상세 화면 ──
 
 function StockDetailView({
   date,
@@ -237,7 +259,9 @@ function StockDetailView({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [tab, setTab] = useState<'stock' | 'etf'>('stock')
-  const countryOption = COUNTRY_OPTIONS.find((c) => c.value === country)
+  const [sortBy, setSortBy] = useState<'total' | 'dividend' | 'safety' | 'risk'>('total')
+  const [factorFilter, setFactorFilter] = useState<'all' | 'income' | 'safe'>('all')
+  const countryOption = COUNTRY_OPTIONS.find((item) => item.value === country)
   const countryLabel = countryOption?.label || country
   const marketFilter = countryOption?.market ?? undefined
 
@@ -246,14 +270,25 @@ function StockDetailView({
   })
 
   const allRecommendations = data?.stockRecommendations ?? []
-  const countryFiltered = allRecommendations.filter((r) => {
+  const countryFiltered = allRecommendations.filter((item) => {
     if (!countryOption) return true
-    return countryOption.exchanges.includes(r.exchangeCode)
+    return countryOption.exchanges.includes(item.exchangeCode)
   })
 
-  const stockRecs = countryFiltered.filter((r) => !r.isEtf)
-  const etfRecs = countryFiltered.filter((r) => r.isEtf)
-  const recommendations = tab === 'stock' ? stockRecs : etfRecs
+  const stockRecs = countryFiltered.filter((item) => !item.isEtf)
+  const etfRecs = countryFiltered.filter((item) => item.isEtf)
+  const baseRecommendations = tab === 'stock' ? stockRecs : etfRecs
+  const filteredRecommendations = baseRecommendations.filter((item) => {
+    if (factorFilter === 'income') return (item.factorScores?.dividend ?? 0) >= 2
+    if (factorFilter === 'safe') return (item.factorScores?.risk ?? 0) >= 7
+    return true
+  })
+  const recommendations = [...filteredRecommendations].sort((left, right) => {
+    if (sortBy === 'dividend') return (right.factorScores?.dividend ?? 0) - (left.factorScores?.dividend ?? 0)
+    if (sortBy === 'safety') return (right.factorScores?.valuation ?? 0) - (left.factorScores?.valuation ?? 0)
+    if (sortBy === 'risk') return (right.factorScores?.risk ?? 0) - (left.factorScores?.risk ?? 0)
+    return right.totalScore - left.totalScore
+  })
 
   return (
     <>
@@ -273,21 +308,24 @@ function StockDetailView({
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <Button
-          variant={tab === 'stock' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => { setTab('stock'); setExpandedId(null) }}
-        >
+      <div className="flex flex-wrap gap-2">
+        <Button variant={tab === 'stock' ? 'default' : 'outline'} size="sm" onClick={() => { setTab('stock'); setExpandedId(null) }}>
           개별주 ({stockRecs.length})
         </Button>
-        <Button
-          variant={tab === 'etf' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => { setTab('etf'); setExpandedId(null) }}
-        >
+        <Button variant={tab === 'etf' ? 'default' : 'outline'} size="sm" onClick={() => { setTab('etf'); setExpandedId(null) }}>
           ETF ({etfRecs.length})
         </Button>
+        <Select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="w-40">
+          <option value="total">총점순</option>
+          <option value="dividend">배당 순</option>
+          <option value="safety">안전마진 순</option>
+          <option value="risk">저리스크 순</option>
+        </Select>
+        <Select value={factorFilter} onChange={(event) => setFactorFilter(event.target.value as typeof factorFilter)} className="w-40">
+          <option value="all">전체</option>
+          <option value="income">배당 중심</option>
+          <option value="safe">안전 중심</option>
+        </Select>
       </div>
 
       {loading ? (
@@ -296,19 +334,18 @@ function StockDetailView({
         <Card>
           <CardContent className="py-12 text-center">
             <Search className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">
-              {tab === 'stock' ? '추천 개별주가 없습니다' : '추천 ETF가 없습니다'}
-            </p>
+            <p className="text-muted-foreground">해당 조건의 추천 종목이 없습니다</p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-3">
-          {recommendations.map((r) => (
+          {recommendations.map((item) => (
             <RecommendationCard
-              key={r.id}
-              rec={r}
-              expanded={expandedId === r.id}
-              onToggle={() => setExpandedId(expandedId === r.id ? null : r.id)}
+              key={item.id}
+              rec={item}
+              date={date}
+              expanded={expandedId === item.id}
+              onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
             />
           ))}
         </div>
@@ -317,60 +354,41 @@ function StockDetailView({
   )
 }
 
-// ── 종목 카드 ──
-
-interface SuggestedStrategy {
-  name: string
-  displayName: string
-  matchScore: number
-  reason: string
-}
-
-interface RecommendationCardProps {
-  rec: {
-    id: string
-    rank: number
-    stockCode: string
-    stockName: string
-    exchangeCode: string
-    market: string
-    totalScore: number
-    technicalScore: number
-    fundamentalScore: number
-    momentumScore: number
-    currentPrice: number
-    changeRate: number
-    volume: number
-    marketCap: number
-    isEtf: boolean
-    reasons: string
-    indicators: string
-    suggestedStrategies: SuggestedStrategy[]
-    createdAt: string
-  }
+function RecommendationCard({
+  rec,
+  date,
+  expanded,
+  onToggle,
+}: {
+  rec: ScreeningRecommendationItem
+  date: string
   expanded: boolean
   onToggle: () => void
-}
-
-function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps) {
+}) {
   let reasons: string[] = []
-  try { reasons = JSON.parse(rec.reasons) } catch { /* ignore */ }
+  try { reasons = JSON.parse(rec.reasons) } catch { }
 
   let indicators: Record<string, unknown> = {}
-  try { indicators = JSON.parse(rec.indicators) } catch { /* ignore */ }
+  try { indicators = JSON.parse(rec.indicators) } catch { }
+
+  const { data: deepAnalysisData, loading: deepLoading } = useGetStockDeepAnalysisQuery({
+    variables: { stockCode: rec.stockCode, date },
+    skip: !expanded,
+  })
+
+  const deepAnalysis = deepAnalysisData?.stockDeepAnalysis ?? null
+  const technicalDetail = parseJson<Record<string, unknown>>(deepAnalysis?.technicalDetail)
+  const dividendDetail = parseJson<Record<string, unknown>>(deepAnalysis?.dividendDetail)
+  const consensusDetail = parseJson<Record<string, unknown>>(deepAnalysis?.consensusDetail)
+  const radarData = buildRadarData(rec.factorScores)
 
   return (
     <Card className="overflow-hidden">
-      <button
-        className="w-full text-left cursor-pointer"
-        onClick={onToggle}
-      >
+      <button className="w-full text-left cursor-pointer" onClick={onToggle}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-lg font-bold text-muted-foreground w-8">
-                #{rec.rank}
-              </span>
+              <span className="text-lg font-bold text-muted-foreground w-8">#{rec.rank}</span>
               <div>
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-base">{rec.stockName}</CardTitle>
@@ -380,9 +398,6 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
                   <Badge variant="outline" className="text-xs">
                     {EXCHANGE_LABELS[rec.exchangeCode] || rec.exchangeCode}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(rec.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
                   <span className={`text-sm font-medium ${rec.changeRate >= 0 ? 'text-success' : 'text-danger'}`}>
                     {rec.changeRate >= 0 ? '+' : ''}{rec.changeRate.toFixed(2)}%
                   </span>
@@ -393,16 +408,23 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="flex items-center gap-1 justify-end">
-                  <span className={`text-xl font-bold ${scoreColor(rec.totalScore)}`}>
-                    {rec.totalScore.toFixed(1)}
-                  </span>
-                  <Tooltip text="기술적(40) + 펀더멘탈(30) + 모멘텀(30) = 100점 만점. 70점 이상 강력 추천, 50점 이상 관심, 그 미만은 보통. 거래량 상위 종목 대상 자동 스코어링 결과이며, 투자 판단은 개별 지표와 추천 근거를 함께 확인하세요.">
+                  <span className={`text-xl font-bold ${scoreColor(rec.totalScore)}`}>{rec.totalScore.toFixed(1)}</span>
+                  <Tooltip text="멀티팩터 100점 만점 점수입니다. 기술, 가치, 성장, 수익성, 리스크, 수급, 배당, 컨센서스를 종합합니다.">
                     <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                   </Tooltip>
                 </div>
-                <Badge variant={scoreBadgeVariant(rec.totalScore)} className="text-xs">
-                  {rec.totalScore >= 70 ? '강력 추천' : rec.totalScore >= 50 ? '관심' : '보통'}
-                </Badge>
+                <div className="flex items-center gap-1.5 justify-end">
+                  <Badge variant={scoreBadgeVariant(rec.totalScore)} className="text-xs">
+                    {rec.totalScore >= 70 ? '강력 추천' : rec.totalScore >= 50 ? '관심' : '보통'}
+                  </Badge>
+                  {typeof indicators.dataAvailability === 'number' && indicators.dataAvailability < 100 && (
+                    <Tooltip text={`팩터 데이터 ${indicators.dataAvailability}% 가용 — 일부 지표 미수신`}>
+                      <Badge variant="outline" className="text-[10px] px-1 py-0 text-muted-foreground">
+                        {indicators.dataAvailability}%
+                      </Badge>
+                    </Tooltip>
+                  )}
+                </div>
               </div>
               {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
             </div>
@@ -411,101 +433,146 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
       </button>
 
       <CardContent className="pt-0 pb-3">
-        <div className="grid grid-cols-3 gap-3">
-          <ScoreBar icon={<Brain className="h-3.5 w-3.5" />} label="기술적" score={rec.technicalScore} max={40} tooltip="이동평균선, RSI, 볼린저밴드 등 차트 기반 분석 점수 (40점 만점)" />
-          <ScoreBar icon={<BarChart3 className="h-3.5 w-3.5" />} label="펀더멘탈" score={rec.fundamentalScore} max={30} tooltip="PER, ROE, 시가총액 등 재무 건전성 평가 점수 (30점 만점)" />
-          <ScoreBar icon={<Zap className="h-3.5 w-3.5" />} label="모멘텀" score={rec.momentumScore} max={30} tooltip="거래량 급증, 가격 상승 추세 등 단기 모멘텀 점수 (30점 만점)" />
+        <div className="grid grid-cols-5 gap-2">
+          <ScoreBar icon={<Brain className="h-3.5 w-3.5" />} label="기술" score={rec.technicalScore} max={40} tooltip="기술적 분석 호환 점수" />
+          <ScoreBar icon={<BarChart3 className="h-3.5 w-3.5" />} label="펀더" score={rec.fundamentalScore} max={30} tooltip="가치/성장/수익성/배당/컨센서스 집계" />
+          <ScoreBar icon={<Zap className="h-3.5 w-3.5" />} label="모멘텀" score={rec.momentumScore} max={30} tooltip="모멘텀/수급 집계" />
+          <ScoreBar icon={<ShieldAlert className="h-3.5 w-3.5" />} label="리스크" score={rec.factorScores?.risk ?? 0} max={10} tooltip="부채/유동비율/변동성/MDD/차입금의존도" />
+          <ScoreBar icon={<Award className="h-3.5 w-3.5" />} label="퀄리티" score={((rec.factorScores?.growth ?? 0) + (rec.factorScores?.profitability ?? 0) + (rec.factorScores?.dividend ?? 0))} max={25} tooltip="성장+수익성+배당 종합 품질" />
         </div>
       </CardContent>
 
       {expanded && (
-        <CardContent className="border-t border-border pt-4 space-y-4">
+        <CardContent className="border-t border-border pt-4 space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">현재가</span>
-              <p className="font-medium">{formatNumber(rec.currentPrice)}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">거래량</span>
-              <p className="font-medium">{formatNumber(rec.volume)}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">시가총액</span>
-              <p className="font-medium">{formatNumber(rec.marketCap)}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">등락률</span>
-              <p className={`font-medium ${rec.changeRate >= 0 ? 'text-success' : 'text-danger'}`}>
-                {rec.changeRate >= 0 ? '+' : ''}{rec.changeRate.toFixed(2)}%
-              </p>
-            </div>
+            <InfoCell label="현재가" value={formatNumber(rec.currentPrice)} />
+            <InfoCell label="거래량" value={formatNumber(rec.volume)} />
+            <InfoCell label="시가총액" value={formatNumber(rec.marketCap)} />
+            <InfoCell label="등락률" value={`${rec.changeRate >= 0 ? '+' : ''}${rec.changeRate.toFixed(2)}%`} danger={rec.changeRate < 0} success={rec.changeRate >= 0} />
           </div>
+
+          {radarData.length >= 4 && (
+            <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">멀티팩터 레이더</p>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart data={radarData}>
+                      <PolarGrid stroke="rgba(100,116,139,0.24)" />
+                      <PolarAngleAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} />
+                      <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+                      <Radar dataKey="value" stroke="#0f766e" fill="#14b8a6" fillOpacity={0.3} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {Object.entries(rec.factorScores ?? {}).map(([key, value]) => (
+                  <div key={key} className="rounded-lg bg-muted/50 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{factorLabel(key)}</p>
+                    <p className="text-sm font-semibold">{Number(value).toFixed(1)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {Object.keys(indicators).length > 0 && (
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">지표</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                {indicators.rsi14 !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">RSI(14)<Tooltip text="상대강도지수. 30 이하 과매도(매수 기회), 70 이상 과매수(매도 신호)"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{Number(indicators.rsi14).toFixed(1)}</p>
-                  </div>
-                )}
-                {indicators.ma20 !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">MA20<Tooltip text="20일 이동평균선. 단기 추세 지표로, 현재가가 위에 있으면 상승 추세"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{formatNumber(Number(indicators.ma20))}</p>
-                  </div>
-                )}
-                {indicators.ma60 !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">MA60<Tooltip text="60일 이동평균선. 중기 추세 지표. MA20이 MA60 상향 돌파 시 골든크로스(매수 신호)"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{formatNumber(Number(indicators.ma60))}</p>
-                  </div>
-                )}
-                {indicators.ma200 !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">MA200<Tooltip text="200일 이동평균선. 장기 추세 기준선으로, 현재가가 위에 있으면 장기 상승 추세"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{formatNumber(Number(indicators.ma200))}</p>
-                  </div>
-                )}
-                {indicators.per !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">PER<Tooltip text="주가수익비율. 주가 ÷ 주당순이익. 낮을수록 저평가, 업종 평균과 비교하여 판단"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{Number(indicators.per).toFixed(1)}</p>
-                  </div>
-                )}
-                {indicators.roe !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">ROE<Tooltip text="자기자본이익률. 자기자본 대비 이익 비율. 10% 이상이면 양호"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">{Number(indicators.roe).toFixed(1)}%</p>
-                  </div>
-                )}
-                {indicators.volumeSurgeRate !== undefined && (
-                  <div className="rounded-lg bg-muted/50 px-3 py-1.5">
-                    <span className="text-muted-foreground text-xs flex items-center gap-0.5">거래량 급증<Tooltip text="평균 거래량 대비 급증 비율. 시장의 관심이 집중되고 있음을 의미"><Info className="h-3 w-3 text-muted-foreground/60 cursor-help" /></Tooltip></span>
-                    <p className="font-medium">+{Number(indicators.volumeSurgeRate).toFixed(0)}%</p>
-                  </div>
-                )}
+                {renderIndicator('RSI(14)', indicators.rsi14)}
+                {renderIndicator('MA20', indicators.ma20, true)}
+                {renderIndicator('MA60', indicators.ma60, true)}
+                {renderIndicator('PER', indicators.per)}
+                {renderIndicator('ROE', indicators.roe, false, '%')}
+                {renderIndicator('EV/EBITDA', indicators.evEbitda)}
+                {renderIndicator('배당수익률', indicators.dividendYield, false, '%')}
+                {renderIndicator('안전마진', indicators.marginOfSafety, false, '%')}
               </div>
             </div>
           )}
+
+          <div className="rounded-xl border border-border bg-background p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+              <p className="text-sm font-medium">딥 분석 패널</p>
+              {deepAnalysis?.riskGrade && <Badge variant={riskBadgeVariant(deepAnalysis.riskGrade)}>{deepAnalysis.riskGrade}</Badge>}
+            </div>
+
+            {deepLoading ? (
+              <p className="text-sm text-muted-foreground">딥 분석 로딩중...</p>
+            ) : !deepAnalysis ? (
+              <p className="text-sm text-muted-foreground">딥 분석 결과가 아직 없습니다.</p>
+            ) : (
+              <div className="space-y-4">
+                {deepAnalysis.reportSummary && (
+                  <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm text-foreground">{deepAnalysis.reportSummary}</div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <DeepCard
+                    icon={<DollarSign className="h-4 w-4" />}
+                    title="DCF"
+                    lines={[
+                      `내재가치 ${formatMaybeNumber(deepAnalysis.intrinsicValue)}`,
+                      `안전마진 ${formatMaybePercent(deepAnalysis.marginOfSafety)}`,
+                      `목표가 ${formatMaybeNumber(deepAnalysis.targetPrice)}`,
+                    ]}
+                  />
+                  <DeepCard
+                    icon={<ShieldAlert className="h-4 w-4" />}
+                    title="리스크"
+                    lines={[
+                      `등급 ${deepAnalysis.riskGrade ?? 'N/A'}`,
+                      `30일 변동성 ${formatMaybePercent(deepAnalysis.volatility30d)}`,
+                      `90일 MDD ${formatMaybePercent(deepAnalysis.maxDrawdown90d)}`,
+                    ]}
+                  />
+                  <DeepCard
+                    icon={<TrendingUp className="h-4 w-4" />}
+                    title="기술적"
+                    lines={[
+                      `추세 ${deepAnalysis.trendDirection ?? 'N/A'}`,
+                      `배당 ${formatMaybePercent(deepAnalysis.dividendYield)}`,
+                      `컨센서스 ${deepAnalysis.consensusRating ?? 'N/A'}`,
+                    ]}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <DetailPanel title="기술 상세" rows={[
+                    `지지선: ${arrayHead(technicalDetail?.support as number[])}`,
+                    `저항선: ${arrayHead(technicalDetail?.resistance as number[])}`,
+                    `ADX: ${formatMaybeNumber(technicalDetail?.adx as number | undefined)}`,
+                  ]} />
+                  <DetailPanel title="배당/컨센서스" rows={[
+                    `연속 배당: ${valueOf(dividendDetail?.consecutiveDividendYears)}`,
+                    `배당성향: ${formatMaybePercent(dividendDetail?.payoutRatio as number | undefined)}`,
+                    `목표가 괴리: ${formatMaybePercent(deepAnalysis.targetUpside)}`,
+                    `최근 서프라이즈: ${arrayHead(consensusDetail?.earningsSurprise as number[], '%')}`,
+                  ]} />
+                </div>
+              </div>
+            )}
+          </div>
 
           {rec.suggestedStrategies.length > 0 && (
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">적합 전략</p>
               <div className="space-y-2">
-                {rec.suggestedStrategies.map((s) => (
-                  <div key={s.name} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
+                {rec.suggestedStrategies.map((strategy) => (
+                  <div key={strategy.name} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
                     <Target className="h-4 w-4 text-primary-500 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{s.displayName}</span>
-                        <Badge variant={s.matchScore >= 70 ? 'success' : s.matchScore >= 50 ? 'warning' : 'outline'} className="text-[10px] px-1.5">
-                          {s.matchScore}점
+                        <span className="text-sm font-medium">{strategy.displayName}</span>
+                        <Badge variant={strategy.matchScore >= 70 ? 'success' : strategy.matchScore >= 50 ? 'warning' : 'outline'} className="text-[10px] px-1.5">
+                          {strategy.matchScore}점
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.reason}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{strategy.reason}</p>
                     </div>
                   </div>
                 ))}
@@ -517,8 +584,8 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">추천 근거</p>
               <div className="space-y-1">
-                {reasons.map((reason, i) => (
-                  <div key={i} className="flex items-start gap-2 text-sm">
+                {reasons.map((reason, index) => (
+                  <div key={index} className="flex items-start gap-2 text-sm">
                     <TrendingUp className="h-3.5 w-3.5 text-primary-500 mt-0.5 shrink-0" />
                     <span>{reason}</span>
                   </div>
@@ -532,7 +599,7 @@ function RecommendationCard({ rec, expanded, onToggle }: RecommendationCardProps
   )
 }
 
-function ScoreBar({ icon, label, score, max, tooltip }: { icon: React.ReactNode; label: string; score: number; max: number; tooltip?: string }) {
+function ScoreBar({ icon, label, score, max, tooltip }: { icon: ReactNode; label: string; score: number; max: number; tooltip?: string }) {
   const pct = Math.min((score / max) * 100, 100)
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-400'
 
@@ -553,4 +620,101 @@ function ScoreBar({ icon, label, score, max, tooltip }: { icon: React.ReactNode;
       </div>
     </div>
   )
+}
+
+function InfoCell({ label, value, danger, success }: { label: string; value: string; danger?: boolean; success?: boolean }) {
+  return (
+    <div>
+      <span className="text-muted-foreground">{label}</span>
+      <p className={`font-medium ${danger ? 'text-danger' : success ? 'text-success' : ''}`}>{value}</p>
+    </div>
+  )
+}
+
+function DeepCard({ icon, title, lines }: { icon: ReactNode; title: string; lines: string[] }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3">
+      <div className="flex items-center gap-2 text-sm font-medium mb-2">{icon}{title}</div>
+      <div className="space-y-1 text-sm text-muted-foreground">
+        {lines.map((line) => <p key={line}>{line}</p>)}
+      </div>
+    </div>
+  )
+}
+
+function DetailPanel({ title, rows }: { title: string; rows: string[] }) {
+  return (
+    <div className="rounded-lg bg-muted/30 px-3 py-3">
+      <p className="text-xs font-medium text-muted-foreground mb-2">{title}</p>
+      <div className="space-y-1">
+        {rows.map((row) => <p key={row}>{row}</p>)}
+      </div>
+    </div>
+  )
+}
+
+function renderIndicator(label: string, value: unknown, numberFormat = false, suffix = '') {
+  if (value === undefined || value === null) return null
+  const display = numberFormat ? formatNumber(Number(value)) : `${Number(value).toFixed(1)}${suffix}`
+  return (
+    <div key={label} className="rounded-lg bg-muted/50 px-3 py-1.5">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <p className="font-medium">{display}</p>
+    </div>
+  )
+}
+
+function buildRadarData(factors?: FactorScores) {
+  if (!factors) return []
+  return [
+    ['기술', factors.technical, 15],
+    ['가치', factors.valuation, 15],
+    ['성장', factors.growth, 10],
+    ['수익성', factors.profitability, 10],
+    ['리스크', factors.risk, 10],
+    ['모멘텀', factors.momentum, 10],
+    ['수급', factors.supplyDemand, 10],
+    ['배당', factors.dividend, 5],
+    ['컨센서스', factors.consensus, 10],
+    ['패턴', factors.pattern, 5],
+  ]
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([label, value, max]) => ({ label, value: (Number(value) / Number(max)) * 100 }))
+}
+
+function factorLabel(key: string): string {
+  const map: Record<string, string> = {
+    technical: '기술',
+    valuation: '가치',
+    growth: '성장',
+    profitability: '수익성',
+    risk: '리스크',
+    momentum: '모멘텀',
+    supplyDemand: '수급',
+    dividend: '배당',
+    consensus: '컨센서스',
+    pattern: '패턴',
+    fundamental: '펀더 종합',
+  }
+  return map[key] || key
+}
+
+function formatMaybeNumber(value?: number | null) {
+  if (value === undefined || value === null) return 'N/A'
+  return formatNumber(value)
+}
+
+function formatMaybePercent(value?: number | null) {
+  if (value === undefined || value === null) return 'N/A'
+  return `${value.toFixed(1)}%`
+}
+
+function arrayHead(values?: number[], suffix = '') {
+  if (!values || values.length === 0) return 'N/A'
+  return values.slice(0, 3).map((value) => `${formatNumber(value)}${suffix}`).join(', ')
+}
+
+function valueOf(value: unknown) {
+  if (value === undefined || value === null || value === '') return 'N/A'
+  return String(value)
 }

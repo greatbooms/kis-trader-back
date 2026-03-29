@@ -1,7 +1,7 @@
 export interface WatchStockConfig {
   id: string;
   market: 'DOMESTIC' | 'OVERSEAS';
-  exchangeCode?: string;
+  exchangeCode: string;
   stockCode: string;
   stockName: string;
   strategyName?: string;

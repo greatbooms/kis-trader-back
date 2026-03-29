@@ -70,7 +70,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
     }
 
     const market = watchStock.market;
-    const exchangeCode = watchStock.exchangeCode || 'KRX';
+    const exchangeCode = watchStock.exchangeCode;
     const isOverseas = market === 'OVERSEAS';
     const hasPosition = !!position && position.quantity > 0;
 
@@ -92,7 +92,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
       );
       signals.push({
         market,
-        exchangeCode: isOverseas ? exchangeCode : undefined,
+        exchangeCode,
         stockCode: watchStock.stockCode,
         side: 'SELL',
         quantity: holdQty,
@@ -116,7 +116,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
       );
       signals.push({
         market,
-        exchangeCode: isOverseas ? exchangeCode : undefined,
+        exchangeCode,
         stockCode: watchStock.stockCode,
         side: 'SELL',
         quantity: holdQty,
@@ -142,7 +142,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
     if (buyQty > 0) {
       signals.push({
         market,
-        exchangeCode: isOverseas ? exchangeCode : undefined,
+        exchangeCode,
         stockCode: watchStock.stockCode,
         side: 'BUY',
         quantity: buyQty,

@@ -12,8 +12,8 @@ export class SimulationWatchStockType {
   @Field(() => Market)
   market: Market;
 
-  @Field({ nullable: true })
-  exchangeCode?: string;
+  @Field()
+  exchangeCode: string;
 
   @Field()
   stockCode: string;
@@ -24,7 +24,7 @@ export class SimulationWatchStockType {
   @Field(() => Float, { nullable: true })
   quota?: number;
 
-  @Field(() => Int)
+  @Field(() => Float)
   cycle: number;
 
   @Field(() => Int)

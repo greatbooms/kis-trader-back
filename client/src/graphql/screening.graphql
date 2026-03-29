@@ -24,6 +24,19 @@ query GetStockRecommendations($input: StockRecommendationsFilterInput) {
     volume
     marketCap
     isEtf
+    factorScores {
+      technical
+      valuation
+      growth
+      profitability
+      risk
+      momentum
+      supplyDemand
+      dividend
+      consensus
+      pattern
+      fundamental
+    }
     createdAt
   }
 }
@@ -62,5 +75,31 @@ mutation UpdateScreeningSettings($input: UpdateScreeningSettingsInput!) {
       label
       enabled
     }
+  }
+}
+
+query GetStockDeepAnalysis($stockCode: String!, $date: String) {
+  stockDeepAnalysis(stockCode: $stockCode, date: $date) {
+    id
+    screeningDate
+    stockCode
+    stockName
+    exchangeCode
+    intrinsicValue
+    marginOfSafety
+    riskGrade
+    volatility30d
+    maxDrawdown90d
+    trendDirection
+    dividendYield
+    targetPrice
+    targetUpside
+    consensusRating
+    reportSummary
+    dcfDetail
+    riskDetail
+    technicalDetail
+    dividendDetail
+    consensusDetail
   }
 }

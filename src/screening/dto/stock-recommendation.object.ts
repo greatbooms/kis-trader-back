@@ -1,4 +1,5 @@
 import { ObjectType, Field, Float, Int } from '@nestjs/graphql';
+import { FactorScoreType } from './factor-score.object';
 
 @ObjectType()
 export class SuggestedStrategyType {
@@ -29,5 +30,6 @@ export class StockRecommendationType {
   @Field(() => Float) volume: number;
   @Field(() => Float) marketCap: number;
   @Field() isEtf: boolean;
+  @Field(() => FactorScoreType, { nullable: true }) factorScores?: FactorScoreType;
   @Field() createdAt: Date;
 }

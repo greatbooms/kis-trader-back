@@ -57,7 +57,7 @@ type RiskStateType {
 type TradeRecordType {
   id: ID!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   side: Side!
@@ -101,7 +101,7 @@ scalar DateTime
 type PositionType {
   id: ID!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   quantity: Int!
@@ -152,7 +152,7 @@ type ManualSellResult {
 type WatchStockType {
   id: ID!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   isActive: Boolean!
@@ -181,11 +181,11 @@ type SimulationWatchStockType {
   id: ID!
   sessionId: String!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   quota: Float
-  cycle: Int!
+  cycle: Float!
   maxCycles: Int!
   stopLossRate: Float!
   maxPortfolioRate: Float!
@@ -223,7 +223,7 @@ type SimulationTradeType {
   id: ID!
   sessionId: String!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   side: Side!
@@ -239,7 +239,7 @@ type SimulationPositionType {
   id: ID!
   sessionId: String!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   quantity: Int!
@@ -294,6 +294,20 @@ type StockSearchResult {
   exchangeCode: String!
 }
 
+type FactorScoreType {
+  technical: Float
+  valuation: Float
+  growth: Float
+  profitability: Float
+  risk: Float
+  momentum: Float
+  supplyDemand: Float
+  dividend: Float
+  consensus: Float
+  pattern: Float
+  fundamental: Float
+}
+
 type SuggestedStrategyType {
   name: String!
   displayName: String!
@@ -321,7 +335,32 @@ type StockRecommendationType {
   volume: Float!
   marketCap: Float!
   isEtf: Boolean!
+  factorScores: FactorScoreType
   createdAt: DateTime!
+}
+
+type StockDeepAnalysisType {
+  id: String!
+  screeningDate: String!
+  stockCode: String!
+  stockName: String!
+  exchangeCode: String!
+  intrinsicValue: Float
+  marginOfSafety: Float
+  riskGrade: String
+  volatility30d: Float
+  maxDrawdown90d: Float
+  trendDirection: String
+  dividendYield: Float
+  targetPrice: Float
+  targetUpside: Float
+  consensusRating: String
+  reportSummary: String
+  dcfDetail: String
+  riskDetail: String
+  technicalDetail: String
+  dividendDetail: String
+  consensusDetail: String
 }
 
 type ScreeningCountrySetting {
@@ -368,9 +407,9 @@ type Query {
   simulationMetrics(sessionId: String!): SimulationMetricsType!
   searchStocks(input: SearchStocksInput!): [StockSearchResult!]!
   stockRecommendations(input: StockRecommendationsFilterInput): [StockRecommendationType!]!
+  stockDeepAnalysis(stockCode: String!, date: String): StockDeepAnalysisType
   screeningDates(input: ScreeningListFilterInput): [String!]!
   screeningDateSummaries(input: ScreeningListFilterInput): [ScreeningDateSummary!]!
-  runScreeningNow(input: RunScreeningInput!): Boolean!
   screeningSettings: ScreeningSettingsType!
 }
 
@@ -436,11 +475,6 @@ input ScreeningListFilterInput {
   limit: Float
 }
 
-input RunScreeningInput {
-  market: String!
-  exchangeCode: String
-}
-
 type Mutation {
   setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
   manualSell(input: ManualSellInput!): ManualSellResult!
@@ -455,6 +489,8 @@ type Mutation {
   updateSimulationStatus(input: UpdateSimulationStatusInput!): SimulationSessionType!
   resetSimulation(id: String!): SimulationSessionType!
   deleteSimulation(id: String!): Boolean!
+  runScreeningNow(input: RunScreeningInput!): Boolean!
+  runDeepAnalysisNow(input: RunScreeningInput!): Boolean!
   updateScreeningSettings(input: UpdateScreeningSettingsInput!): ScreeningSettingsType!
 }
 
@@ -468,7 +504,7 @@ input SetStrategyAllocationInput {
 input ManualSellInput {
   stockCode: String!
   market: String!
-  exchangeCode: String
+  exchangeCode: String!
 
   """매도 수량 (미지정 시 전량)"""
   quantity: Float
@@ -476,7 +512,7 @@ input ManualSellInput {
 
 input CreateWatchStockInput {
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   strategyName: String
@@ -517,7 +553,7 @@ input CreateSimulationInput {
 
 input WatchStockInput {
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   quota: Float
@@ -529,7 +565,7 @@ input WatchStockInput {
 input AddSimulationWatchStockInput {
   sessionId: String!
   market: Market!
-  exchangeCode: String
+  exchangeCode: String!
   stockCode: String!
   stockName: String!
   quota: Float
@@ -542,6 +578,11 @@ input AddSimulationWatchStockInput {
 input UpdateSimulationStatusInput {
   id: String!
   status: SimulationStatus!
+}
+
+input RunScreeningInput {
+  market: String!
+  exchangeCode: String
 }
 
 input UpdateScreeningSettingsInput {

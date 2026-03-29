@@ -97,7 +97,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     }
 
     const market = watchStock.market;
-    const exchangeCode = watchStock.exchangeCode || 'KRX';
+    const exchangeCode = watchStock.exchangeCode;
     const isOverseas = market === 'OVERSEAS';
     const hasPosition = !!position && position.quantity > 0;
 
@@ -125,7 +125,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       );
       signals.push({
         market,
-        exchangeCode: isOverseas ? exchangeCode : undefined,
+        exchangeCode,
         stockCode: watchStock.stockCode,
         side: 'SELL',
         quantity: holdQty,
@@ -202,7 +202,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       if (buyQty > 0) {
         signals.push({
           market,
-          exchangeCode: isOverseas ? exchangeCode : undefined,
+          exchangeCode,
           stockCode: watchStock.stockCode,
           side: 'BUY',
           quantity: buyQty,
@@ -235,7 +235,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (buy1Qty > 0 && buy1Price > 0) {
           signals.push({
             market,
-            exchangeCode: isOverseas ? exchangeCode : undefined,
+            exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'BUY',
             quantity: buy1Qty,
@@ -248,7 +248,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (buy2Qty > 0 && buy2Price > 0) {
           signals.push({
             market,
-            exchangeCode: isOverseas ? exchangeCode : undefined,
+            exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'BUY',
             quantity: buy2Qty,
@@ -265,7 +265,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (buy2Qty > 0 && buy2Price > 0) {
           signals.push({
             market,
-            exchangeCode: isOverseas ? exchangeCode : undefined,
+            exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'BUY',
             quantity: buy2Qty,
@@ -291,7 +291,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (sell1Price > 0) {
           signals.push({
             market,
-            exchangeCode: isOverseas ? exchangeCode : undefined,
+            exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'SELL',
             quantity: sell1Qty,
@@ -309,7 +309,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           if (sell2Price > 0) {
             signals.push({
               market,
-              exchangeCode: isOverseas ? exchangeCode : undefined,
+              exchangeCode,
               stockCode: watchStock.stockCode,
               side: 'SELL',
               quantity: sell2Qty,

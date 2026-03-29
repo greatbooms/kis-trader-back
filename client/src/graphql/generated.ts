@@ -48,7 +48,7 @@ export type AccountSummaryType = {
 };
 
 export type AddSimulationWatchStockInput = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  exchangeCode: Scalars["String"]["input"];
   market: Market;
   maxCycles?: InputMaybe<Scalars["Int"]["input"]>;
   maxPortfolioRate?: InputMaybe<Scalars["Float"]["input"]>;
@@ -76,7 +76,7 @@ export type CreateSimulationInput = {
 };
 
 export type CreateWatchStockInput = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  exchangeCode: Scalars["String"]["input"];
   market: Market;
   maxCycles?: InputMaybe<Scalars["Int"]["input"]>;
   maxPortfolioRate?: InputMaybe<Scalars["Float"]["input"]>;
@@ -96,13 +96,28 @@ export type DashboardSummaryType = {
   winRate: Scalars["Float"]["output"];
 };
 
+export type FactorScoreType = {
+  __typename?: "FactorScoreType";
+  consensus?: Maybe<Scalars["Float"]["output"]>;
+  dividend?: Maybe<Scalars["Float"]["output"]>;
+  fundamental?: Maybe<Scalars["Float"]["output"]>;
+  growth?: Maybe<Scalars["Float"]["output"]>;
+  momentum?: Maybe<Scalars["Float"]["output"]>;
+  pattern?: Maybe<Scalars["Float"]["output"]>;
+  profitability?: Maybe<Scalars["Float"]["output"]>;
+  risk?: Maybe<Scalars["Float"]["output"]>;
+  supplyDemand?: Maybe<Scalars["Float"]["output"]>;
+  technical?: Maybe<Scalars["Float"]["output"]>;
+  valuation?: Maybe<Scalars["Float"]["output"]>;
+};
+
 export type LoginInput = {
   password: Scalars["String"]["input"];
   username: Scalars["String"]["input"];
 };
 
 export type ManualSellInput = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  exchangeCode: Scalars["String"]["input"];
   market: Scalars["String"]["input"];
   /** 매도 수량 (미지정 시 전량) */
   quantity?: InputMaybe<Scalars["Float"]["input"]>;
@@ -142,6 +157,8 @@ export type Mutation = {
   manualSell: ManualSellResult;
   removeSimulationWatchStock: Scalars["Boolean"]["output"];
   resetSimulation: SimulationSessionType;
+  runDeepAnalysisNow: Scalars["Boolean"]["output"];
+  runScreeningNow: Scalars["Boolean"]["output"];
   setStrategyAllocation: StrategyAllocationType;
   updateScreeningSettings: ScreeningSettingsType;
   updateSimulationStatus: SimulationSessionType;
@@ -184,6 +201,14 @@ export type MutationResetSimulationArgs = {
   id: Scalars["String"]["input"];
 };
 
+export type MutationRunDeepAnalysisNowArgs = {
+  input: RunScreeningInput;
+};
+
+export type MutationRunScreeningNowArgs = {
+  input: RunScreeningInput;
+};
+
 export type MutationSetStrategyAllocationArgs = {
   input: SetStrategyAllocationInput;
 };
@@ -220,7 +245,7 @@ export type PositionType = {
   __typename?: "PositionType";
   avgPrice: Scalars["Float"]["output"];
   currentPrice: Scalars["Float"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
   market: Market;
   profitLoss: Scalars["Float"]["output"];
@@ -245,7 +270,6 @@ export type Query = {
   positions: Array<PositionType>;
   quote?: Maybe<StockPriceType>;
   riskState: RiskStateType;
-  runScreeningNow: Scalars["Boolean"]["output"];
   screeningDateSummaries: Array<ScreeningDateSummary>;
   screeningDates: Array<Scalars["String"]["output"]>;
   screeningSettings: ScreeningSettingsType;
@@ -256,6 +280,7 @@ export type Query = {
   simulationSessions: Array<SimulationSessionType>;
   simulationSnapshots: Array<SimulationSnapshotType>;
   simulationTrades: Array<SimulationTradeType>;
+  stockDeepAnalysis?: Maybe<StockDeepAnalysisType>;
   stockRecommendations: Array<StockRecommendationType>;
   strategyAllocations: Array<StrategyAllocationType>;
   trade?: Maybe<TradeRecordType>;
@@ -281,10 +306,6 @@ export type QueryQuoteArgs = {
 
 export type QueryRiskStateArgs = {
   input: RiskStateFilterInput;
-};
-
-export type QueryRunScreeningNowArgs = {
-  input: RunScreeningInput;
 };
 
 export type QueryScreeningDateSummariesArgs = {
@@ -321,6 +342,11 @@ export type QuerySimulationSnapshotsArgs = {
 
 export type QuerySimulationTradesArgs = {
   input: SimulationTradesFilterInput;
+};
+
+export type QueryStockDeepAnalysisArgs = {
+  date?: InputMaybe<Scalars["String"]["input"]>;
+  stockCode: Scalars["String"]["input"];
 };
 
 export type QueryStockRecommendationsArgs = {
@@ -433,7 +459,7 @@ export type SimulationPositionType = {
   __typename?: "SimulationPositionType";
   avgPrice: Scalars["Float"]["output"];
   currentPrice: Scalars["Float"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
   market: Market;
   profitLoss: Scalars["Float"]["output"];
@@ -491,7 +517,7 @@ export type SimulationStatus = "COMPLETED" | "PAUSED" | "RUNNING";
 export type SimulationTradeType = {
   __typename?: "SimulationTradeType";
   createdAt: Scalars["DateTime"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
   market: Market;
   price: Scalars["Float"]["output"];
@@ -513,8 +539,8 @@ export type SimulationTradesFilterInput = {
 
 export type SimulationWatchStockType = {
   __typename?: "SimulationWatchStockType";
-  cycle: Scalars["Int"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  cycle: Scalars["Float"]["output"];
+  exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
   isActive: Scalars["Boolean"]["output"];
   market: Market;
@@ -526,6 +552,31 @@ export type SimulationWatchStockType = {
   stockName: Scalars["String"]["output"];
   stopLossRate: Scalars["Float"]["output"];
   strategyParams?: Maybe<Scalars["String"]["output"]>;
+};
+
+export type StockDeepAnalysisType = {
+  __typename?: "StockDeepAnalysisType";
+  consensusDetail?: Maybe<Scalars["String"]["output"]>;
+  consensusRating?: Maybe<Scalars["String"]["output"]>;
+  dcfDetail?: Maybe<Scalars["String"]["output"]>;
+  dividendDetail?: Maybe<Scalars["String"]["output"]>;
+  dividendYield?: Maybe<Scalars["Float"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
+  id: Scalars["String"]["output"];
+  intrinsicValue?: Maybe<Scalars["Float"]["output"]>;
+  marginOfSafety?: Maybe<Scalars["Float"]["output"]>;
+  maxDrawdown90d?: Maybe<Scalars["Float"]["output"]>;
+  reportSummary?: Maybe<Scalars["String"]["output"]>;
+  riskDetail?: Maybe<Scalars["String"]["output"]>;
+  riskGrade?: Maybe<Scalars["String"]["output"]>;
+  screeningDate: Scalars["String"]["output"];
+  stockCode: Scalars["String"]["output"];
+  stockName: Scalars["String"]["output"];
+  targetPrice?: Maybe<Scalars["Float"]["output"]>;
+  targetUpside?: Maybe<Scalars["Float"]["output"]>;
+  technicalDetail?: Maybe<Scalars["String"]["output"]>;
+  trendDirection?: Maybe<Scalars["String"]["output"]>;
+  volatility30d?: Maybe<Scalars["Float"]["output"]>;
 };
 
 export type StockPriceType = {
@@ -545,6 +596,7 @@ export type StockRecommendationType = {
   createdAt: Scalars["DateTime"]["output"];
   currentPrice: Scalars["Float"]["output"];
   exchangeCode: Scalars["String"]["output"];
+  factorScores?: Maybe<FactorScoreType>;
   fundamentalScore: Scalars["Float"]["output"];
   id: Scalars["String"]["output"];
   indicators: Scalars["String"]["output"];
@@ -634,7 +686,7 @@ export type TradeFilterInput = {
 export type TradeRecordType = {
   __typename?: "TradeRecordType";
   createdAt: Scalars["DateTime"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
   executedPrice?: Maybe<Scalars["Float"]["output"]>;
   executedQty?: Maybe<Scalars["Int"]["output"]>;
   id: Scalars["ID"]["output"];
@@ -675,7 +727,7 @@ export type UpdateWatchStockInput = {
 };
 
 export type WatchStockInput = {
-  exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
+  exchangeCode: Scalars["String"]["input"];
   market: Market;
   maxPortfolioRate?: InputMaybe<Scalars["Float"]["input"]>;
   quota?: InputMaybe<Scalars["Float"]["input"]>;
@@ -689,7 +741,7 @@ export type WatchStockType = {
   __typename?: "WatchStockType";
   createdAt: Scalars["DateTime"]["output"];
   cycle: Scalars["Int"]["output"];
-  exchangeCode?: Maybe<Scalars["String"]["output"]>;
+  exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
   isActive: Scalars["Boolean"]["output"];
   /** 마지막 전략 실행 날짜 */
@@ -762,6 +814,20 @@ export type GetStockRecommendationsQuery = {
       matchScore: number;
       reason: string;
     }>;
+    factorScores?: {
+      __typename?: "FactorScoreType";
+      technical?: number | null;
+      valuation?: number | null;
+      growth?: number | null;
+      profitability?: number | null;
+      risk?: number | null;
+      momentum?: number | null;
+      supplyDemand?: number | null;
+      dividend?: number | null;
+      consensus?: number | null;
+      pattern?: number | null;
+      fundamental?: number | null;
+    } | null;
   }>;
 };
 
@@ -828,6 +894,39 @@ export type UpdateScreeningSettingsMutation = {
   };
 };
 
+export type GetStockDeepAnalysisQueryVariables = Exact<{
+  stockCode: Scalars["String"]["input"];
+  date?: InputMaybe<Scalars["String"]["input"]>;
+}>;
+
+export type GetStockDeepAnalysisQuery = {
+  __typename?: "Query";
+  stockDeepAnalysis?: {
+    __typename?: "StockDeepAnalysisType";
+    id: string;
+    screeningDate: string;
+    stockCode: string;
+    stockName: string;
+    exchangeCode: string;
+    intrinsicValue?: number | null;
+    marginOfSafety?: number | null;
+    riskGrade?: string | null;
+    volatility30d?: number | null;
+    maxDrawdown90d?: number | null;
+    trendDirection?: string | null;
+    dividendYield?: number | null;
+    targetPrice?: number | null;
+    targetUpside?: number | null;
+    consensusRating?: string | null;
+    reportSummary?: string | null;
+    dcfDetail?: string | null;
+    riskDetail?: string | null;
+    technicalDetail?: string | null;
+    dividendDetail?: string | null;
+    consensusDetail?: string | null;
+  } | null;
+};
+
 export type GetSimulationSessionsQueryVariables = Exact<{
   input?: InputMaybe<SimulationSessionsFilterInput>;
 }>;
@@ -855,7 +954,7 @@ export type GetSimulationSessionsQuery = {
       stockCode: string;
       stockName: string;
       market: Market;
-      exchangeCode?: string | null;
+      exchangeCode: string;
       quota?: number | null;
       cycle: number;
       maxCycles: number;
@@ -893,7 +992,7 @@ export type GetSimulationSessionQuery = {
       stockCode: string;
       stockName: string;
       market: Market;
-      exchangeCode?: string | null;
+      exchangeCode: string;
       quota?: number | null;
       cycle: number;
       maxCycles: number;
@@ -915,7 +1014,7 @@ export type GetSimulationPositionsQuery = {
     __typename?: "SimulationPositionType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     quantity: number;
@@ -937,7 +1036,7 @@ export type GetSimulationTradesQuery = {
     __typename?: "SimulationTradeType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     side: Side;
@@ -1027,7 +1126,7 @@ export type AddSimulationWatchStockMutation = {
     stockCode: string;
     stockName: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     quota?: number | null;
     maxCycles: number;
     stopLossRate: number;
@@ -1109,7 +1208,7 @@ export type GetTradesQuery = {
     __typename?: "TradeRecordType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     side: Side;
@@ -1136,7 +1235,7 @@ export type GetTradeQuery = {
     __typename?: "TradeRecordType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     side: Side;
@@ -1163,7 +1262,7 @@ export type GetPositionsQuery = {
     __typename?: "PositionType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     quantity: number;
@@ -1322,7 +1421,7 @@ export type GetWatchStocksQuery = {
     __typename?: "WatchStockType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     isActive: boolean;
@@ -1350,7 +1449,7 @@ export type CreateWatchStockMutation = {
     __typename?: "WatchStockType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     isActive: boolean;
@@ -1377,7 +1476,7 @@ export type UpdateWatchStockMutation = {
     __typename?: "WatchStockType";
     id: string;
     market: Market;
-    exchangeCode?: string | null;
+    exchangeCode: string;
     stockCode: string;
     stockName: string;
     isActive: boolean;
@@ -1504,6 +1603,19 @@ export const GetStockRecommendationsDocument = gql`
       volume
       marketCap
       isEtf
+      factorScores {
+        technical
+        valuation
+        growth
+        profitability
+        risk
+        momentum
+        supplyDemand
+        dividend
+        consensus
+        pattern
+        fundamental
+      }
       createdAt
     }
   }
@@ -1932,6 +2044,126 @@ export function useUpdateScreeningSettingsMutation(
 }
 export type UpdateScreeningSettingsMutationHookResult = ReturnType<
   typeof useUpdateScreeningSettingsMutation
+>;
+export const GetStockDeepAnalysisDocument = gql`
+  query GetStockDeepAnalysis($stockCode: String!, $date: String) {
+    stockDeepAnalysis(stockCode: $stockCode, date: $date) {
+      id
+      screeningDate
+      stockCode
+      stockName
+      exchangeCode
+      intrinsicValue
+      marginOfSafety
+      riskGrade
+      volatility30d
+      maxDrawdown90d
+      trendDirection
+      dividendYield
+      targetPrice
+      targetUpside
+      consensusRating
+      reportSummary
+      dcfDetail
+      riskDetail
+      technicalDetail
+      dividendDetail
+      consensusDetail
+    }
+  }
+`;
+
+/**
+ * __useGetStockDeepAnalysisQuery__
+ *
+ * To run a query within a React component, call `useGetStockDeepAnalysisQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetStockDeepAnalysisQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetStockDeepAnalysisQuery({
+ *   variables: {
+ *      stockCode: // value for 'stockCode'
+ *      date: // value for 'date'
+ *   },
+ * });
+ */
+export function useGetStockDeepAnalysisQuery(
+  baseOptions: ApolloReactHooks.QueryHookOptions<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  > &
+    (
+      | { variables: GetStockDeepAnalysisQueryVariables; skip?: boolean }
+      | { skip: boolean }
+    ),
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  >(GetStockDeepAnalysisDocument, options);
+}
+export function useGetStockDeepAnalysisLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  >(GetStockDeepAnalysisDocument, options);
+}
+// @ts-ignore
+export function useGetStockDeepAnalysisSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetStockDeepAnalysisQuery,
+  GetStockDeepAnalysisQueryVariables
+>;
+export function useGetStockDeepAnalysisSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetStockDeepAnalysisQuery,
+        GetStockDeepAnalysisQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  GetStockDeepAnalysisQuery | undefined,
+  GetStockDeepAnalysisQueryVariables
+>;
+export function useGetStockDeepAnalysisSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        GetStockDeepAnalysisQuery,
+        GetStockDeepAnalysisQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    GetStockDeepAnalysisQuery,
+    GetStockDeepAnalysisQueryVariables
+  >(GetStockDeepAnalysisDocument, options);
+}
+export type GetStockDeepAnalysisQueryHookResult = ReturnType<
+  typeof useGetStockDeepAnalysisQuery
+>;
+export type GetStockDeepAnalysisLazyQueryHookResult = ReturnType<
+  typeof useGetStockDeepAnalysisLazyQuery
+>;
+export type GetStockDeepAnalysisSuspenseQueryHookResult = ReturnType<
+  typeof useGetStockDeepAnalysisSuspenseQuery
 >;
 export const GetSimulationSessionsDocument = gql`
   query GetSimulationSessions($input: SimulationSessionsFilterInput) {

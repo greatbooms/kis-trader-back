@@ -74,7 +74,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     if (curPrice <= 0) return signals;
 
     const market = watchStock.market;
-    const exchangeCode = watchStock.exchangeCode || 'KRX';
+    const exchangeCode = watchStock.exchangeCode;
     const isOverseas = market === 'OVERSEAS';
     const hasPosition = !!position && position.quantity > 0;
 
@@ -87,7 +87,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     if (mddCheck?.liquidateAll && hasPosition) {
       signals.push({
         market,
-        exchangeCode: isOverseas ? exchangeCode : undefined,
+        exchangeCode,
         stockCode: watchStock.stockCode,
         side: 'SELL',
         quantity: position!.quantity,
@@ -121,7 +121,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         );
         signals.push({
           market,
-          exchangeCode: isOverseas ? exchangeCode : undefined,
+          exchangeCode,
           stockCode: watchStock.stockCode,
           side: 'SELL',
           quantity: holdQty,
@@ -139,7 +139,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         this.logger.log(`[${watchStock.stockCode}] TREND EXIT: ${reason}`);
         signals.push({
           market,
-          exchangeCode: isOverseas ? exchangeCode : undefined,
+          exchangeCode,
           stockCode: watchStock.stockCode,
           side: 'SELL',
           quantity: holdQty,
@@ -179,7 +179,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
           );
           signals.push({
             market,
-            exchangeCode: isOverseas ? exchangeCode : undefined,
+            exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'BUY',
             quantity: pyramidQty,
@@ -221,7 +221,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         );
         signals.push({
           market,
-          exchangeCode: isOverseas ? exchangeCode : undefined,
+          exchangeCode,
           stockCode: watchStock.stockCode,
           side: 'BUY',
           quantity: buyQty,

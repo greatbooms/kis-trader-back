@@ -133,7 +133,7 @@ export class TradingService {
             result,
             position: position ? {
               stockCode: position.stockCode, stockName: position.stockName,
-              exchangeCode: position.exchangeCode || undefined, market: position.market,
+              exchangeCode: position.exchangeCode, market: position.market,
               quantity: position.quantity, avgPrice: Number(position.avgPrice),
               currentPrice: Number(position.currentPrice), profitLoss: Number(position.profitLoss),
               profitRate: Number(position.profitRate), totalInvested: Number(position.totalInvested),
@@ -312,7 +312,7 @@ export class TradingService {
               ? {
                   stockCode: position.stockCode,
                   stockName: position.stockName,
-                  exchangeCode: position.exchangeCode || undefined,
+                  exchangeCode: position.exchangeCode,
                   market: position.market,
                   quantity: position.quantity,
                   avgPrice: Number(position.avgPrice),
@@ -361,14 +361,15 @@ export class TradingService {
 
       await this.prisma.position.upsert({
         where: {
-          market_stockCode: {
+          market_exchangeCode_stockCode: {
             market: market as Market,
+            exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
             stockCode: item.stockCode,
           },
         },
         create: {
           market: market as Market,
-          exchangeCode: item.exchangeCode,
+          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
           stockCode: item.stockCode,
           stockName: item.stockName,
           quantity: item.quantity,
@@ -385,7 +386,7 @@ export class TradingService {
           profitLoss: new Prisma.Decimal(item.profitLoss),
           profitRate: new Prisma.Decimal(item.profitRate),
           stockName: item.stockName,
-          exchangeCode: item.exchangeCode,
+          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
           totalInvested: new Prisma.Decimal(totalInvested),
         },
       });

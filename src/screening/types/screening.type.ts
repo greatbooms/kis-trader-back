@@ -32,6 +32,28 @@ export interface SuggestedStrategy {
   reason: string;
 }
 
+export type ScreeningMode = 'FAST' | 'FULL';
+
+export interface ForeignInstitutionDetail {
+  foreignNet: number;
+  instNet: number;
+  trustNet: number;
+  fundNet: number;
+  foreignNetAmount: number;
+}
+
+export interface CountryConfig {
+  country: string;
+  exchanges: string[];
+}
+
+export interface FactorComponent {
+  score: number;
+  max: number;
+  reasons: string[];
+  hasData: boolean;
+}
+
 export interface StockScore {
   stockCode: string;
   stockName: string;
@@ -49,6 +71,9 @@ export interface StockScore {
   volume: number;
   marketCap: number;
   isEtf: boolean;
+  factorScores?: Record<string, number>;
+  dataAvailability?: number;
+  deepAnalysisId?: string;
 }
 
 /** ETF/ETN/펀드 판별 키워드 */
@@ -118,6 +143,49 @@ export interface StockIndicatorDetail {
   volumeIncreaseRate?: number; // API 직접 제공 거래량 증가율
   avgVolume?: number; // 평균 거래량
   volumeToAvgRatio?: number; // 현재거래량 / 평균거래량 비율
+  macd?: { line: number; signal: number; histogram: number };
+  bollingerBands?: { upper: number; middle: number; lower: number; percentB: number };
+  adx14?: number;
+  supportLevels?: number[];
+  resistanceLevels?: number[];
+  fibonacciLevels?: number[];
+  chartPattern?: string;
+  intrinsicValue?: number;
+  marginOfSafety?: number;
+  evEbitda?: number;
+  revenueGrowthRate?: number;
+  operatingProfitGrowthRate?: number;
+  epsGrowthRate?: number;
+  operatingMargin?: number;
+  netMargin?: number;
+  currentRatio?: number;
+  interestCoverageRatio?: number;
+  shortSaleRatio?: number;
+  creditBalanceRate?: number;
+  volatility30d?: number;
+  atr14?: number;
+  atrPercent?: number;
+  maxDrawdown60d?: number;
+  quickRatio?: number;
+  borrowingDependency?: number;
+  grossMargin?: number;
+  equityGrowthRate?: number;
+  totalAssetGrowthRate?: number;
+  estimatedEps?: number;
+  estimatedPer?: number;
+  dividendYield?: number;
+  payoutRatio?: number;
+  consecutiveDividendYears?: number;
+  dividendGrowthRate?: number;
+  foreignNetBuyStreak?: number;
+  programTradeDirection?: 'BUY' | 'SELL';
+  targetPrice?: number;
+  targetPriceUpside?: number;
+  consensusRating?: string;
+  earningsSurprise?: number;
+  analystCount?: number;
+  factors?: Record<string, number>;
+  dataAvailability?: number; // 팩터 데이터 가용률 (%)
   // 해외 추가
   sector?: string; // 업종/섹터
   prevDayVolumeChangeRate?: number; // 전일거래량 대비 변화율 (해외)

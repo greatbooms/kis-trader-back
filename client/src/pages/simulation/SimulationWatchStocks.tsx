@@ -78,7 +78,7 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
           stockCode: selectedStock.stockCode,
           stockName: selectedStock.stockName,
           market: (selectedStock.market as Market) || country.market || sessionMarket || 'DOMESTIC',
-          exchangeCode: selectedStock.exchangeCode || undefined,
+          exchangeCode: selectedStock.exchangeCode,
           quota: quota ? Number(quota) : undefined,
           maxCycles: needsMaxCycles(strategyName) && maxCycles ? Number(maxCycles) : undefined,
           stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
@@ -185,7 +185,7 @@ export function SimulationWatchStocks({ sessionId }: SimulationWatchStocksProps)
                         </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                           {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
-                          <span>사이클: {stock.cycle}/{stock.maxCycles}</span>
+                          <span>사이클: {stock.cycle.toFixed(1)}/{stock.maxCycles}</span>
                           {stock.stopLossRate !== undefined && stock.stopLossRate > 0 && <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>}
                         </div>
                       </div>

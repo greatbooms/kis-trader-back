@@ -10,7 +10,7 @@ datasource db {
 model TradeRecord {
   id            String      @id @default(uuid())
   market        Market
-  exchangeCode  String?     @map("exchange_code")
+  exchangeCode  String      @map("exchange_code")
   stockCode     String      @map("stock_code")
   stockName     String      @map("stock_name")
   side          Side
@@ -33,7 +33,7 @@ model TradeRecord {
 model Position {
   id            String   @id @default(uuid())
   market        Market
-  exchangeCode  String?  @map("exchange_code")
+  exchangeCode  String   @map("exchange_code")
   stockCode     String   @map("stock_code")
   stockName     String   @map("stock_name")
   quantity      Int
@@ -44,14 +44,14 @@ model Position {
   totalInvested Decimal  @default(0) @map("total_invested") @db.Decimal(16, 4)
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  @@unique([market, stockCode])
+  @@unique([market, exchangeCode, stockCode])
   @@map("positions")
 }
 
 model WatchStock {
   id               String   @id @default(uuid())
   market           Market
-  exchangeCode     String?  @map("exchange_code")
+  exchangeCode     String   @map("exchange_code")
   stockCode        String   @map("stock_code")
   stockName        String   @map("stock_name")
   isActive         Boolean  @default(true) @map("is_active")
@@ -65,7 +65,7 @@ model WatchStock {
   updatedAt        DateTime @updatedAt @map("updated_at")
   strategyParams   Json?    @map("strategy_params")
 
-  @@unique([market, stockCode])
+  @@unique([market, exchangeCode, stockCode])
   @@map("watch_stocks")
 }
 
@@ -130,6 +130,8 @@ model StockRecommendation {
   volume              BigInt   @default(0)
   marketCap           BigInt   @default(0) @map("market_cap")
   isEtf               Boolean  @default(false) @map("is_etf")
+  factorScores        Json?    @map("factor_scores")
+  deepAnalysisId      String?  @map("deep_analysis_id")
   createdAt           DateTime @default(now()) @map("created_at")
   suggestedStrategies Json?    @map("suggested_strategies")
 
@@ -137,6 +139,37 @@ model StockRecommendation {
   @@index([screeningDate, market])
   @@index([screeningDate, market, isEtf])
   @@map("stock_recommendations")
+}
+
+model StockDeepAnalysis {
+  id                       String   @id @default(cuid())
+  screeningDate            String   @map("screening_date")
+  stockCode                String   @map("stock_code")
+  stockName                String   @map("stock_name")
+  exchangeCode             String   @map("exchange_code")
+  market                   Market
+  intrinsicValue           Decimal? @map("intrinsic_value") @db.Decimal(16, 4)
+  marginOfSafety           Decimal? @map("margin_of_safety") @db.Decimal(8, 4)
+  dcfDetail                Json?    @map("dcf_detail")
+  riskGrade                String?  @map("risk_grade")
+  volatility30d            Decimal? @map("volatility_30d") @db.Decimal(8, 4)
+  maxDrawdown90d           Decimal? @map("max_drawdown_90d") @db.Decimal(8, 4)
+  riskDetail               Json?    @map("risk_detail")
+  trendDirection           String?  @map("trend_direction")
+  technicalDetail          Json?    @map("technical_detail")
+  dividendYield            Decimal? @map("dividend_yield") @db.Decimal(8, 4)
+  consecutiveDividendYears Int?     @map("consecutive_dividend_years")
+  dividendDetail           Json?    @map("dividend_detail")
+  targetPrice              Decimal? @map("target_price") @db.Decimal(16, 4)
+  targetUpside             Decimal? @map("target_upside") @db.Decimal(8, 4)
+  consensusRating          String?  @map("consensus_rating")
+  consensusDetail          Json?    @map("consensus_detail")
+  reportSummary            String?  @map("report_summary") @db.Text
+  createdAt                DateTime @default(now()) @map("created_at")
+
+  @@unique([screeningDate, exchangeCode, stockCode])
+  @@index([screeningDate, market])
+  @@map("stock_deep_analyses")
 }
 
 model AppSetting {
@@ -173,7 +206,7 @@ model SimulationWatchStock {
   id               String            @id @default(uuid())
   sessionId        String            @map("session_id")
   market           Market
-  exchangeCode     String?           @map("exchange_code")
+  exchangeCode     String            @map("exchange_code")
   stockCode        String            @map("stock_code")
   stockName        String            @map("stock_name")
   quota            Decimal?          @db.Decimal(12, 2)
@@ -185,7 +218,7 @@ model SimulationWatchStock {
   isActive         Boolean           @default(true) @map("is_active")
   session          SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@unique([sessionId, stockCode])
+  @@unique([sessionId, exchangeCode, stockCode])
   @@map("simulation_watch_stocks")
 }
 
@@ -193,7 +226,7 @@ model SimulationTrade {
   id           String            @id @default(uuid())
   sessionId    String            @map("session_id")
   market       Market
-  exchangeCode String?           @map("exchange_code")
+  exchangeCode String            @map("exchange_code")
   stockCode    String            @map("stock_code")
   stockName    String            @map("stock_name")
   side         Side
@@ -212,7 +245,7 @@ model SimulationPosition {
   id            String            @id @default(uuid())
   sessionId     String            @map("session_id")
   market        Market
-  exchangeCode  String?           @map("exchange_code")
+  exchangeCode  String            @map("exchange_code")
   stockCode     String            @map("stock_code")
   stockName     String            @map("stock_name")
   quantity      Int
@@ -224,7 +257,7 @@ model SimulationPosition {
   updatedAt     DateTime          @updatedAt @map("updated_at")
   session       SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@unique([sessionId, stockCode])
+  @@unique([sessionId, exchangeCode, stockCode])
   @@map("simulation_positions")
 }
 
@@ -284,7 +317,7 @@ model StopLossApproval {
   id             String         @id @default(uuid())
   tradeRecordId  String         @map("trade_record_id")
   market         Market
-  exchangeCode   String?        @map("exchange_code")
+  exchangeCode   String         @map("exchange_code")
   stockCode      String         @map("stock_code")
   stockName      String         @map("stock_name")
   strategyName   String?        @map("strategy_name")

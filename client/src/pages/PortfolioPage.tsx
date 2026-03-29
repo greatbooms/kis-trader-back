@@ -200,7 +200,7 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
           input: {
             stockCode: pos.stockCode,
             market: pos.market,
-            exchangeCode: pos.exchangeCode ?? undefined,
+            exchangeCode: pos.exchangeCode,
             quantity: qty,
           },
         },

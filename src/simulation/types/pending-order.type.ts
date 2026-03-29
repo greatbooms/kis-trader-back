@@ -1,7 +1,7 @@
 export interface SimulationPendingOrder {
   sessionId: string;
   market: string;
-  exchangeCode?: string;
+  exchangeCode: string;
   stockCode: string;
   side: 'BUY' | 'SELL';
   quantity: number;

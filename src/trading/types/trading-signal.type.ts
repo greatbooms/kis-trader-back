@@ -1,6 +1,6 @@
 export interface TradingSignal {
   market: 'DOMESTIC' | 'OVERSEAS';
-  exchangeCode?: string;
+  exchangeCode: string;
   stockCode: string;
   side: 'BUY' | 'SELL';
   quantity: number;

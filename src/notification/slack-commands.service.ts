@@ -215,7 +215,7 @@ export class SlackCommandsService implements OnModuleInit {
     return positions.map((p) => ({
       stockCode: p.stockCode,
       stockName: p.stockName,
-      exchangeCode: p.exchangeCode || undefined,
+      exchangeCode: p.exchangeCode,
       market: p.market,
       quantity: p.quantity,
       avgPrice: Number(p.avgPrice),
@@ -241,7 +241,7 @@ export class SlackCommandsService implements OnModuleInit {
       position: {
         stockCode: position.stockCode,
         stockName: position.stockName,
-        exchangeCode: position.exchangeCode || undefined,
+        exchangeCode: position.exchangeCode,
         market: position.market,
         quantity: position.quantity,
         avgPrice: Number(position.avgPrice),

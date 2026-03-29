@@ -34,3 +34,6 @@ client/dist
 
 # Stock master temp
 .stock-master-tmp
+
+# duo-agent
+.duo-agent

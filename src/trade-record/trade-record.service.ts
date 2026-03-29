@@ -169,7 +169,7 @@ export class TradeRecordService {
         const price = await this.kisDomestic.getPrice(input.stockCode);
         currentPrice = price.currentPrice;
       } else {
-        const exchangeCode = input.exchangeCode || position.exchangeCode || 'NASD';
+        const exchangeCode = input.exchangeCode || position.exchangeCode;
         const price = await this.kisOverseas.getPrice(exchangeCode, input.stockCode);
         currentPrice = price.currentPrice;
       }
@@ -204,7 +204,7 @@ export class TradeRecordService {
       if (input.market === 'DOMESTIC') {
         result = await this.kisDomestic.orderSell(input.stockCode, sellQty, roundPrice, '00');
       } else {
-        const exchangeCode = input.exchangeCode || position.exchangeCode || 'NASD';
+        const exchangeCode = input.exchangeCode || position.exchangeCode;
         result = await this.kisOverseas.orderSell(exchangeCode, input.stockCode, sellQty, roundPrice, '00');
       }
 

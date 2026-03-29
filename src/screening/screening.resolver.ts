@@ -3,6 +3,7 @@ import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
 import {
   StockRecommendationType,
+  StockDeepAnalysisType,
   ScreeningSettingsType,
   UpdateScreeningSettingsInput,
   ScreeningDateSummary,
@@ -65,8 +66,49 @@ export class ScreeningResolver {
       volume: Number(r.volume),
       marketCap: Number(r.marketCap),
       isEtf: r.isEtf,
+      factorScores: r.factorScores ? (r.factorScores as Record<string, number>) : undefined,
       createdAt: r.createdAt,
     }));
+  }
+
+  @Query(() => StockDeepAnalysisType, { nullable: true })
+  async stockDeepAnalysis(
+    @Args('stockCode') stockCode: string,
+    @Args('date', { nullable: true }) date?: string,
+  ): Promise<StockDeepAnalysisType | null> {
+    let targetDate = date;
+    if (!targetDate) {
+      const dates = await this.screeningService.getScreeningDates(1);
+      targetDate = dates[0];
+    }
+    if (!targetDate) return null;
+
+    const analysis = await this.screeningService.getStockDeepAnalysis(targetDate, stockCode);
+    if (!analysis) return null;
+
+    return {
+      id: analysis.id,
+      screeningDate: analysis.screeningDate,
+      stockCode: analysis.stockCode,
+      stockName: analysis.stockName,
+      exchangeCode: analysis.exchangeCode,
+      intrinsicValue: analysis.intrinsicValue ? Number(analysis.intrinsicValue) : undefined,
+      marginOfSafety: analysis.marginOfSafety ? Number(analysis.marginOfSafety) : undefined,
+      riskGrade: analysis.riskGrade ?? undefined,
+      volatility30d: analysis.volatility30d ? Number(analysis.volatility30d) : undefined,
+      maxDrawdown90d: analysis.maxDrawdown90d ? Number(analysis.maxDrawdown90d) : undefined,
+      trendDirection: analysis.trendDirection ?? undefined,
+      dividendYield: analysis.dividendYield ? Number(analysis.dividendYield) : undefined,
+      targetPrice: analysis.targetPrice ? Number(analysis.targetPrice) : undefined,
+      targetUpside: analysis.targetUpside ? Number(analysis.targetUpside) : undefined,
+      consensusRating: analysis.consensusRating ?? undefined,
+      reportSummary: analysis.reportSummary ?? undefined,
+      dcfDetail: analysis.dcfDetail ? JSON.stringify(analysis.dcfDetail) : undefined,
+      riskDetail: analysis.riskDetail ? JSON.stringify(analysis.riskDetail) : undefined,
+      technicalDetail: analysis.technicalDetail ? JSON.stringify(analysis.technicalDetail) : undefined,
+      dividendDetail: analysis.dividendDetail ? JSON.stringify(analysis.dividendDetail) : undefined,
+      consensusDetail: analysis.consensusDetail ? JSON.stringify(analysis.consensusDetail) : undefined,
+    };
   }
 
   @Query(() => [String])
@@ -83,7 +125,7 @@ export class ScreeningResolver {
     return this.screeningService.getScreeningDateSummaries(input?.limit ?? 10);
   }
 
-  @Query(() => Boolean)
+  @Mutation(() => Boolean)
   async runScreeningNow(
     @Args('input') input: RunScreeningInput,
   ): Promise<boolean> {
@@ -93,6 +135,20 @@ export class ScreeningResolver {
       await this.screeningScheduler.runOverseasScreening([input.exchangeCode]);
     } else {
       await this.screeningScheduler.runOverseasScreening(['NASD', 'NYSE', 'AMEX']);
+    }
+    return true;
+  }
+
+  @Mutation(() => Boolean)
+  async runDeepAnalysisNow(
+    @Args('input') input: RunScreeningInput,
+  ): Promise<boolean> {
+    if (input.market === 'DOMESTIC') {
+      await this.screeningScheduler.runDomesticDeepAnalysis();
+    } else if (input.exchangeCode) {
+      await this.screeningScheduler.runOverseasDeepAnalysis([input.exchangeCode]);
+    } else {
+      await this.screeningScheduler.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX']);
     }
     return true;
   }

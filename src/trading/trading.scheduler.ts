@@ -135,7 +135,7 @@ export class TradingScheduler implements OnModuleInit {
 
       const byExchange = new Map<string, typeof watchStocks>();
       for (const w of watchStocks) {
-        const ex = w.exchangeCode || 'NASD';
+        const ex = w.exchangeCode;
         if (!byExchange.has(ex)) byExchange.set(ex, []);
         byExchange.get(ex)!.push(w);
       }
@@ -251,12 +251,12 @@ export class TradingScheduler implements OnModuleInit {
         try {
           const price = market === 'DOMESTIC'
             ? await this.kisDomestic.getPrice(ws.stockCode)
-            : await this.kisOverseas.getPrice(ws.exchangeCode || exchangeCode, ws.stockCode);
+            : await this.kisOverseas.getPrice(ws.exchangeCode, ws.stockCode);
 
           const pos = positions.find((p) => p.stockCode === ws.stockCode);
 
           const stockIndicators = await this.marketAnalysis.getStockIndicators(
-            market, ws.exchangeCode || exchangeCode, ws.stockCode, price.currentPrice,
+            market, ws.exchangeCode, ws.stockCode, price.currentPrice,
           );
 
           // 현재가 API에서 직접 제공되는 추가 지표를 stockIndicators에 병합
@@ -292,7 +292,7 @@ export class TradingScheduler implements OnModuleInit {
           } else {
             try {
               const buyable = await this.kisOverseas.getBuyableAmount(
-                ws.exchangeCode || exchangeCode, ws.stockCode, price.currentPrice,
+                ws.exchangeCode, ws.stockCode, price.currentPrice,
               );
               buyableAmount = buyable.foreignCurrencyAvailable;
             } catch (e) {
@@ -315,7 +315,7 @@ export class TradingScheduler implements OnModuleInit {
           const watchStockConfig: WatchStockConfig = {
             id: ws.id,
             market,
-            exchangeCode: ws.exchangeCode || exchangeCode,
+            exchangeCode: ws.exchangeCode,
             stockCode: ws.stockCode,
             stockName: ws.stockName,
             strategyName: ws.strategyName || undefined,
@@ -330,7 +330,7 @@ export class TradingScheduler implements OnModuleInit {
           // 밸류 팩터 전략일 때만 재무 데이터 조회 (API 호출 최소화)
           let fundamentals: StockFundamentals | undefined;
           if (strategyName === 'value-factor') {
-            fundamentals = await this.fetchFundamentals(market, ws.exchangeCode || exchangeCode, ws.stockCode, price);
+            fundamentals = await this.fetchFundamentals(market, ws.exchangeCode, ws.stockCode, price);
           }
 
           contexts.push({
@@ -373,7 +373,7 @@ export class TradingScheduler implements OnModuleInit {
         const firstStock = watchStocks[0];
         if (firstStock) {
           const buyable = await this.kisOverseas.getBuyableAmount(
-            firstStock.exchangeCode || exchangeCode,
+            firstStock.exchangeCode,
             firstStock.stockCode,
             1,
           );
@@ -470,7 +470,7 @@ export class TradingScheduler implements OnModuleInit {
         for (const order of orders) {
           this.logger.log(`Cancelling overseas unfilled order: ${order.stockCode} #${order.orderNo}`);
           await this.kisOverseas.cancelOrder(
-            order.exchangeCode || 'NASD',
+            order.exchangeCode ?? '',
             order.orderNo,
             order.stockCode,
             order.quantity,

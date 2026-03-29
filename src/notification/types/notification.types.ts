@@ -4,7 +4,7 @@ import { OrderResult } from '../../kis/types/kis-api.types';
 export interface PositionInfo {
   stockCode: string;
   stockName: string;
-  exchangeCode?: string;
+  exchangeCode: string;
   market: string;
   quantity: number;
   avgPrice: number;
@@ -46,7 +46,7 @@ export interface DailySummaryContext {
 
 export interface FilterLogContext {
   stockCode: string;
-  exchangeCode?: string;
+  exchangeCode: string;
   reason: string;
   details: Record<string, any>;
 }
@@ -70,7 +70,7 @@ export interface StopLossApprovalRequest {
   tradeRecordId: string;
   stockCode: string;
   stockName: string;
-  exchangeCode?: string;
+  exchangeCode: string;
   market: string;
   strategyName?: string;
   quantity: number;

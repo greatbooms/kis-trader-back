@@ -150,7 +150,7 @@ function AddWatchStockModal({
 }: {
   strategies: { name: string; displayName: string }[]
   onSave: (input: {
-    market: Market; stockCode: string; stockName: string; exchangeCode?: string
+    market: Market; stockCode: string; stockName: string; exchangeCode: string
     strategyName?: string; quota?: number; maxCycles?: number; stopLossRate?: number
     strategyParams?: string
   }) => Promise<void>
@@ -209,7 +209,7 @@ function AddWatchStockModal({
         market: (selectedStock.market as Market) || selectedCountry?.market || 'DOMESTIC',
         stockCode: selectedStock.stockCode,
         stockName: selectedStock.stockName,
-        exchangeCode: selectedStock.exchangeCode || undefined,
+        exchangeCode: selectedStock.exchangeCode,
         strategyName,
         quota: Number(quota),
         maxCycles: meta.hasMaxCycles && maxCycles ? Number(maxCycles) : undefined,

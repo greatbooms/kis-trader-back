@@ -88,6 +88,7 @@ describe('WatchStockService', () => {
     it('should create a new watch stock with required fields', async () => {
       const input = {
         market: 'DOMESTIC' as any,
+        exchangeCode: 'KRX',
         stockCode: '005930',
         stockName: 'Samsung',
       };

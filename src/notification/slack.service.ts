@@ -219,12 +219,17 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendScreeningResult(market: string, date: string, scores: { stockCode: string; stockName: string; exchangeCode: string; totalScore: number; technicalScore: number; fundamentalScore: number; momentumScore: number; reasons: string[]; currentPrice: number; changeRate: number }[]): Promise<void> {
+  async sendScreeningResult(market: string, date: string, scores: { stockCode: string; stockName: string; exchangeCode: string; totalScore: number; technicalScore: number; fundamentalScore: number; momentumScore: number; reasons: string[]; currentPrice: number; changeRate: number; factorScores?: Record<string, number> }[]): Promise<void> {
     if (!await this.ensureConnected()) return;
 
     try {
       const top = scores.slice(0, 10);
-      const marketLabel = market === 'DOMESTIC' ? '국내' : top[0]?.exchangeCode || '해외';
+      const marketLabel = market === 'DOMESTIC' ? '국내' : top[0]?.exchangeCode ?? '해외';
+      const factorSummary = top.slice(0, 3).map((s) => {
+        const factors = s.factorScores;
+        if (!factors) return `${s.stockName}: 팩터 데이터 없음`;
+        return `${s.stockName}: 기술 ${factors.technical ?? 0}, 가치 ${factors.valuation ?? 0}, 성장 ${factors.growth ?? 0}, 수급 ${factors.supplyDemand ?? 0}`;
+      });
       const lines = top.map((s, i) =>
         `${i + 1}. *${s.stockName}* (${s.stockCode}) — ${s.totalScore.toFixed(1)}점\n` +
         `    기술 ${s.technicalScore.toFixed(0)} | 펀더 ${s.fundamentalScore.toFixed(0)} | 모멘텀 ${s.momentumScore.toFixed(0)} | ${s.changeRate >= 0 ? '+' : ''}${s.changeRate.toFixed(1)}%\n` +
@@ -242,6 +247,16 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           text: { type: 'mrkdwn', text: lines.join('\n\n') },
         },
       ];
+
+      if (factorSummary.length > 0) {
+        blocks.push(
+          { type: 'divider' },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*상위 3종목 팩터 요약*\n${factorSummary.join('\n')}` },
+          },
+        );
+      }
 
       if (scores.length > 10) {
         blocks.push({
@@ -261,12 +276,83 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async sendDeepAnalysisReport(stockCode: string, analysis: {
+    stockName: string;
+    exchangeCode: string;
+    dcfValuation?: { intrinsicValue: number; currentPrice: number; marginOfSafety: number; wacc: number; terminalGrowthRate: number };
+    riskProfile?: { riskGrade: string; volatility30d: number; maxDrawdown90d: number };
+    technicalDetail?: { trendDirection: string; support: number[]; resistance: number[]; adx: number; macd: { histogram: number }; };
+    dividendAnalysis?: { currentYield: number; consecutiveDividendYears: number; payoutRatio: number };
+    consensusData?: { targetPrice: number; rating: string; earningsSurprise: number[] };
+  }): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
+      const dcf = analysis.dcfValuation;
+      const risk = analysis.riskProfile;
+      const technical = analysis.technicalDetail;
+      const dividend = analysis.dividendAnalysis;
+      const consensus = analysis.consensusData;
+      const riskEmoji = risk?.riskGrade === 'LOW'
+        ? '🟢'
+        : risk?.riskGrade === 'MEDIUM'
+          ? '🟡'
+          : risk?.riskGrade === 'HIGH'
+            ? '🟠'
+            : '🔴';
+
+      const text = [
+        `📊 ${analysis.stockName} 딥 분석 리포트 — ${today}`,
+        '',
+        '■ 가치평가 (DCF)',
+        dcf
+          ? `내재가치: ${dcf.intrinsicValue.toFixed(0)} | 현재가: ${dcf.currentPrice.toFixed(0)} | 안전마진: ${dcf.marginOfSafety.toFixed(1)}%\nWACC: ${dcf.wacc.toFixed(1)}% | 영구성장률: ${dcf.terminalGrowthRate.toFixed(1)}%`
+          : '데이터 없음',
+        '',
+        `■ 리스크 등급: ${riskEmoji} ${risk?.riskGrade ?? 'N/A'}`,
+        risk
+          ? `30일 변동성: ${risk.volatility30d.toFixed(1)}% | 90일 MDD: ${risk.maxDrawdown90d.toFixed(1)}%`
+          : '데이터 없음',
+        '',
+        '■ 기술적 분석',
+        technical
+          ? `추세: ${technical.trendDirection} | 지지: ${(technical.support[0] ?? 0).toFixed(0)} | 저항: ${(technical.resistance[0] ?? 0).toFixed(0)}\nMACD: ${technical.macd.histogram >= 0 ? '매수 시그널' : '약세'} | ADX: ${technical.adx.toFixed(1)}`
+          : '데이터 없음',
+        '',
+        '■ 배당',
+        dividend
+          ? `배당수익률: ${dividend.currentYield.toFixed(1)}% | 연속 배당: ${dividend.consecutiveDividendYears}년 | 배당성향: ${dividend.payoutRatio.toFixed(1)}%`
+          : '데이터 없음',
+        '',
+        '■ 컨센서스',
+        consensus
+          ? `목표가: ${consensus.targetPrice.toFixed(0)} | 투자의견: ${consensus.rating}\n최근 실적: 서프라이즈 ${(consensus.earningsSurprise[0] ?? 0).toFixed(1)}%`
+          : '데이터 없음',
+      ].join('\n');
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        text: `딥 분석 리포트 | ${stockCode}`,
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text },
+          },
+        ],
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send deep analysis report: ${e.message}`);
+      this.handleSendError(e);
+    }
+  }
+
   /** 손절 승인 요청 메시지 전송 (버튼 포함) — 메시지 ts 반환 */
   async sendStopLossApproval(req: StopLossApprovalRequest): Promise<{ ts: string; channel: string } | null> {
     if (!await this.ensureConnected()) return null;
 
     try {
-      const exchange = req.exchangeCode || 'KRX';
+      const exchange = req.exchangeCode;
       const lossPercent = (req.lossRate * 100).toFixed(1);
       const blocks: KnownBlock[] = [
         {
@@ -386,7 +472,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       title = '매도 체결';
     }
 
-    const exchange = signal.exchangeCode || 'KRX';
+    const exchange = signal.exchangeCode;
     const header = `${emoji} ${title} | ${exchange}:${signal.stockCode}`;
 
     const blocks: KnownBlock[] = [
@@ -554,7 +640,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   }
 
   formatFilterLog(ctx: FilterLogContext): KnownBlock[] {
-    const exchange = ctx.exchangeCode || 'KRX';
+    const exchange = ctx.exchangeCode;
     const detailLines = Object.entries(ctx.details)
       .map(([k, v]) => `*${k}:* ${typeof v === 'object' ? JSON.stringify(v) : v}`)
       .join('\n');
@@ -597,7 +683,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     ];
 
     for (const p of positions) {
-      const exchange = p.exchangeCode || 'KRX';
+      const exchange = p.exchangeCode;
       const evalAmount = p.quantity * p.currentPrice;
       blocks.push({
         type: 'section',
@@ -619,7 +705,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     position: PositionInfo,
     watchStock?: { quota?: number; cycle: number; maxCycles: number; stopLossRate: number },
   ): KnownBlock[] {
-    const exchange = position.exchangeCode || 'KRX';
+    const exchange = position.exchangeCode;
     const evalAmount = position.quantity * position.currentPrice;
     const T =
       watchStock?.quota && watchStock.quota > 0
