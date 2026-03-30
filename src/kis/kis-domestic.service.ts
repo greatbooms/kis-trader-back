@@ -43,8 +43,13 @@ export class KisDomesticService {
 
     try {
       const res = await this.kisBase.get(path, trId, params);
-      const output = (res.output as any[]) || (res.output1 as any[]) || (res.output2 as any[]);
-      return Array.isArray(output) ? output : output ? [output] : undefined;
+      if (Array.isArray(res.output)) return res.output as any[];
+      if (Array.isArray(res.output2)) return res.output2 as any[];
+      if (Array.isArray(res.output1)) return res.output1 as any[];
+      if (res.output) return [res.output];
+      if (res.output2) return [res.output2];
+      if (res.output1) return [res.output1];
+      return undefined;
     } catch (e) {
       this.logger.warn(`${apiName} fetch failed: ${e.message}`);
       return undefined;
@@ -71,6 +76,7 @@ export class KisDomesticService {
       highPrice: parseFloat(o.stck_hgpr) || 0,
       lowPrice: parseFloat(o.stck_lwpr) || 0,
       volume: parseInt(o.acml_vol, 10) || 0,
+      changeRate: o.prdy_ctrt ? parseFloat(o.prdy_ctrt) || 0 : undefined,
       prevDayVolumeRate: o.prdy_vrss_vol_rate ? parseFloat(o.prdy_vrss_vol_rate) : undefined,
       per: o.per ? parseFloat(o.per) || undefined : undefined,
       pbr: o.pbr ? parseFloat(o.pbr) || undefined : undefined,
@@ -541,6 +547,8 @@ export class KisDomesticService {
 
   /** 국내 종목투자의견 조회 (실전만) */
   async getInvestOpinion(stockCode: string): Promise<any[] | undefined> {
+    const today = this.kstDateOffset(0);
+    const fromDate = this.kstDateOffset(-730);
     return this.getProdOnlyOutput(
       'Invest opinion',
       '/uapi/domestic-stock/v1/quotations/invest-opinion',
@@ -549,24 +557,31 @@ export class KisDomesticService {
         FID_COND_MRKT_DIV_CODE: 'J',
         FID_COND_SCR_DIV_CODE: '16633',
         FID_INPUT_ISCD: stockCode,
-        FID_INPUT_DATE_1: '',
-        FID_INPUT_DATE_2: '',
+        FID_INPUT_DATE_1: fromDate,
+        FID_INPUT_DATE_2: today,
       },
     );
   }
 
   /** 국내 종목추정실적 조회 (실전만) */
-  async getEstimatePerform(stockCode: string): Promise<any[] | undefined> {
-    return this.getProdOnlyOutput(
-      'Estimate perform',
-      '/uapi/domestic-stock/v1/quotations/estimate-perform',
-      'HHKST668300C0',
-      {
-        FID_COND_MRKT_DIV_CODE: 'J',
-        FID_INPUT_ISCD: stockCode,
-        SHT_CD: stockCode,
-      },
-    );
+  async getEstimatePerform(stockCode: string): Promise<any | undefined> {
+    if (this.isPaper) {
+      this.logger.debug('Estimate perform is unavailable in paper mode');
+      return undefined;
+    }
+
+    try {
+      return await this.kisBase.get(
+        '/uapi/domestic-stock/v1/quotations/estimate-perform',
+        'HHKST668300C0',
+        {
+          SHT_CD: stockCode,
+        },
+      );
+    } catch (e) {
+      this.logger.warn(`Estimate perform fetch failed: ${e.message}`);
+      return undefined;
+    }
   }
 
   /** 국내 배당률 상위 조회 (실전만) */
@@ -585,6 +600,8 @@ export class KisDomesticService {
 
   /** 국내 배당일정 조회 (실전만) */
   async getDividendSchedule(stockCode: string): Promise<any[] | undefined> {
+    const today = this.kstDateOffset(0);
+    const fromDate = this.kstDateOffset(-3650);
     return this.getProdOnlyOutput(
       'Dividend schedule',
       '/uapi/domestic-stock/v1/ksdinfo/dividend',
@@ -594,9 +611,10 @@ export class KisDomesticService {
         FID_INPUT_ISCD: stockCode,
         CTS: '',
         GB1: '0',
-        F_DT: '',
-        T_DT: '',
+        F_DT: fromDate,
+        T_DT: today,
         SHT_CD: stockCode,
+        HIGH_GB: '',
       },
     );
   }
@@ -649,8 +667,8 @@ export class KisDomesticService {
         FID_INPUT_ISCD: stockCode,
         FID_INPUT_DATE_1: past,
         FID_INPUT_DATE_2: today,
-        FID_ORG_ADJ_PRC: '0',
-        FID_ETC_CLS_CODE: '',
+        FID_ORG_ADJ_PRC: '',
+        FID_ETC_CLS_CODE: '1',
       },
     );
   }
@@ -670,7 +688,7 @@ export class KisDomesticService {
   }
 
   /** 국내 기관/외국인 매매 종목 가집계 */
-  async getForeignInstitutionTotal(marketDiv = 'J'): Promise<any[]> {
+  async getForeignInstitutionTotal(marketDiv = 'V'): Promise<any[]> {
     const res = await this.kisBase.get(
       '/uapi/domestic-stock/v1/quotations/foreign-institution-total',
       'FHPTJ04400000',
@@ -680,10 +698,16 @@ export class KisDomesticService {
         FID_INPUT_ISCD: '0000',
         FID_DIV_CLS_CODE: '0',
         FID_RANK_SORT_CLS_CODE: '0',
-        FID_ETC_CLS_CODE: '',
+        FID_ETC_CLS_CODE: '0',
       },
     );
     return (res.output as any[]) || [];
+  }
+
+  private kstDateOffset(days: number): string {
+    const date = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10).replace(/-/g, '');
   }
 
   /** 국내 잔고 조회 */

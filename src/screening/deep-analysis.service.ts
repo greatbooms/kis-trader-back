@@ -6,13 +6,19 @@ import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { DeepAnalysisResult, DCFValuation, RiskProfile, TechnicalDetail, DividendAnalysis, ConsensusData } from './types';
 import { pickNumeric, pickString } from './utils/api-data.util';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
+import { summarizeDividendSchedule } from './utils/dividend.util';
 
 @Injectable()
 export class DeepAnalysisService {
   private readonly logger = new Logger(DeepAnalysisService.name);
   private static readonly MARKET_PREMIUM = 5.5;
   private static readonly TERMINAL_GROWTH = 2.0;
+  private static readonly KOREAN_FINANCIAL_STATEMENT_UNIT = 100_000_000;
+  private static readonly MARKET_DATA_CACHE_MS = 10 * 60 * 1000;
+  private benchmarkPriceCache = new Map<string, { data: DailyPrice[]; expiresAt: number }>();
+  private riskFreeRateCache?: { value: number; expiresAt: number };
 
   constructor(
     private kisDomestic: KisDomesticService,
@@ -60,15 +66,20 @@ export class DeepAnalysisService {
     const otherMajorRatios = this.getSettledValue<any[]>(domesticFinanceGroup[3]);
     const dividendSchedule = this.getSettledValue<any[]>(domesticFinanceGroup[4]);
     const investOpinion = this.getSettledValue<any[]>(domesticFinanceGroup[5]);
-    const estimatePerform = this.getSettledValue<any[]>(domesticFinanceGroup[6]);
+    const estimatePerform = this.getSettledValue<any>(domesticFinanceGroup[6]);
     const shortSale = this.getSettledValue<any[]>(domesticFinanceGroup[7]);
     const creditBalance = this.getSettledValue<any[]>(domesticFinanceGroup[8]);
     const balanceSheet = this.getSettledValue<any[]>(domesticFinanceGroup[9]);
 
     const beta = await this.calculateBeta(exchangeCode, dailyPrices);
-    const dcfValuation = incomeStatement && growthRatio && priceDetail
-      ? await this.calculateSimpleDCF(incomeStatement, growthRatio, priceDetail, beta)
-      : undefined;
+    const dcfValuation = await this.calculateDcfValuation(
+      exchangeCode,
+      dailyPrices,
+      priceDetail,
+      incomeStatement,
+      growthRatio,
+      beta,
+    );
     const riskProfile = dailyPrices.length > 0
       ? this.assessRisk(stabilityRatio, shortSale, creditBalance, balanceSheet, dailyPrices, beta)
       : undefined;
@@ -76,7 +87,7 @@ export class DeepAnalysisService {
       ? this.analyzeTechnical(dailyPrices, priceDetail)
       : undefined;
     const dividendAnalysis = market === 'DOMESTIC' && otherMajorRatios
-      ? this.analyzeDividend(dividendSchedule, otherMajorRatios)
+      ? this.analyzeDividend(dividendSchedule, otherMajorRatios, priceDetail?.currentPrice, priceDetail?.eps)
       : undefined;
     const consensusData = market === 'DOMESTIC'
       ? this.getConsensusData(investOpinion, estimatePerform)
@@ -97,6 +108,20 @@ export class DeepAnalysisService {
 
     analysis.reportSummary = this.generateReportSummary(analysis);
     return analysis;
+  }
+
+  async calculateDcfValuation(
+    exchangeCode: string,
+    dailyPrices: DailyPrice[],
+    priceDetail?: StockPriceResult,
+    incomeStatement?: any[],
+    growthRatio?: any[],
+    beta?: number,
+  ): Promise<DCFValuation | undefined> {
+    if (!priceDetail || !incomeStatement?.length || !growthRatio?.length) return undefined;
+
+    const resolvedBeta = beta ?? await this.calculateBeta(exchangeCode, dailyPrices);
+    return this.calculateSimpleDCF(incomeStatement, growthRatio, priceDetail, resolvedBeta);
   }
 
   private async calculateSimpleDCF(
@@ -154,9 +179,10 @@ export class DeepAnalysisService {
     const terminalValue = freeCashFlows[freeCashFlows.length - 1] * (1 + terminalRate)
       / Math.max(discountRate - terminalRate, 0.01);
     const enterpriseValue = discounted + terminalValue / Math.pow(1 + discountRate, 5);
+    const enterpriseValueInKrw = enterpriseValue * DeepAnalysisService.KOREAN_FINANCIAL_STATEMENT_UNIT;
     const intrinsicValue = priceDetail.listedShares && priceDetail.listedShares > 0
-      ? enterpriseValue / priceDetail.listedShares
-      : enterpriseValue;
+      ? enterpriseValueInKrw / priceDetail.listedShares
+      : enterpriseValueInKrw;
     const currentPrice = priceDetail.currentPrice;
     const marginOfSafety = intrinsicValue > 0
       ? ((intrinsicValue - currentPrice) / intrinsicValue) * 100
@@ -312,71 +338,59 @@ export class DeepAnalysisService {
   private analyzeDividend(
     dividendSchedule: any[] | undefined,
     otherRatios: any[] | undefined,
+    currentPrice?: number,
+    eps?: number,
   ): DividendAnalysis | undefined {
     const latestRatio = otherRatios?.[0];
     if (!latestRatio && !dividendSchedule?.length) return undefined;
 
-    const currentYield = this.pickNumeric(latestRatio, [
+    const scheduleSummary = summarizeDividendSchedule(dividendSchedule);
+    const baseYield = this.pickNumeric(latestRatio, [
       'divi_rate',
       'dividend_yield',
       '배당수익률',
-    ]) ?? 0;
-    const payoutRatio = this.pickNumeric(latestRatio, [
+    ]);
+    const currentYield = (baseYield && baseYield > 0)
+      ? baseYield
+      : scheduleSummary.latestAnnualDividendAmount && currentPrice && currentPrice > 0
+        ? (scheduleSummary.latestAnnualDividendAmount / currentPrice) * 100
+        : 0;
+    const basePayoutRatio = this.pickNumeric(latestRatio, [
       'payout_rate',
       'dvdn_payn_rt',
       '배당성향',
-    ]) ?? 0;
-
-    const years = new Set(
-      (dividendSchedule ?? [])
-        .map((item) => this.pickString(item, ['cash_div_dt', 'ex_dividend_date', '배당기준일']))
-        .filter(Boolean)
-        .map((value) => String(value).slice(0, 4)),
-    );
-
-    const amounts = (dividendSchedule ?? [])
-      .map((item) => this.pickNumeric(item, ['cash_divi_rate', 'dividend_amount', '주당배당금']))
-      .filter((value): value is number => value !== undefined)
-      .slice(0, 5)
-      .reverse();
-
-    const dividendGrowthRate5y = amounts.length >= 2 && amounts[0] > 0
-      ? ((amounts[amounts.length - 1] / amounts[0]) ** (1 / Math.max(amounts.length - 1, 1)) - 1) * 100
-      : undefined;
-
-    const latestSchedule = dividendSchedule?.[0];
+    ]);
+    const payoutRatio = (basePayoutRatio && basePayoutRatio > 0)
+      ? basePayoutRatio
+      : scheduleSummary.latestAnnualDividendAmount && eps && eps > 0
+        ? (scheduleSummary.latestAnnualDividendAmount / eps) * 100
+        : 0;
     return {
       currentYield,
       payoutRatio,
-      consecutiveDividendYears: years.size,
-      dividendGrowthRate5y,
-      exDividendDate: this.pickString(latestSchedule, ['cash_div_dt', 'ex_dividend_date']),
-      nextPaymentDate: this.pickString(latestSchedule, ['pay_dt', 'payment_date']),
+      consecutiveDividendYears: scheduleSummary.consecutiveDividendYears ?? 0,
+      dividendGrowthRate5y: scheduleSummary.dividendGrowthRate5y,
+      exDividendDate: scheduleSummary.exDividendDate,
+      nextPaymentDate: scheduleSummary.nextPaymentDate,
     };
   }
 
   private getConsensusData(
     investOpinion: any[] | undefined,
-    estimatePerform: any[] | undefined,
+    estimatePerform: any,
   ): ConsensusData | undefined {
-    const latestOpinion = investOpinion?.[0];
-    const estimates = estimatePerform ?? [];
-    if (!latestOpinion && estimates.length === 0) return undefined;
-
-    const targetPrice = this.pickNumeric(latestOpinion, ['goal_pric', 'target_price', '목표가']) ?? 0;
-    const analystCount = this.pickNumeric(latestOpinion, ['analyst_cnt', 'nr_analyst', '애널리스트수']) ?? 0;
-    const rating = this.pickString(latestOpinion, ['opinion', 'rating', '투자의견']) ?? 'N/A';
-    const earningsSurprise = estimates
-      .slice(0, 4)
-      .map((item) => this.pickNumeric(item, ['surprise_rt', 'earnings_surprise', '서프라이즈율']) ?? 0);
-    const estimatedEps = this.pickNumeric(estimates[0], ['estm_eps', 'estimated_eps', '추정eps']) ?? 0;
+    const opinionSummary = summarizeInvestOpinion(investOpinion);
+    const estimateSummary = summarizeEstimatePerform(estimatePerform);
+    if (!opinionSummary.targetPrice && !opinionSummary.rating && !estimateSummary.rating && estimateSummary.estimatedEps === undefined) {
+      return undefined;
+    }
 
     return {
-      targetPrice,
-      analystCount,
-      rating,
-      earningsSurprise,
-      estimatedEps,
+      targetPrice: opinionSummary.targetPrice ?? 0,
+      analystCount: opinionSummary.analystCount ?? 0,
+      rating: opinionSummary.rating ?? estimateSummary.rating ?? 'N/A',
+      earningsSurprise: estimateSummary.earningsSurprise !== undefined ? [estimateSummary.earningsSurprise] : [0],
+      estimatedEps: estimateSummary.estimatedEps ?? 0,
     };
   }
 
@@ -418,11 +432,7 @@ export class DeepAnalysisService {
     if (!referenceIndex) return undefined;
 
     try {
-      const benchmarkPrices = await this.marketAnalysis.fetchIndexDailyPrices(
-        referenceIndex.type,
-        referenceIndex.code,
-        120,
-      );
+      const benchmarkPrices = await this.getBenchmarkPrices(exchangeCode);
       if (benchmarkPrices.length < 60) return undefined;
 
       const stockReturns = this.buildReturns(dailyPrices);
@@ -441,6 +451,27 @@ export class DeepAnalysisService {
       this.logger.warn(`Beta calculation failed for ${exchangeCode}: ${e.message}`);
       return undefined;
     }
+  }
+
+  private async getBenchmarkPrices(exchangeCode: string): Promise<DailyPrice[]> {
+    const cached = this.benchmarkPriceCache.get(exchangeCode);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const referenceIndex = EXCHANGE_REFERENCE_INDEX[exchangeCode];
+    if (!referenceIndex) return [];
+
+    const data = await this.marketAnalysis.fetchIndexDailyPrices(
+      referenceIndex.type,
+      referenceIndex.code,
+      120,
+    );
+    this.benchmarkPriceCache.set(exchangeCode, {
+      data,
+      expiresAt: Date.now() + DeepAnalysisService.MARKET_DATA_CACHE_MS,
+    });
+    return data;
   }
 
   private buildSensitivityMatrix(
@@ -551,9 +582,18 @@ export class DeepAnalysisService {
   }
 
   private async getRiskFreeRate(): Promise<number> {
+    if (this.riskFreeRateCache && this.riskFreeRateCache.expiresAt > Date.now()) {
+      return this.riskFreeRateCache.value;
+    }
+
     try {
       const rates = await this.kisDomestic.getInterestRates();
-      return rates[0]?.rate ?? 3.0;
+      const value = rates[0]?.rate ?? 3.0;
+      this.riskFreeRateCache = {
+        value,
+        expiresAt: Date.now() + DeepAnalysisService.MARKET_DATA_CACHE_MS,
+      };
+      return value;
     } catch {
       return 3.0;
     }

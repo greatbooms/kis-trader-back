@@ -16,6 +16,33 @@ const DEFAULT_PARAMS = {
   pyramidingRatio: 0.5,
 };
 
+function resolveAtrRate(ctx: StockStrategyContext): number | undefined {
+  if (ctx.stockIndicators.atrPercent !== undefined) return ctx.stockIndicators.atrPercent / 100;
+  if (ctx.stockIndicators.atr14 !== undefined && ctx.price.currentPrice > 0) {
+    return ctx.stockIndicators.atr14 / ctx.price.currentPrice;
+  }
+  return undefined;
+}
+
+function hasFlowConfirmation(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const hasFlowData =
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  if (!hasFlowData) return true;
+  return Boolean(
+    stockIndicators.foreignNetBuy ||
+      stockIndicators.institutionNetBuy ||
+      stockIndicators.programTradeDirection === 'BUY',
+  );
+}
+
+function hasNegativeConsensus(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const rating = stockIndicators.consensusRating ?? '';
+  const negativeRating = /(SELL|REDUCE|비중축소|매도)/i.test(rating);
+  return negativeRating || (stockIndicators.targetPriceUpside !== undefined && stockIndicators.targetPriceUpside < -10);
+}
+
 @Injectable()
 export class TrendFollowingStrategy implements PerStockTradingStrategy {
   readonly name = 'trend-following';
@@ -39,7 +66,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     '【매도 조건】',
     '- MA20 < MA60 (데드크로스, 추세 전환)',
     '- ADX < 20 (추세 소멸)',
-    '- -7% 하락 시 전량 매도 (손절)',
+    '- -7% 또는 ATR 기반 동적 손절 중 더 넓은 기준 적용',
     '- 리스크 전량청산 시그널 시 즉시 매도',
     '',
     '【특징】',
@@ -49,6 +76,8 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     '',
     '【안전장치】',
     '- 투자유의/시장경고 종목은 진입 차단',
+    '- 수급 데이터가 있으면 외인/기관/프로그램 매수 우위 확인 후 진입',
+    '- 목표가 괴리가 크게 음수이거나 부정적 컨센서스면 진입 차단',
     '- 250일 최고가 근접(-5% 이내) 시 피라미딩 비율 30% 확대 (추세 강도 보강)',
     '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
@@ -81,6 +110,11 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100
       : (p: number) => Math.round(p);
+    const atrRate = resolveAtrRate(ctx);
+    const effectiveStopLossRate = Math.max(
+      params.stopLossRate,
+      atrRate ? Math.min(0.12, atrRate * 1.8) : 0,
+    );
 
     // 리스크 체크: 전략별 MDD 기준 전량 청산
     const mddCheck = riskState ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate) : undefined;
@@ -115,7 +149,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       const profitRate = (curPrice - avgPrice) / avgPrice;
       const holdQty = position!.quantity;
 
-      if (profitRate <= -params.stopLossRate) {
+      if (profitRate <= -effectiveStopLossRate) {
         this.logger.log(
           `[${watchStock.stockCode}] STOP LOSS: ${(profitRate * 100).toFixed(1)}%`,
         );
@@ -126,7 +160,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
           side: 'SELL',
           quantity: holdQty,
           price: roundPrice(curPrice),
-          reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
+          reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(effectiveStopLossRate * 100).toFixed(1)}%`,
         });
         return signals;
       }
@@ -205,6 +239,8 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       // 투자유의/시장경고 종목 진입 차단
       if (stockIndicators.investCautionYn) return signals;
       if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (!hasFlowConfirmation(stockIndicators)) return signals;
+      if (hasNegativeConsensus(stockIndicators)) return signals;
 
       // 진입: 골든크로스 + 강한 추세 + 현재가 > MA20
       if (!goldenCross || !strongTrend || curPrice <= ma20) {
@@ -216,8 +252,11 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       const buyQty = Math.floor(buyAmount / curPrice);
 
       if (buyQty > 0) {
+        const flowNote = stockIndicators.foreignNetBuy || stockIndicators.institutionNetBuy || stockIndicators.programTradeDirection === 'BUY'
+          ? ', 수급확인'
+          : '';
         this.logger.log(
-          `[${watchStock.stockCode}] TREND ENTRY: MA20=${ma20.toFixed(0)} > MA60=${ma60.toFixed(0)}, ADX=${adx14.toFixed(1)}, price=${curPrice}`,
+          `[${watchStock.stockCode}] TREND ENTRY: MA20=${ma20.toFixed(0)} > MA60=${ma60.toFixed(0)}, ADX=${adx14.toFixed(1)}, price=${curPrice}${flowNote}`,
         );
         signals.push({
           market,
@@ -226,7 +265,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `추세진입: MA20(${ma20.toFixed(0)})>MA60(${ma60.toFixed(0)}), ADX=${adx14.toFixed(1)}`,
+          reason: `추세진입: MA20(${ma20.toFixed(0)})>MA60(${ma60.toFixed(0)}), ADX=${adx14.toFixed(1)}${flowNote}`,
         });
       }
     }

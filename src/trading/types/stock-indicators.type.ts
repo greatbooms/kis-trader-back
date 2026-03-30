@@ -2,6 +2,7 @@ export interface StockIndicators {
   ma200?: number;
   rsi14?: number;
   currentAboveMA200: boolean;
+  volatility30d?: number;
   // 하이브리드 전략용 확장 지표
   ma20?: number;
   ma60?: number;
@@ -14,6 +15,7 @@ export interface StockIndicators {
   macdPrevHistogram?: number;
   adx14?: number;
   atr14?: number;
+  atrPercent?: number;
   avgVolume20?: number;
   volumeRatio?: number;
   prevHigh?: number;
@@ -23,6 +25,13 @@ export interface StockIndicators {
   // 현재가 API에서 직접 제공되는 추가 지표
   foreignHoldRate?: number; // 외국인 소진율 (%)
   foreignNetBuyQty?: number; // 외국인 순매수 수량
+  foreignNetBuy?: boolean; // 외국인 순매수 여부
+  institutionNetBuy?: boolean; // 기관 순매수 여부
+  fundNetBuy?: boolean; // 연기금/펀드 순매수 여부
+  trustNetBuy?: boolean; // 투자신탁 순매수 여부
+  foreignNetBuyAmount?: number; // 외국인 순매수 거래대금
+  foreignNetBuyStreak?: number; // 외국인 연속 순매수 일수
+  programTradeDirection?: 'BUY' | 'SELL'; // 프로그램 매매 방향
   w52High?: number; // 52주 최고가
   w52Low?: number; // 52주 최저가
   investCautionYn?: boolean; // 투자유의여부
@@ -41,4 +50,15 @@ export interface StockIndicators {
   marketCap?: number; // 시가총액
   loanBalanceRate?: number; // 융자잔고 비율 (%)
   shortSellable?: boolean; // 공매도 가능 여부
+  dividendYield?: number; // 배당수익률 (%)
+  payoutRatio?: number; // 배당성향 (%)
+  consecutiveDividendYears?: number; // 연속 배당 연수
+  dividendGrowthRate?: number; // 5년 배당 성장률 (%)
+  targetPrice?: number; // 컨센서스 목표가
+  targetPriceUpside?: number; // 현재가 대비 목표가 괴리 (%)
+  consensusRating?: string; // 컨센서스 의견
+  earningsSurprise?: number; // 최근 실적 서프라이즈 (%)
+  estimatedEps?: number; // 추정 EPS
+  estimatedPer?: number; // 추정 PER
+  analystCount?: number; // 애널리스트 수
 }

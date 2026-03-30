@@ -90,6 +90,8 @@ export class MarketAnalysisService {
       // 20일 평균 거래량 및 거래량 비율
       const avgVolume20 = prices.length >= 20 ? this.calculateAvgVolume(volumes, 20) : undefined;
       const volumeRatio = avgVolume20 && avgVolume20 > 0 ? volumes[0] / avgVolume20 : undefined;
+      const volatility30d = prices.length >= 31 ? this.calculateVolatility(prices.slice(0, 31)) : undefined;
+      const atrPercent = atr14 && currentPrice > 0 ? (atr14 / currentPrice) * 100 : undefined;
 
       // 전일 OHLC / 당일 시가
       const prevHigh = prices.length >= 2 ? prices[1].high : undefined;
@@ -101,6 +103,7 @@ export class MarketAnalysisService {
         ma200,
         rsi14,
         currentAboveMA200: ma200 ? currentPrice > ma200 : true,
+        volatility30d,
         ma20,
         ma60,
         bollingerUpper,
@@ -112,6 +115,7 @@ export class MarketAnalysisService {
         macdPrevHistogram,
         adx14,
         atr14,
+        atrPercent,
         avgVolume20,
         volumeRatio,
         prevHigh,
@@ -355,6 +359,20 @@ export class MarketAnalysisService {
   /** ADX 계산 (Wilder 방식, period=14) - prices[0]이 최신 */
   calculateADX(highs: number[], lows: number[], closes: number[], period: number): number {
     return this.calculateADXWithATR(highs, lows, closes, period).adx;
+  }
+
+  /** 연율화 변동성 계산 (%) */
+  calculateVolatility(prices: DailyPrice[]): number {
+    const returns: number[] = [];
+    for (let index = 0; index < prices.length - 1; index++) {
+      if (prices[index].close > 0 && prices[index + 1].close > 0) {
+        returns.push(prices[index].close / prices[index + 1].close - 1);
+      }
+    }
+    if (returns.length === 0) return 0;
+    const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+    const variance = returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / returns.length;
+    return Math.sqrt(variance) * Math.sqrt(252) * 100;
   }
 
   /** ADX + ATR 동시 계산 (TR 재사용) */

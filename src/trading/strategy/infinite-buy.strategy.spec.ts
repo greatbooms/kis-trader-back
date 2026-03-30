@@ -128,12 +128,13 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('stock indicator filters', () => {
-    it('should block new entry when price below MA200', async () => {
+    it('should ignore stock MA200 and still allow new entry when index is healthy', async () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: false, ma200: 75000 },
       });
       const signals = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(0);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].side).toBe('BUY');
     });
 
     it('should allow existing position when price below MA200', async () => {
@@ -298,8 +299,8 @@ describe('InfiniteBuyStrategy', () => {
       const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
 
       expect(sell2).toBeDefined();
-      // T < 10 → targetRate = 1.05
-      expect(sell2!.price).toBe(Math.round(70000 * 1.05)); // 73500
+      // T=5 → sell2Rate = max(15 - 5/3, 8)% = 13.3%
+      expect(sell2!.price).toBe(Math.round(70000 * (1 + (15 - 5 / 3) / 100)));
     });
   });
 
@@ -339,8 +340,8 @@ describe('InfiniteBuyStrategy', () => {
       const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
 
       expect(sell2).toBeDefined();
-      // T >= 20 → targetRate = 1.10
-      expect(sell2!.price).toBe(Math.round(70000 * 1.10)); // 77000
+      // T=25 → sell2Rate = max(15 - 25/3, 8)% = 8.0%
+      expect(sell2!.price).toBe(Math.round(70000 * 1.08));
     });
   });
 
@@ -386,6 +387,70 @@ describe('InfiniteBuyStrategy', () => {
         // So no buy signal
         expect(buySignal.quantity).toBeLessThanOrEqual(Math.floor(50000 / 70000) || 1);
       }
+    });
+
+    it('should block new entry on negative consensus', async () => {
+      const ctx = createContext({
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 50,
+          consensusRating: 'SELL',
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+    });
+
+    it('should increase initial buy amount for stable dividend stocks', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 35000,
+          openPrice: 34800,
+          highPrice: 35200,
+          lowPrice: 34500,
+          volume: 1000000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 50,
+          dividendYield: 2.5,
+          consecutiveDividendYears: 7,
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].quantity).toBe(3);
+      expect(signals[0].reason).toContain('배당안정성+');
+    });
+
+    it('should reduce buy amount when volatility and sell flow are both adverse', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 20000,
+          openPrice: 19800,
+          highPrice: 20200,
+          lowPrice: 19700,
+          volume: 1000000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 50,
+          volatility30d: 48,
+          foreignNetBuy: false,
+          institutionNetBuy: false,
+          programTradeDirection: 'SELL',
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].quantity).toBe(2);
     });
 
   });

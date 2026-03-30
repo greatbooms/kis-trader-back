@@ -16,6 +16,17 @@ const DEFAULT_PARAMS = {
   takeProfitRate: 0.03,
 };
 
+function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const hasFlowData =
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  if (!hasFlowData) return false;
+  return stockIndicators.foreignNetBuy === false
+    && stockIndicators.institutionNetBuy === false
+    && stockIndicators.programTradeDirection === 'SELL';
+}
+
 @Injectable()
 export class ConservativeStrategy implements PerStockTradingStrategy {
   readonly name = 'conservative';
@@ -43,6 +54,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
     '【안전장치】',
     '- 투자유의/시장경고 종목은 진입 차단',
     '- 공매도 불가 + 융자잔고 3% 미만 종목은 하방 방어력이 높아 투자 비중 40%로 완화',
+    '- 변동성 과다 또는 외인/기관/프로그램 동반 매도 종목은 진입 차단',
     '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
@@ -152,6 +164,9 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
       // 거래량 >= 2배
       if (volumeRatio < params.volumeThreshold) return signals;
 
+      if ((stockIndicators.volatility30d ?? 0) >= 60) return signals;
+      if (hasStrongSellFlow(stockIndicators)) return signals;
+
       // 보수적 모드: 기본 자금의 30%만 사용
       const quota = watchStock.quota || 0;
       let availableRate = 1 - params.cashRate; // 0.3
@@ -163,13 +178,24 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
         availableRate = Math.min(availableRate + 0.1, 0.5);
       }
 
+      if ((stockIndicators.d250LowRate ?? Number.POSITIVE_INFINITY) <= 10 || (stockIndicators.yearLowRate ?? Number.POSITIVE_INFINITY) <= 5) {
+        availableRate = Math.min(availableRate + 0.1, 0.5);
+      }
+
+      if ((stockIndicators.volatility30d ?? 0) >= 35) {
+        availableRate *= 0.8;
+      }
+
       const buyAmount = Math.min(quota * availableRate, ctx.buyableAmount);
       const buyQty = Math.floor(buyAmount / curPrice);
 
       if (buyQty > 0) {
         const defensiveNote = isDefensive ? ', 하방방어력+' : '';
+        const reboundNote = (stockIndicators.d250LowRate ?? Number.POSITIVE_INFINITY) <= 10 || (stockIndicators.yearLowRate ?? Number.POSITIVE_INFINITY) <= 5
+          ? ', 바닥권근접'
+          : '';
         this.logger.log(
-          `[${watchStock.stockCode}] CONSERVATIVE BUY: price=${curPrice}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, rate=${(availableRate * 100).toFixed(0)}%${defensiveNote}`,
+          `[${watchStock.stockCode}] CONSERVATIVE BUY: price=${curPrice}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, rate=${(availableRate * 100).toFixed(0)}%${defensiveNote}${reboundNote}`,
         );
         signals.push({
           market,
@@ -178,7 +204,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `보수적매수: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, 자금 ${(availableRate * 100).toFixed(0)}%${defensiveNote}`,
+          reason: `보수적매수: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, 자금 ${(availableRate * 100).toFixed(0)}%${defensiveNote}${reboundNote}`,
         });
       }
     }

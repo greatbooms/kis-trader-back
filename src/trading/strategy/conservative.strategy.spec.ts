@@ -368,6 +368,67 @@ describe('ConservativeStrategy', () => {
       const signals = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
+
+    it('should block entry when volatility is too high', async () => {
+      const ctx = createContext({
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 20,
+          volumeRatio: 2.5,
+          volatility30d: 62,
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+    });
+
+    it('should block entry when foreign/institution/program are all selling', async () => {
+      const ctx = createContext({
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 20,
+          volumeRatio: 2.5,
+          foreignNetBuy: false,
+          institutionNetBuy: false,
+          programTradeDirection: 'SELL',
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+    });
+
+    it('should increase buy size when stock is near long-term lows', async () => {
+      const ctx = createContext({
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 20,
+          volumeRatio: 2.5,
+          d250LowRate: 9,
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].quantity).toBe(5);
+      expect(signals[0].reason).toContain('바닥권근접');
+    });
+
+    it('should reduce buy size when volatility is elevated but still tradable', async () => {
+      const ctx = createContext({
+        stockIndicators: {
+          currentAboveMA200: true,
+          rsi14: 20,
+          volumeRatio: 2.5,
+          volatility30d: 40,
+        },
+      });
+
+      const signals = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].quantity).toBe(3);
+    });
   });
 
   describe('custom params via strategyParams', () => {

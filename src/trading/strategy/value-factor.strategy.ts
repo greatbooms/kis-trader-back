@@ -63,6 +63,8 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '',
     '【안전장치】',
     '- 투자유의/시장경고 종목은 진입 차단',
+    '- 배당성향 120% 초과 종목은 진입 차단',
+    '- 큰 폭의 어닝 쇼크 또는 부정적 컨센서스면 진입 차단',
     '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
@@ -190,6 +192,11 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         return signals;
       }
 
+      if (fundamentals.dividendPayoutRate !== undefined && fundamentals.dividendPayoutRate > 120) {
+        this.logger.debug(`[${watchStock.stockCode}] Payout filter failed: ${fundamentals.dividendPayoutRate}% > 120%`);
+        return signals;
+      }
+
       // PER 체크 (국내/해외 공통)
       if (fundamentals.per === undefined || fundamentals.per <= 0 || fundamentals.per >= params.maxPer) {
         this.logger.debug(
@@ -241,6 +248,21 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         return signals;
       }
 
+      if (stockIndicators.earningsSurprise !== undefined && stockIndicators.earningsSurprise < -20) {
+        this.logger.debug(`[${watchStock.stockCode}] Earnings surprise filter failed: ${stockIndicators.earningsSurprise}%`);
+        return signals;
+      }
+
+      if (stockIndicators.targetPriceUpside !== undefined && stockIndicators.targetPriceUpside < -10) {
+        this.logger.debug(`[${watchStock.stockCode}] Target upside filter failed: ${stockIndicators.targetPriceUpside}%`);
+        return signals;
+      }
+
+      if (stockIndicators.consensusRating && /(SELL|REDUCE|비중축소|매도)/i.test(stockIndicators.consensusRating)) {
+        this.logger.debug(`[${watchStock.stockCode}] Consensus filter failed: ${stockIndicators.consensusRating}`);
+        return signals;
+      }
+
       // 모든 조건 충족 → 매수
       const quota = watchStock.quota || 0;
       const buyAmount = Math.min(quota, ctx.buyableAmount);
@@ -249,9 +271,15 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
       if (buyQty > 0) {
         const perInfo = `PER=${fundamentals.per.toFixed(1)}`;
         const pbrInfo = fundamentals.pbr !== undefined ? `, PBR=${fundamentals.pbr.toFixed(1)}` : '';
+        const dividendInfo = stockIndicators.dividendYield !== undefined
+          ? `, DivY=${stockIndicators.dividendYield.toFixed(1)}%`
+          : '';
+        const payoutInfo = fundamentals.dividendPayoutRate !== undefined
+          ? `, Payout=${fundamentals.dividendPayoutRate.toFixed(0)}%`
+          : '';
         const extraInfo = !isOverseas
-          ? `${pbrInfo}, ROE=${fundamentals.roe?.toFixed(0) ?? 'N/A'}%, EPS=${fundamentals.eps?.toFixed(0) ?? 'N/A'}`
-          : `${pbrInfo} (해외)`;
+          ? `${pbrInfo}, ROE=${fundamentals.roe?.toFixed(0) ?? 'N/A'}%, EPS=${fundamentals.eps?.toFixed(0) ?? 'N/A'}${dividendInfo}${payoutInfo}`
+          : `${pbrInfo}${dividendInfo} (해외)`;
 
         this.logger.log(
           `[${watchStock.stockCode}] VALUE ENTRY: ${perInfo}${extraInfo}, RSI=${rsi14?.toFixed(0) ?? 'N/A'}`,

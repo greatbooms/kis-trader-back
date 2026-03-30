@@ -129,7 +129,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     expect(signals.some((s) => s.side === 'BUY')).toBe(true);
   });
 
-  it('T=10: should use +7% target rate for Sell2', async () => {
+  it('T=10: should use dynamic Sell2 target formula', async () => {
     const perCycleQuota = 1000000 / 40;
     const ctx = createBaseContext({
       position: {
@@ -144,13 +144,13 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
 
     const signals = await strategy.evaluateStock(ctx);
     const sell2 = signals.find((s) => s.reason.includes('Sell2'));
-    // T=10 → target rate should be 7% (T<10 is 5%, T<20 is 7%)
+    // T=10 → max(15 - 10/3, 8)% = 11.7%
     if (sell2) {
-      expect(sell2.price).toBe(Math.round(68000 * 1.07));
+      expect(sell2.price).toBe(Math.round(68000 * (1 + (15 - 10 / 3) / 100)));
     }
   });
 
-  it('T=20: should use +10% target rate', async () => {
+  it('T=20: should use 8.3% Sell2 target rate', async () => {
     const perCycleQuota = 1000000 / 40;
     const ctx = createBaseContext({
       position: {
@@ -166,7 +166,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     const signals = await strategy.evaluateStock(ctx);
     const sell2 = signals.find((s) => s.reason.includes('Sell2'));
     if (sell2) {
-      expect(sell2.price).toBe(Math.round(66000 * 1.10));
+      expect(sell2.price).toBe(Math.round(66000 * (1 + (15 - 20 / 3) / 100)));
     }
   });
 

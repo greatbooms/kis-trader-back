@@ -12,10 +12,13 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
 import { HolidayItem, StockPriceResult } from '../kis/types/kis-api.types';
-import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy } from './types';
+import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy, StockIndicators } from './types';
 import { Market } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from '../screening/utils/consensus.util';
+import { summarizeDividendSchedule } from '../screening/utils/dividend.util';
+import { pickNumeric } from '../screening/utils/api-data.util';
 
 @Injectable()
 export class TradingScheduler implements OnModuleInit {
@@ -233,6 +236,10 @@ export class TradingScheduler implements OnModuleInit {
     }
 
     const today = new Date().toISOString().slice(0, 10);
+    const investorTradeCache = new Map<string, Promise<any[] | undefined>>();
+    const dividendScheduleCache = new Map<string, Promise<any[] | undefined>>();
+    const investOpinionCache = new Map<string, Promise<any[] | undefined>>();
+    const estimatePerformCache = new Map<string, Promise<any | undefined>>();
 
     for (const [strategyName, stocks] of byStrategy) {
       const strategy = this.strategyRegistry.getStrategy(strategyName);
@@ -331,6 +338,53 @@ export class TradingScheduler implements OnModuleInit {
           let fundamentals: StockFundamentals | undefined;
           if (strategyName === 'value-factor') {
             fundamentals = await this.fetchFundamentals(market, ws.exchangeCode, ws.stockCode, price);
+          }
+
+          if (market === 'DOMESTIC' && this.needsInvestorFlow(strategyName)) {
+            const investorTradeDaily = await this.getCachedValue(
+              investorTradeCache,
+              ws.stockCode,
+              () => this.kisDomestic.getInvestorTradeDaily(ws.stockCode),
+            );
+            this.applyInvestorTradeSignals(stockIndicators, investorTradeDaily);
+          }
+
+          if (market === 'DOMESTIC' && (this.needsDividendSignals(strategyName) || this.needsConsensusSignals(strategyName))) {
+            const [dividendSchedule, investOpinion, estimatePerform] = await Promise.all([
+              this.needsDividendSignals(strategyName)
+                ? this.getCachedValue(
+                    dividendScheduleCache,
+                    ws.stockCode,
+                    () => this.kisDomestic.getDividendSchedule(ws.stockCode),
+                  )
+                : Promise.resolve(undefined),
+              this.needsConsensusSignals(strategyName)
+                ? this.getCachedValue(
+                    investOpinionCache,
+                    ws.stockCode,
+                    () => this.kisDomestic.getInvestOpinion(ws.stockCode),
+                  )
+                : Promise.resolve(undefined),
+              this.needsConsensusSignals(strategyName)
+                ? this.getCachedValue(
+                    estimatePerformCache,
+                    ws.stockCode,
+                    () => this.kisDomestic.getEstimatePerform(ws.stockCode),
+                  )
+                : Promise.resolve(undefined),
+            ]);
+            if (this.needsDividendSignals(strategyName)) {
+              this.applyDividendSignals(
+                stockIndicators,
+                dividendSchedule,
+                price.currentPrice,
+                fundamentals?.dividendPayoutRate,
+                fundamentals?.eps,
+              );
+            }
+            if (this.needsConsensusSignals(strategyName)) {
+              this.applyConsensusSignals(stockIndicators, investOpinion, estimatePerform, price.currentPrice);
+            }
           }
 
           contexts.push({
@@ -573,6 +627,113 @@ export class TradingScheduler implements OnModuleInit {
   }
 
   // ========== 재무 데이터 조회 ==========
+
+  private needsInvestorFlow(strategyName: string): boolean {
+    return ['momentum-breakout', 'trend-following', 'conservative', 'infinite-buy'].includes(strategyName);
+  }
+
+  private needsDividendSignals(strategyName: string): boolean {
+    return ['infinite-buy', 'value-factor'].includes(strategyName);
+  }
+
+  private needsConsensusSignals(strategyName: string): boolean {
+    return ['trend-following', 'value-factor', 'infinite-buy'].includes(strategyName);
+  }
+
+  private async getCachedValue<T>(
+    cache: Map<string, Promise<T>>,
+    key: string,
+    loader: () => Promise<T>,
+  ): Promise<T> {
+    if (!cache.has(key)) {
+      cache.set(key, loader());
+    }
+    return cache.get(key)!;
+  }
+
+  private applyInvestorTradeSignals(stockIndicators: StockIndicators, rows: any[] | undefined): void {
+    const latestInvestor = rows?.[0];
+    const foreignNetQty = pickNumeric(latestInvestor, ['frgn_ntby_qty', 'foreign_net_buy_qty']);
+    const institutionNetQty = pickNumeric(latestInvestor, ['orgn_ntby_qty', 'institution_net_buy_qty']);
+    const trustNetQty = pickNumeric(latestInvestor, ['ivtr_ntby_qty', 'trust_net_buy_qty']);
+    const fundNetQty = pickNumeric(latestInvestor, ['fund_ntby_qty', 'fund_net_buy_qty']);
+
+    if (foreignNetQty !== undefined) stockIndicators.foreignNetBuy = foreignNetQty > 0;
+    if (institutionNetQty !== undefined) stockIndicators.institutionNetBuy = institutionNetQty > 0;
+    if (trustNetQty !== undefined) stockIndicators.trustNetBuy = trustNetQty > 0;
+    if (fundNetQty !== undefined) stockIndicators.fundNetBuy = fundNetQty > 0;
+
+    stockIndicators.foreignNetBuyAmount = pickNumeric(
+      latestInvestor,
+      ['frgn_ntby_tr_pbmn', 'foreign_net_buy_amount'],
+    );
+    stockIndicators.foreignNetBuyStreak = this.estimateNetBuyStreak(
+      rows,
+      ['frgn_ntby_qty', 'foreign_net_buy_qty'],
+    );
+    stockIndicators.programTradeDirection = this.estimateProgramTradeDirection(rows);
+  }
+
+  private applyDividendSignals(
+    stockIndicators: StockIndicators,
+    dividendSchedule: any[] | undefined,
+    currentPrice: number,
+    basePayoutRatio?: number,
+    eps?: number,
+  ): void {
+    const scheduleSummary = summarizeDividendSchedule(dividendSchedule);
+    stockIndicators.consecutiveDividendYears = scheduleSummary.consecutiveDividendYears;
+    stockIndicators.dividendGrowthRate = scheduleSummary.dividendGrowthRate5y;
+
+    if (scheduleSummary.latestAnnualDividendAmount && currentPrice > 0) {
+      stockIndicators.dividendYield = (scheduleSummary.latestAnnualDividendAmount / currentPrice) * 100;
+    }
+
+    const payoutRatio = (basePayoutRatio && basePayoutRatio > 0)
+      ? basePayoutRatio
+      : (scheduleSummary.latestAnnualDividendAmount && eps && eps > 0)
+          ? (scheduleSummary.latestAnnualDividendAmount / eps) * 100
+          : undefined;
+    stockIndicators.payoutRatio = payoutRatio;
+  }
+
+  private applyConsensusSignals(
+    stockIndicators: StockIndicators,
+    investOpinion: any[] | undefined,
+    estimatePerform: any,
+    currentPrice: number,
+  ): void {
+    const opinionSummary = summarizeInvestOpinion(investOpinion);
+    const estimateSummary = summarizeEstimatePerform(estimatePerform);
+
+    stockIndicators.targetPrice = opinionSummary.targetPrice;
+    stockIndicators.consensusRating = opinionSummary.rating ?? estimateSummary.rating;
+    stockIndicators.analystCount = opinionSummary.analystCount;
+    stockIndicators.earningsSurprise = estimateSummary.earningsSurprise;
+    stockIndicators.estimatedEps = estimateSummary.estimatedEps;
+    stockIndicators.estimatedPer = estimateSummary.estimatedPer;
+
+    if (opinionSummary.targetPrice && currentPrice > 0) {
+      stockIndicators.targetPriceUpside = ((opinionSummary.targetPrice - currentPrice) / currentPrice) * 100;
+    }
+  }
+
+  private estimateNetBuyStreak(rows: any[] | undefined, keys: string[]): number | undefined {
+    if (!rows?.length) return undefined;
+    let streak = 0;
+    for (const row of rows) {
+      const value = pickNumeric(row, keys) ?? 0;
+      if (value > 0) streak += 1;
+      else break;
+    }
+    return streak || undefined;
+  }
+
+  private estimateProgramTradeDirection(rows: any[] | undefined): 'BUY' | 'SELL' | undefined {
+    const value = pickNumeric(rows?.[0], ['pgtr_ntby_qty', 'program_net_buy_qty', '프로그램순매수']);
+    if (value === undefined) return undefined;
+    return value >= 0 ? 'BUY' : 'SELL';
+  }
 
   private async fetchFundamentals(
     market: string,

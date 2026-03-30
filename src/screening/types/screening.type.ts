@@ -131,6 +131,9 @@ export interface StockIndicatorDetail {
   // 추가 리스크/가격 위치 지표
   loanBalanceRate?: number; // 융자잔고 비율 (%)
   shortSellable?: boolean; // 공매도 가능 여부
+  investCautionYn?: boolean; // 투자유의 여부
+  marketWarnCode?: string; // 시장경고 코드
+  shortOverheatYn?: boolean; // 단기과열 여부
   d250High?: number; // 250일 최고가
   d250Low?: number; // 250일 최저가
   d250HighRate?: number; // 250일 최고가 대비 현재가 비율

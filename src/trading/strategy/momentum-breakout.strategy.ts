@@ -18,6 +18,27 @@ const DEFAULT_PARAMS = {
   volumeThreshold: 1.5,
 };
 
+function resolveAtrRate(ctx: StockStrategyContext): number | undefined {
+  if (ctx.stockIndicators.atrPercent !== undefined) return ctx.stockIndicators.atrPercent / 100;
+  if (ctx.stockIndicators.atr14 !== undefined && ctx.price.currentPrice > 0) {
+    return ctx.stockIndicators.atr14 / ctx.price.currentPrice;
+  }
+  return undefined;
+}
+
+function hasFlowConfirmation(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const hasFlowData =
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  if (!hasFlowData) return true;
+  return Boolean(
+    stockIndicators.foreignNetBuy ||
+      stockIndicators.institutionNetBuy ||
+      stockIndicators.programTradeDirection === 'BUY',
+  );
+}
+
 @Injectable()
 export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
   readonly name = 'momentum-breakout';
@@ -37,8 +58,8 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     '- +8% 도달: 전량 매도 (2차 익절)',
     '',
     '【손절 조건】',
-    '- -3% 하락 시 전량 매도 (손절)',
-    '- 당일 고가 대비 -2% 하락 시 전량 매도 (트레일링 스탑)',
+    '- -3% 또는 ATR 기반 동적 손절 중 더 넓은 기준 적용',
+    '- 당일 고가 대비 -2% 또는 ATR 기반 동적 트레일링 스탑 적용',
     '- 리스크 전량청산 시그널 시 즉시 매도',
     '',
     '【특징】',
@@ -48,6 +69,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     '',
     '【안전장치】',
     '- 투자유의/시장경고/단기과열 종목은 진입 차단',
+    '- 수급 데이터가 있으면 외인/기관/프로그램 중 하나 이상 매수 우위일 때만 진입',
     '- 단일 종목 포트폴리오 비중 15% 초과 시 추가 매수 차단',
     '- 연중 최고가 근접 시 돌파 확인 시그널 추가 표기',
   ].join('\n');
@@ -80,6 +102,15 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100
       : (p: number) => Math.round(p);
+    const atrRate = resolveAtrRate(ctx);
+    const effectiveStopLossRate = Math.max(
+      params.stopLossRate,
+      atrRate ? Math.min(0.06, atrRate * 1.2) : 0,
+    );
+    const effectiveTrailingStopRate = Math.max(
+      params.trailingStopRate,
+      atrRate ? Math.min(0.04, atrRate * 0.8) : 0,
+    );
 
     // 리스크 체크: 전략별 MDD 기준 전량 청산
     const mddCheck = riskState ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate) : undefined;
@@ -103,7 +134,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       const holdQty = position!.quantity;
 
       // 손절: -3%
-      if (profitRate <= -params.stopLossRate) {
+      if (profitRate <= -effectiveStopLossRate) {
         this.logger.log(
           `[${watchStock.stockCode}] STOP LOSS: ${(profitRate * 100).toFixed(1)}%`,
         );
@@ -114,13 +145,13 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           side: 'SELL',
           quantity: holdQty,
           price: roundPrice(curPrice),
-          reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
+          reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(effectiveStopLossRate * 100).toFixed(1)}%`,
         });
         return signals;
       }
 
       // 트레일링 스탑: 고점 대비 -2% (당일 고가 기준)
-      if (price.highPrice > 0 && curPrice < price.highPrice * (1 - params.trailingStopRate)) {
+      if (price.highPrice > 0 && curPrice < price.highPrice * (1 - effectiveTrailingStopRate)) {
         this.logger.log(
           `[${watchStock.stockCode}] TRAILING STOP: high=${price.highPrice}, cur=${curPrice}`,
         );
@@ -131,7 +162,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           side: 'SELL',
           quantity: holdQty,
           price: roundPrice(curPrice),
-          reason: `트레일링스탑: 고점 ${price.highPrice} 대비 -${(params.trailingStopRate * 100).toFixed(0)}%`,
+          reason: `트레일링스탑: 고점 ${price.highPrice} 대비 -${(effectiveTrailingStopRate * 100).toFixed(1)}%`,
         });
         return signals;
       }
@@ -207,6 +238,9 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       // 거래량 >= 1.5배
       if (volumeRatio < params.volumeThreshold) return signals;
 
+      // 수급 데이터가 있다면 최소한 하나의 매수 우위 확인
+      if (!hasFlowConfirmation(stockIndicators)) return signals;
+
       // 시가 + 전일레인지 × K 돌파
       const prevRange = prevHigh - prevLow;
       const breakoutPrice = todayOpen + prevRange * params.kValue;
@@ -221,9 +255,12 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
         // 연중 최고가 근접/돌파 시 reason에 표기 (추가 확신 시그널)
         const yearHighNote = stockIndicators.yearHighRate !== undefined && stockIndicators.yearHighRate >= -3
           ? `, 연중최고근접` : '';
+        const flowNote = stockIndicators.foreignNetBuy || stockIndicators.institutionNetBuy || stockIndicators.programTradeDirection === 'BUY'
+          ? ', 수급확인'
+          : '';
 
         this.logger.log(
-          `[${watchStock.stockCode}] BUY signal: price=${curPrice}, MA20=${ma20.toFixed(2)}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, breakout=${breakoutPrice.toFixed(2)}${yearHighNote}`,
+          `[${watchStock.stockCode}] BUY signal: price=${curPrice}, MA20=${ma20.toFixed(2)}, RSI=${rsi14.toFixed(1)}, vol=${volumeRatio.toFixed(1)}x, breakout=${breakoutPrice.toFixed(2)}${yearHighNote}${flowNote}`,
         );
         signals.push({
           market,
@@ -232,7 +269,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `모멘텀돌파: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, K돌파=${breakoutPrice.toFixed(0)}${yearHighNote}`,
+          reason: `모멘텀돌파: RSI=${rsi14.toFixed(0)}, vol=${volumeRatio.toFixed(1)}x, K돌파=${breakoutPrice.toFixed(0)}${yearHighNote}${flowNote}`,
         });
       }
     }

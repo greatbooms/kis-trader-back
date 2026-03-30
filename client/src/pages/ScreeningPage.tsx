@@ -13,7 +13,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award } from 'lucide-react'
+import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award, BookOpen } from 'lucide-react'
 import {
   useGetScreeningDateSummariesQuery,
   useGetStockRecommendationsQuery,
@@ -62,6 +62,129 @@ function riskBadgeVariant(riskGrade?: string | null): 'success' | 'warning' | 'd
 const COUNTRY_FLAG: Record<string, string> = {
   KR: '🇰🇷', US: '🇺🇸', HK: '🇭🇰', CN: '🇨🇳', JP: '🇯🇵', VN: '🇻🇳',
 }
+
+const CELL_TOOLTIPS: Record<string, string> = {
+  현재가: '조회 시점의 현재 체결가입니다.',
+  거래량: '당일 누적 거래량입니다.',
+  시가총액: '현재가 기준 시가총액입니다. 국내 값은 억 원 단위 원천 데이터를 사용합니다.',
+  등락률: '전일 종가 대비 현재가 변화율입니다.',
+}
+
+const INDICATOR_TOOLTIPS: Record<string, string> = {
+  'RSI(14)': '14일 기준 상대강도지수입니다. 보통 30 이하는 과매도, 70 이상은 과매수로 봅니다.',
+  MA20: '최근 20거래일 종가 평균입니다.',
+  MA60: '최근 60거래일 종가 평균입니다.',
+  PER: '주가수익비율입니다. 현재 주가가 주당순이익의 몇 배인지 보여줍니다.',
+  ROE: '자기자본이익률입니다. 자본 대비 수익 창출 효율을 뜻합니다.',
+  'EV/EBITDA': '기업가치를 EBITDA로 나눈 값입니다. 업종 내 상대가치 비교에 자주 씁니다.',
+  배당수익률: '현재 주가 대비 연간 배당금 비율입니다.',
+  안전마진: '내부 DCF 적정가 대비 현재가가 얼마나 할인 또는 고평가 상태인지 보여줍니다. 음수면 현재가가 적정가보다 높다는 뜻입니다.',
+}
+
+const FACTOR_TOOLTIPS: Record<string, string> = {
+  technical: '이동평균, RSI, MACD, 추세 신호 등 기술적 지표 기반 점수입니다.',
+  valuation: 'PER, PBR, EV/EBITDA, 안전마진 등 가치평가 지표 기반 점수입니다.',
+  growth: '매출, 이익, 자본 성장률 중심의 성장성 점수입니다.',
+  profitability: '영업이익률, ROE, 순이익률 등 수익성 지표 점수입니다.',
+  risk: '변동성, MDD, 부채비율, 유동비율, 차입금 의존도 등을 반영한 리스크 점수입니다.',
+  momentum: '단기 가격 흐름과 추세 강도 중심의 점수입니다.',
+  supplyDemand: '거래량, 수급, 외국인/기관 흐름 등 수급 기반 점수입니다.',
+  dividend: '배당수익률, 배당성향, 연속 배당 여부 등 주주환원 점수입니다.',
+  consensus: '증권사 목표가, 투자의견, 추정 실적 등 시장 컨센서스를 바탕으로 한 점수입니다.',
+  pattern: '지지/저항, 차트 패턴, 기술적 위치를 바탕으로 한 보조 점수입니다.',
+  fundamental: '가치, 성장, 수익성 등 펀더멘털 팩터를 종합한 보조 점수입니다.',
+}
+
+const SECTION_TOOLTIPS: Record<string, string> = {
+  DCF: '우리 내부 DCF 모델로 계산한 적정가와 안전마진입니다. 목표가는 별도의 증권사 컨센서스 값입니다.',
+  리스크: '변동성, MDD, 재무안정성, 공매도·신용 데이터 기반 위험 요약입니다.',
+  기술적: '추세 방향과 함께 배당, 증권사 컨센서스 같은 보조 판단 지표를 묶어 보여줍니다.',
+  '기술 상세': '기술적 지표 세부값입니다. 지지선, 저항선, ADX를 확인할 수 있습니다.',
+  '배당/컨센서스': '배당 이력과 배당성향, 증권사 목표가 대비 괴리, 실적 서프라이즈를 보여줍니다.',
+}
+
+const DEEP_ANALYSIS_GLOSSARY = [
+  {
+    term: '내부 DCF',
+    description: '우리 내부 할인현금흐름(DCF) 모델 기준으로 계산한 적정가 영역입니다.',
+  },
+  {
+    term: '내부 DCF 적정가',
+    description: '매출 성장, 영업이익률, 할인율(WACC)을 넣어 우리 모델이 계산한 적정 주가입니다.',
+  },
+  {
+    term: '안전마진',
+    description: '내부 DCF 적정가 대비 현재가의 할인율입니다. 음수면 현재가가 적정가보다 높은 상태입니다.',
+  },
+  {
+    term: '증권사 컨센서스 목표가',
+    description: '여러 증권사 리포트의 목표가를 모아 본 시장 평균 목표가입니다.',
+  },
+  {
+    term: '리스크',
+    description: '변동성과 낙폭, 재무안정성, 공매도·신용 관련 위험을 종합해 보는 영역입니다.',
+  },
+  {
+    term: '등급',
+    description: '리스크 종합 결과를 LOW, MEDIUM, HIGH, EXTREME 같은 단계로 요약한 값입니다.',
+  },
+  {
+    term: '30일 변동성',
+    description: '최근 30거래일 가격 움직임이 얼마나 큰지 연율화해 보여주는 값입니다.',
+  },
+  {
+    term: '90일 MDD',
+    description: '최근 90거래일 기준 가장 큰 낙폭입니다. 값이 낮을수록 하락 폭이 컸다는 뜻입니다.',
+  },
+  {
+    term: '기술적',
+    description: '추세와 차트 위치, 보조지표를 바탕으로 현재 기술적 상태를 요약한 영역입니다.',
+  },
+  {
+    term: '추세',
+    description: '이동평균, MACD, ADX 등으로 본 현재 가격 흐름 방향입니다. 보통 상승, 하락, 횡보로 표시합니다.',
+  },
+  {
+    term: '배당',
+    description: '현재 주가 대비 연간 배당금 비율인 배당수익률을 뜻합니다.',
+  },
+  {
+    term: '증권사 컨센서스',
+    description: '여러 증권사 애널리스트의 투자의견, 목표가, 추정 실적을 모아 본 시장 평균 의견입니다.',
+  },
+  {
+    term: '지지선',
+    description: '최근 가격 흐름에서 주가가 버티기 쉬운 가격 구간입니다.',
+  },
+  {
+    term: '저항선',
+    description: '최근 가격 흐름에서 매물 부담이 커질 수 있는 가격 구간입니다.',
+  },
+  {
+    term: 'ADX',
+    description: '추세 강도를 보는 지표입니다. 보통 값이 높을수록 추세가 더 강하다고 해석합니다.',
+  },
+  {
+    term: '배당/컨센서스',
+    description: '배당 이력과 주주환원 지표, 증권사 목표가·실적 기대를 함께 보는 영역입니다.',
+  },
+  {
+    term: '연속 배당',
+    description: '배당 지급이 이어진 연수를 뜻합니다. 값이 높을수록 배당 이력이 꾸준하다는 의미입니다.',
+  },
+  {
+    term: '배당성향',
+    description: '순이익 대비 배당금 비율입니다. 벌어들인 이익 중 얼마를 배당에 쓰는지 보여줍니다.',
+  },
+  {
+    term: '목표가 괴리(상승여력)',
+    description: '현재가와 증권사 컨센서스 목표가의 차이입니다. 플러스면 목표가가 현재가보다 높다는 뜻입니다.',
+  },
+  {
+    term: '최근 서프라이즈',
+    description: '시장 예상 실적과 실제 실적의 차이를 뜻합니다. 플러스면 예상보다 좋았다는 의미입니다.',
+  },
+]
 
 type DateSummary = {
   date: string
@@ -365,6 +488,7 @@ function RecommendationCard({
   expanded: boolean
   onToggle: () => void
 }) {
+  const [showDeepHelp, setShowDeepHelp] = useState(false)
   let reasons: string[] = []
   try { reasons = JSON.parse(rec.reasons) } catch { }
 
@@ -445,10 +569,10 @@ function RecommendationCard({
       {expanded && (
         <CardContent className="border-t border-border pt-4 space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <InfoCell label="현재가" value={formatNumber(rec.currentPrice)} />
-            <InfoCell label="거래량" value={formatNumber(rec.volume)} />
-            <InfoCell label="시가총액" value={formatNumber(rec.marketCap)} />
-            <InfoCell label="등락률" value={`${rec.changeRate >= 0 ? '+' : ''}${rec.changeRate.toFixed(2)}%`} danger={rec.changeRate < 0} success={rec.changeRate >= 0} />
+            <InfoCell label="현재가" value={formatNumber(rec.currentPrice)} tooltip={CELL_TOOLTIPS.현재가} />
+            <InfoCell label="거래량" value={formatNumber(rec.volume)} tooltip={CELL_TOOLTIPS.거래량} />
+            <InfoCell label="시가총액" value={formatNumber(rec.marketCap)} tooltip={CELL_TOOLTIPS.시가총액} />
+            <InfoCell label="등락률" value={`${rec.changeRate >= 0 ? '+' : ''}${rec.changeRate.toFixed(2)}%`} danger={rec.changeRate < 0} success={rec.changeRate >= 0} tooltip={CELL_TOOLTIPS.등락률} />
           </div>
 
           {radarData.length >= 4 && (
@@ -468,9 +592,11 @@ function RecommendationCard({
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                {Object.entries(rec.factorScores ?? {}).map(([key, value]) => (
+                {factorEntries(rec.factorScores).map(([key, value]) => (
                   <div key={key} className="rounded-lg bg-muted/50 px-3 py-2">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{factorLabel(key)}</p>
+                    <div className="text-[11px] uppercase tracking-wide">
+                      <MetricLabel label={factorLabel(key)} tooltip={FACTOR_TOOLTIPS[key]} />
+                    </div>
                     <p className="text-sm font-semibold">{Number(value).toFixed(1)}</p>
                   </div>
                 ))}
@@ -495,10 +621,20 @@ function RecommendationCard({
           )}
 
           <div className="rounded-xl border border-border bg-background p-4 space-y-4">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-muted-foreground" />
-              <p className="text-sm font-medium">딥 분석 패널</p>
-              {deepAnalysis?.riskGrade && <Badge variant={riskBadgeVariant(deepAnalysis.riskGrade)}>{deepAnalysis.riskGrade}</Badge>}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-medium">딥 분석 패널</p>
+                {deepAnalysis?.riskGrade && <Badge variant={riskBadgeVariant(deepAnalysis.riskGrade)}>{deepAnalysis.riskGrade}</Badge>}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDeepHelp((value) => !value)}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                {showDeepHelp ? '도움말 닫기' : '용어 도움말'}
+              </Button>
             </div>
 
             {deepLoading ? (
@@ -507,23 +643,32 @@ function RecommendationCard({
               <p className="text-sm text-muted-foreground">딥 분석 결과가 아직 없습니다.</p>
             ) : (
               <div className="space-y-4">
-                {deepAnalysis.reportSummary && (
-                  <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm text-foreground">{deepAnalysis.reportSummary}</div>
+                {showDeepHelp && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    {DEEP_ANALYSIS_GLOSSARY.map((item) => (
+                      <div key={item.term} className="rounded-lg bg-muted/30 px-3 py-3">
+                        <p className="font-medium text-foreground">{item.term}</p>
+                        <p className="mt-1 text-muted-foreground">{item.description}</p>
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <DeepCard
                     icon={<DollarSign className="h-4 w-4" />}
-                    title="DCF"
+                    title="내부 DCF"
+                    tooltip={SECTION_TOOLTIPS.DCF}
                     lines={[
-                      `내재가치 ${formatMaybeNumber(deepAnalysis.intrinsicValue)}`,
+                      `내부 DCF 적정가 ${formatMaybeNumber(deepAnalysis.intrinsicValue)}`,
                       `안전마진 ${formatMaybePercent(deepAnalysis.marginOfSafety)}`,
-                      `목표가 ${formatMaybeNumber(deepAnalysis.targetPrice)}`,
+                      `증권사 컨센서스 목표가 ${formatMaybeNumber(deepAnalysis.targetPrice)}`,
                     ]}
                   />
                   <DeepCard
                     icon={<ShieldAlert className="h-4 w-4" />}
                     title="리스크"
+                    tooltip={SECTION_TOOLTIPS.리스크}
                     lines={[
                       `등급 ${deepAnalysis.riskGrade ?? 'N/A'}`,
                       `30일 변동성 ${formatMaybePercent(deepAnalysis.volatility30d)}`,
@@ -533,10 +678,11 @@ function RecommendationCard({
                   <DeepCard
                     icon={<TrendingUp className="h-4 w-4" />}
                     title="기술적"
+                    tooltip={SECTION_TOOLTIPS.기술적}
                     lines={[
                       `추세 ${deepAnalysis.trendDirection ?? 'N/A'}`,
                       `배당 ${formatMaybePercent(deepAnalysis.dividendYield)}`,
-                      `컨센서스 ${deepAnalysis.consensusRating ?? 'N/A'}`,
+                      `증권사 컨센서스 ${deepAnalysis.consensusRating ?? 'N/A'}`,
                     ]}
                   />
                 </div>
@@ -546,13 +692,13 @@ function RecommendationCard({
                     `지지선: ${arrayHead(technicalDetail?.support as number[])}`,
                     `저항선: ${arrayHead(technicalDetail?.resistance as number[])}`,
                     `ADX: ${formatMaybeNumber(technicalDetail?.adx as number | undefined)}`,
-                  ]} />
+                  ]} tooltip={SECTION_TOOLTIPS['기술 상세']} />
                   <DetailPanel title="배당/컨센서스" rows={[
                     `연속 배당: ${valueOf(dividendDetail?.consecutiveDividendYears)}`,
                     `배당성향: ${formatMaybePercent(dividendDetail?.payoutRatio as number | undefined)}`,
-                    `목표가 괴리: ${formatMaybePercent(deepAnalysis.targetUpside)}`,
+                    `목표가 괴리(상승여력): ${formatMaybePercent(deepAnalysis.targetUpside)}`,
                     `최근 서프라이즈: ${arrayHead(consensusDetail?.earningsSurprise as number[], '%')}`,
-                  ]} />
+                  ]} tooltip={SECTION_TOOLTIPS['배당/컨센서스']} />
                 </div>
               </div>
             )}
@@ -560,7 +706,7 @@ function RecommendationCard({
 
           {rec.suggestedStrategies.length > 0 && (
             <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">적합 전략</p>
+              <p className="text-xs font-medium text-muted-foreground mb-2">적합 자동매매 전략</p>
               <div className="space-y-2">
                 {rec.suggestedStrategies.map((strategy) => (
                   <div key={strategy.name} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
@@ -622,19 +768,40 @@ function ScoreBar({ icon, label, score, max, tooltip }: { icon: ReactNode; label
   )
 }
 
-function InfoCell({ label, value, danger, success }: { label: string; value: string; danger?: boolean; success?: boolean }) {
+function MetricLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  return (
+    <span className="flex items-center gap-1 text-muted-foreground">
+      <span className="text-sm">{label}</span>
+      {tooltip && (
+        <Tooltip text={tooltip}>
+          <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+        </Tooltip>
+      )}
+    </span>
+  )
+}
+
+function InfoCell({ label, value, danger, success, tooltip }: { label: string; value: string; danger?: boolean; success?: boolean; tooltip?: string }) {
   return (
     <div>
-      <span className="text-muted-foreground">{label}</span>
+      <MetricLabel label={label} tooltip={tooltip} />
       <p className={`font-medium ${danger ? 'text-danger' : success ? 'text-success' : ''}`}>{value}</p>
     </div>
   )
 }
 
-function DeepCard({ icon, title, lines }: { icon: ReactNode; title: string; lines: string[] }) {
+function DeepCard({ icon, title, lines, tooltip }: { icon: ReactNode; title: string; lines: string[]; tooltip?: string }) {
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-3">
-      <div className="flex items-center gap-2 text-sm font-medium mb-2">{icon}{title}</div>
+      <div className="flex items-center gap-2 text-sm font-medium mb-2">
+        {icon}
+        <span>{title}</span>
+        {tooltip && (
+          <Tooltip text={tooltip}>
+            <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+          </Tooltip>
+        )}
+      </div>
       <div className="space-y-1 text-sm text-muted-foreground">
         {lines.map((line) => <p key={line}>{line}</p>)}
       </div>
@@ -642,10 +809,12 @@ function DeepCard({ icon, title, lines }: { icon: ReactNode; title: string; line
   )
 }
 
-function DetailPanel({ title, rows }: { title: string; rows: string[] }) {
+function DetailPanel({ title, rows, tooltip }: { title: string; rows: string[]; tooltip?: string }) {
   return (
     <div className="rounded-lg bg-muted/30 px-3 py-3">
-      <p className="text-xs font-medium text-muted-foreground mb-2">{title}</p>
+      <div className="mb-2 text-xs font-medium">
+        <MetricLabel label={title} tooltip={tooltip} />
+      </div>
       <div className="space-y-1">
         {rows.map((row) => <p key={row}>{row}</p>)}
       </div>
@@ -655,10 +824,14 @@ function DetailPanel({ title, rows }: { title: string; rows: string[] }) {
 
 function renderIndicator(label: string, value: unknown, numberFormat = false, suffix = '') {
   if (value === undefined || value === null) return null
-  const display = numberFormat ? formatNumber(Number(value)) : `${Number(value).toFixed(1)}${suffix}`
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return null
+  const display = numberFormat ? formatNumber(numericValue) : `${numericValue.toFixed(1)}${suffix}`
   return (
     <div key={label} className="rounded-lg bg-muted/50 px-3 py-1.5">
-      <span className="text-muted-foreground text-xs">{label}</span>
+      <div className="text-xs font-medium">
+        <MetricLabel label={label} tooltip={INDICATOR_TOOLTIPS[label]} />
+      </div>
       <p className="font-medium">{display}</p>
     </div>
   )
@@ -680,6 +853,11 @@ function buildRadarData(factors?: FactorScores) {
   ]
     .filter(([, value]) => value !== undefined && value !== null)
     .map(([label, value, max]) => ({ label, value: (Number(value) / Number(max)) * 100 }))
+}
+
+function factorEntries(factors?: FactorScores) {
+  if (!factors) return []
+  return Object.entries(factors).filter(([key, value]) => key !== '__typename' && Number.isFinite(Number(value)))
 }
 
 function factorLabel(key: string): string {

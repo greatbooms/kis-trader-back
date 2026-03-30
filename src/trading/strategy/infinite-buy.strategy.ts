@@ -7,6 +7,23 @@ import {
   StrategyMeta,
 } from '../types';
 
+function hasNegativeConsensus(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const rating = stockIndicators.consensusRating ?? '';
+  const negativeRating = /(SELL|REDUCE|비중축소|매도)/i.test(rating);
+  return negativeRating || (stockIndicators.targetPriceUpside !== undefined && stockIndicators.targetPriceUpside < -15);
+}
+
+function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const hasFlowData =
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  if (!hasFlowData) return false;
+  return stockIndicators.foreignNetBuy === false
+    && stockIndicators.institutionNetBuy === false
+    && stockIndicators.programTradeDirection === 'SELL';
+}
+
 
 @Injectable()
 export class InfiniteBuyStrategy implements PerStockTradingStrategy {
@@ -65,6 +82,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 융자잔고 10% 초과 시 매수금액 30% 축소 (레버리지 청산 리스크 방어)',
     '- 지수 MA200 하회 시 매수 중단, 매도만 허용',
     '- 금리 급등 시 매수금액 50% 축소',
+    '- 부정적 컨센서스면 신규 진입 차단, 배당 안정성 높으면 매수금액 소폭 확대',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
@@ -160,6 +178,15 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     // 종목 MA200 체크 제거: 무한매수법은 하락장에서 분할매수하여 평균단가를 낮추는 전략이므로
     // 개별 종목 MA200 필터는 전략 취지에 맞지 않음. 지수 MA200만 유지.
 
+    if (!hasPosition) {
+      if (stockIndicators.investCautionYn) return signals;
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (hasNegativeConsensus(stockIndicators)) {
+        this.logger.debug(`[${watchStock.stockCode}] Negative consensus, skip new entry`);
+        return signals;
+      }
+    }
+
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
     const maxCyclesReached = T >= watchStock.maxCycles;
     if (maxCyclesReached) {
@@ -188,6 +215,21 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       details.quotaAdjust_loanBalance = true;
     }
 
+    if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) {
+      adjustedQuota *= 1.15;
+      details.quotaAdjust_dividend = true;
+    }
+
+    if ((stockIndicators.volatility30d ?? 0) >= 45) {
+      adjustedQuota *= 0.7;
+      details.quotaAdjust_volatility = true;
+    }
+
+    if (hasStrongSellFlow(stockIndicators)) {
+      adjustedQuota *= 0.7;
+      details.quotaAdjust_flow = true;
+    }
+
     // 개선 D: 가용자금 한도
     adjustedQuota = Math.min(adjustedQuota, ctx.buyableAmount);
 
@@ -200,6 +242,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       // --- 첫 매수 (포지션 없음) ---
       const buyQty = Math.floor(adjustedQuota / curPrice);
       if (buyQty > 0) {
+        const dividendNote = (stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5
+          ? ', 배당안정성+'
+          : '';
         signals.push({
           market,
           exchangeCode,
@@ -207,7 +252,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buyQty,
           price: roundPrice(curPrice),
-          reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}`,
+          reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}${dividendNote}`,
           orderDivision: '00',
         });
       }

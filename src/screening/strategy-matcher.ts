@@ -1,183 +1,145 @@
-import { ScreeningCandidate, StockIndicatorDetail, SuggestedStrategy } from './types';
+import { PerStockTradingStrategy, StockStrategyContext, TradingSignal } from '../trading/types';
+import { SuggestedStrategy } from './types';
 
-function buildStrategyMatchScore(base: number, ...components: number[]): number {
-  return Math.round(Math.min(100, base + components.reduce((sum, value) => sum + value, 0)));
+const SCREENING_RECOMMENDATION_PRIORITY = [
+  'momentum-breakout',
+  'trend-following',
+  'value-factor',
+  'grid-mean-reversion',
+  'conservative',
+  'infinite-buy',
+] as const;
+
+const SCREENING_RECOMMENDATION_SET = new Set<string>(SCREENING_RECOMMENDATION_PRIORITY);
+const RECOMMENDATION_CAPITAL_MULTIPLIER: Record<string, number> = {
+  'momentum-breakout': 1.5,
+  'trend-following': 1.5,
+  'value-factor': 1.5,
+  'grid-mean-reversion': 4,
+  conservative: 4,
+  'infinite-buy': 180,
+};
+
+function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  const hasFlowData =
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  if (!hasFlowData) return false;
+  return stockIndicators.foreignNetBuy === false
+    && stockIndicators.institutionNetBuy === false
+    && stockIndicators.programTradeDirection === 'SELL';
 }
 
-function scaleMatchScore(
-  value: number | undefined,
-  threshold: number,
-  ideal: number,
-  maxScore: number,
-): number {
-  if (value === undefined || !Number.isFinite(value)) return 0;
-  if (threshold === ideal) return maxScore;
-  const ratio = (value - threshold) / (ideal - threshold);
-  return Math.max(0, Math.min(maxScore, Math.round(ratio * maxScore)));
+function passesRecommendationGate(strategyName: string, context: StockStrategyContext): boolean {
+  if (strategyName !== 'infinite-buy') return true;
+
+  const { stockIndicators } = context;
+  const stableDividend = (stockIndicators.dividendYield ?? 0) >= 1.5
+    && (stockIndicators.consecutiveDividendYears ?? 0) >= 3;
+  const flowSupportive = Boolean(
+    stockIndicators.foreignNetBuy ||
+      stockIndicators.institutionNetBuy ||
+      stockIndicators.programTradeDirection === 'BUY',
+  );
+  const hasSupportData =
+    stockIndicators.dividendYield !== undefined ||
+    stockIndicators.consecutiveDividendYears !== undefined ||
+    stockIndicators.foreignNetBuy !== undefined ||
+    stockIndicators.institutionNetBuy !== undefined ||
+    stockIndicators.programTradeDirection !== undefined;
+  const volatility30d = stockIndicators.volatility30d;
+  const atrPercent = stockIndicators.atrPercent;
+  const ma20 = stockIndicators.ma20;
+  const priceExtendedAboveMa20 = ma20 !== undefined
+    && ma20 > 0
+    && context.price.currentPrice >= ma20 * 1.25;
+  const overheatedMomentum = (stockIndicators.rsi14 ?? 0) >= 75
+    && (
+      (volatility30d !== undefined && volatility30d >= 120)
+      || (atrPercent !== undefined && atrPercent >= 10)
+    );
+  const extremeVolatility = (volatility30d !== undefined && volatility30d >= 180)
+    || (atrPercent !== undefined && atrPercent >= 15);
+
+  if (stockIndicators.investCautionYn || stockIndicators.shortOverheatYn) return false;
+  if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return false;
+  if (hasStrongSellFlow(stockIndicators) || overheatedMomentum || priceExtendedAboveMa20) return false;
+  if (!hasSupportData) return context.watchStock.market === 'OVERSEAS';
+  if (extremeVolatility && !stableDividend) return false;
+  return stableDividend || flowSupportive;
 }
 
-export function suggestStrategies(
-  indicators: StockIndicatorDetail,
-  candidate: ScreeningCandidate,
-  isOverseas: boolean,
-): SuggestedStrategy[] {
-  const strategies: SuggestedStrategy[] = [];
-  const volumeSurgeRate = indicators.volumeIncreaseRate ?? indicators.volumeSurgeRate;
+function buildRecommendationExecutionContext(
+  strategyName: string,
+  context: StockStrategyContext,
+): StockStrategyContext {
+  const currentPrice = Math.max(context.price.currentPrice, 1);
+  const multiplier = RECOMMENDATION_CAPITAL_MULTIPLIER[strategyName] ?? 1.5;
+  const recommendationQuota = Math.max(
+    context.watchStock.quota ?? 0,
+    Math.ceil(currentPrice * multiplier),
+  );
+  const recommendationBuyableAmount = Math.max(context.buyableAmount, recommendationQuota);
+  const maxPortfolioRate = Math.max(context.watchStock.maxPortfolioRate || 0.15, 0.01);
+  const recommendationPortfolioValue = Math.max(
+    context.totalPortfolioValue,
+    Math.ceil(recommendationQuota / maxPortfolioRate),
+  );
 
-  if ((indicators.per ?? 999) <= 12 && (indicators.roe ?? 0) >= 10) {
-    strategies.push({
-      name: 'value-factor',
-      displayName: '밸류 팩터',
-      matchScore: buildStrategyMatchScore(
-        35,
-        scaleMatchScore(indicators.per, 10, 6, 30),
-        scaleMatchScore(indicators.roe, 12, 20, 25),
-        scaleMatchScore(indicators.debtRatio, 150, 30, 10),
-      ),
-      reason: `PER ${indicators.per?.toFixed(1)}, ROE ${indicators.roe?.toFixed(1)}%`,
-    });
-  }
+  return {
+    ...context,
+    watchStock: {
+      ...context.watchStock,
+      quota: recommendationQuota,
+    },
+    buyableAmount: recommendationBuyableAmount,
+    totalPortfolioValue: recommendationPortfolioValue,
+  };
+}
 
-  if ((indicators.ma20 ?? 0) > (indicators.ma60 ?? Number.MAX_SAFE_INTEGER) && (indicators.adx14 ?? 0) >= 20) {
-    const maSpread = indicators.ma60
-      ? ((indicators.ma20! - indicators.ma60) / indicators.ma60) * 100
-      : undefined;
-    const priceLead = indicators.ma20
-      ? ((candidate.currentPrice - indicators.ma20) / indicators.ma20) * 100
-      : undefined;
-    strategies.push({
-      name: 'trend-following',
-      displayName: '추세 추종',
-      matchScore: buildStrategyMatchScore(
-        40,
-        scaleMatchScore(indicators.adx14, 22, 35, 30),
-        scaleMatchScore(maSpread, 1, 6, 20),
-        scaleMatchScore(priceLead, 0, 8, 10),
-        indicators.macd?.histogram && indicators.macd.histogram > 0 ? 10 : 0,
-      ),
-      reason: `MA20 상향, ADX ${indicators.adx14?.toFixed(1)}`,
-    });
-  }
+function extractPrimaryBuyReason(signals: TradingSignal[]): string {
+  return signals.find((signal) => signal.side === 'BUY')?.reason ?? '전략 진입 조건 충족';
+}
 
-  if (candidate.changeRate >= 1 && (volumeSurgeRate ?? 0) >= 50) {
-    strategies.push({
-      name: 'momentum-breakout',
-      displayName: '모멘텀 돌파',
-      matchScore: buildStrategyMatchScore(
-        35,
-        scaleMatchScore(candidate.changeRate, 2, 5, 25),
-        scaleMatchScore(volumeSurgeRate, 80, 200, 25),
-        indicators.priceAboveMa200 ? 10 : 0,
-      ),
-      reason: `등락률 +${candidate.changeRate.toFixed(1)}%, 거래량 급증`,
-    });
-  }
+function buildSignalBackedMatchScore(strategyName: string, buySignals: TradingSignal[]): number {
+  const priorityIndex = SCREENING_RECOMMENDATION_PRIORITY.indexOf(strategyName as typeof SCREENING_RECOMMENDATION_PRIORITY[number]);
+  const baseScore = priorityIndex >= 0 ? 96 - priorityIndex * 2 : 84;
+  const layeredEntryBonus = Math.min(3, Math.max(0, buySignals.length - 1)) * 2;
+  return Math.min(99, baseScore + layeredEntryBonus);
+}
 
-  if ((indicators.rsi14 ?? 100) < 35 && candidate.changeRate < 0) {
-    const supportDistance = indicators.supportLevels?.[0]
-      ? Math.abs(((candidate.currentPrice - indicators.supportLevels[0]) / indicators.supportLevels[0]) * 100)
-      : undefined;
-    strategies.push({
-      name: 'grid-mean-reversion',
-      displayName: '그리드 평균회귀',
-      matchScore: buildStrategyMatchScore(
-        35,
-        scaleMatchScore(indicators.rsi14, 32, 15, 30),
-        scaleMatchScore(candidate.changeRate, -2, -5, 20),
-        scaleMatchScore(supportDistance, 5, 0, 10),
-      ),
-      reason: `RSI ${indicators.rsi14?.toFixed(1)}, 눌림목 구간`,
-    });
-  }
+export async function suggestStrategies(
+  strategies: PerStockTradingStrategy[],
+  context: StockStrategyContext,
+): Promise<SuggestedStrategy[]> {
+  const results = await Promise.all(
+    strategies
+      .filter((strategy) => SCREENING_RECOMMENDATION_SET.has(strategy.name))
+      .map(async (strategy) => {
+        if (!passesRecommendationGate(strategy.name, context)) return undefined;
+        const recommendationContext = buildRecommendationExecutionContext(strategy.name, context);
+        const signals = await strategy.evaluateStock({
+          ...recommendationContext,
+          watchStock: {
+            ...recommendationContext.watchStock,
+            strategyName: strategy.name,
+          },
+        });
+        const buySignals = signals.filter((signal) => signal.side === 'BUY');
+        if (buySignals.length === 0) return undefined;
 
-  if ((indicators.rsi14 ?? 100) < 25) {
-    strategies.push({
-      name: 'conservative',
-      displayName: '보수적 매매',
-      matchScore: buildStrategyMatchScore(
-        40,
-        scaleMatchScore(indicators.rsi14, 22, 12, 35),
-        scaleMatchScore(indicators.volatility30d, 35, 18, 15),
-        (indicators.currentRatio ?? 0) >= 100 ? 10 : 0,
-      ),
-      reason: `RSI ${indicators.rsi14?.toFixed(1)} 극단적 과매도`,
-    });
-  }
+        return {
+          name: strategy.name,
+          displayName: strategy.displayName,
+          matchScore: buildSignalBackedMatchScore(strategy.name, buySignals),
+          reason: extractPrimaryBuyReason(buySignals),
+        } satisfies SuggestedStrategy;
+      }),
+  );
 
-  if (!isOverseas && (indicators.priceAboveMa200 ?? false)) {
-    const distanceAboveMa200 = indicators.ma200
-      ? ((candidate.currentPrice - indicators.ma200) / indicators.ma200) * 100
-      : undefined;
-    strategies.push({
-      name: 'infinite-buy',
-      displayName: '무한매수법',
-      matchScore: buildStrategyMatchScore(
-        45,
-        scaleMatchScore(distanceAboveMa200, 2, 10, 20),
-        scaleMatchScore(indicators.rsi14, 35, 50, 15),
-        candidate.changeRate >= 0 ? 10 : 0,
-      ),
-      reason: '장기 상승 추세 유지',
-    });
-  }
-
-  if (!isOverseas && (indicators.dividendYield ?? 0) >= 3 && (indicators.consecutiveDividendYears ?? 0) >= 5) {
-    strategies.push({
-      name: 'dividend-stability',
-      displayName: '배당 안정화',
-      matchScore: buildStrategyMatchScore(
-        40,
-        scaleMatchScore(indicators.dividendYield, 3.5, 5.5, 25),
-        scaleMatchScore(indicators.consecutiveDividendYears, 7, 12, 25),
-        scaleMatchScore(indicators.payoutRatio, 100, 40, 10),
-      ),
-      reason: `배당 ${indicators.dividendYield?.toFixed(1)}%, 연속 ${indicators.consecutiveDividendYears}년`,
-    });
-  }
-
-  if (!isOverseas && (indicators.marginOfSafety ?? 0) >= 15) {
-    strategies.push({
-      name: 'dcf-value',
-      displayName: 'DCF 밸류',
-      matchScore: buildStrategyMatchScore(
-        45,
-        scaleMatchScore(indicators.marginOfSafety, 18, 30, 35),
-        scaleMatchScore(indicators.targetPriceUpside, 5, 25, 10),
-      ),
-      reason: `안전마진 ${indicators.marginOfSafety?.toFixed(1)}%`,
-    });
-  }
-
-  if (!isOverseas && (indicators.shortSaleRatio ?? 0) > 5 && (indicators.volumeSurgeRate ?? 0) > 30) {
-    strategies.push({
-      name: 'short-squeeze-response',
-      displayName: '숏스퀴즈 대응',
-      matchScore: buildStrategyMatchScore(
-        35,
-        scaleMatchScore(indicators.shortSaleRatio, 6, 12, 20),
-        scaleMatchScore(indicators.volumeSurgeRate, 50, 150, 25),
-        scaleMatchScore(candidate.changeRate, 1, 5, 10),
-      ),
-      reason: `공매도 ${indicators.shortSaleRatio?.toFixed(1)}%, 거래량 급증`,
-    });
-  }
-
-  if ((indicators.revenueGrowthRate ?? 0) >= 10 && (indicators.operatingProfitGrowthRate ?? 0) >= 10
-    && (indicators.netMargin ?? 0) >= 10 && (indicators.per ?? 999) < 25 && (indicators.per ?? 0) > 0) {
-    strategies.push({
-      name: 'quality-growth',
-      displayName: '퀄리티 성장',
-      matchScore: buildStrategyMatchScore(
-        40,
-        scaleMatchScore(indicators.revenueGrowthRate, 10, 20, 20),
-        scaleMatchScore(indicators.operatingProfitGrowthRate, 10, 20, 15),
-        scaleMatchScore(indicators.netMargin, 10, 20, 15),
-        scaleMatchScore(indicators.per, 25, 10, 10),
-      ),
-      reason: `매출성장 ${indicators.revenueGrowthRate?.toFixed(1)}%, 순이익률 ${indicators.netMargin?.toFixed(1)}%`,
-    });
-  }
-
-  strategies.sort((a, b) => b.matchScore - a.matchScore);
-  return strategies.slice(0, 4);
+  return results
+    .filter((item): item is SuggestedStrategy => !!item)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, 4);
 }

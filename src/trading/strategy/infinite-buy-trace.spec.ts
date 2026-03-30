@@ -93,10 +93,10 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(0.03).toBe(0.03);
     });
 
-    it('Sell1 = avgPrice × 1.03, Sell2 = avgPrice × targetRate', () => {
-      expect(1.03 * 50).toBeCloseTo(51.5);
-      expect(1.05 * 48).toBeCloseTo(50.4);
-      expect(1.10 * 45).toBeCloseTo(49.5);
+    it('Sell1/Sell2는 T가 높을수록 점진적으로 목표가가 낮아진다', () => {
+      expect(50 * (1 + 0.095)).toBeCloseTo(54.75);
+      expect(48 * (1 + 0.14)).toBeCloseTo(54.72);
+      expect(45 * (1 + (15 - 10 / 3) / 100)).toBeCloseTo(50.25);
     });
   });
 
@@ -158,12 +158,12 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy2Price = round(48.50 * 0.99) = round(48.015) = $48.02
       // Buy2Qty = floor(125 / 48.02) = 2
       //
-      // Sell1: avgPrice * 1.03 = 50.00 * 1.03 = $51.50
+      // Sell1: avgPrice * 1.095 = 50.00 * 1.095 = $54.75
       // Sell1Qty = max(1, round(5/3)) = 2
       //
       // Sell2Qty = 5 - 2 = 3
-      // T<10 → targetRate=1.05
-      // Sell2Price = round(50.00 * 1.05) = $52.50
+      // T=1 → targetRate=max(15 - 1/3, 8)% = 14.7%
+      // Sell2Price = round(50.00 * 1.146666...) = $57.33
 
       const buys = signals.filter(s => s.side === 'BUY');
       const sells = signals.filter(s => s.side === 'SELL');
@@ -184,14 +184,14 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy2!.price!).toBeLessThan(48.50); // 반드시 현재가보다 낮음
       expect(buy2!.quantity).toBe(2);
 
-      // Sell1: avgPrice * 1.03, qty = round(5/3) = 2
+      // Sell1: avgPrice * 1.095, qty = round(5/3) = 2
       const sell1 = sells.find(s => s.reason.includes('Sell1'));
-      expect(sell1!.price).toBe(51.50);
+      expect(sell1!.price).toBe(54.75);
       expect(sell1!.quantity).toBe(2);
 
-      // Sell2: T<10 → target=5%, qty = 5 - 2 = 3
+      // Sell2: T=1.0 → target=14.7%, qty = 5 - 2 = 3
       const sell2 = sells.find(s => s.reason.includes('Sell2'));
-      expect(sell2!.price).toBe(52.50);
+      expect(sell2!.price).toBe(57.33);
       expect(sell2!.quantity).toBe(3);
     });
   });
@@ -228,14 +228,14 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy2!.price).toBe(44.55);
       expect(buy2!.price!).toBeLessThan(45.00); // 반드시 현재가보다 낮음
 
-      // Sell1: avgPrice * 1.03 = 48 * 1.03 = 49.44
+      // Sell1: avgPrice * 1.085 = 48 * 1.085 = 52.08
       const sell1 = signals.find(s => s.reason.includes('Sell1'));
-      expect(sell1!.price).toBe(49.44);
+      expect(sell1!.price).toBe(52.08);
       expect(sell1!.quantity).toBe(5); // max(1, round(15/3))
 
-      // Sell2: T<10 → target=5%, 48 * 1.05 = 50.40
+      // Sell2: T=3.0 → target=max(15 - 1.0, 8)% = 14%, 48 * 1.14 = 54.72
       const sell2 = signals.find(s => s.reason.includes('Sell2'));
-      expect(sell2!.price).toBe(50.40);
+      expect(sell2!.price).toBe(54.72);
       expect(sell2!.quantity).toBe(10); // 15 - 5
     });
   });
@@ -295,13 +295,13 @@ describe('무한매수법 — 실전 데이터 추적', () => {
   });
 
   // ============================================================
-  // T=10 경계: dipRate 전환 (1% → 2%) + Sell2 target 전환 (5% → 7%)
+  // T=10 경계: dipRate 전환 (1% → 2%) + Sell2 기울기 완화
   // ============================================================
   describe('T=10 경계: dipRate/target 전환', () => {
-    it('T=9.9 → dipRate=1%, target=5%  /  T=10.0 → dipRate=2%, target=7%', async () => {
+    it('T=9.9 → dipRate=1%  /  T=10.0 → dipRate=2%, Sell2는 연속적으로 낮아진다', async () => {
       const perCycleQuota = 250;
 
-      // T=9.9 (< 10): dipRate=3%, target=5%
+      // T=9.9 (< 10): dipRate=1%
       const ctx1 = makeCtx({
         price: {
           stockCode: 'TQQQ', stockName: 'TQQQ',
@@ -323,9 +323,9 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy2_1!.price).toBe(45.54);
 
       const sell2_1 = signals1.find(s => s.reason.includes('Sell2'));
-      expect(sell2_1!.reason).toContain('target=5%');
+      expect(sell2_1!.reason).toContain('+11.7%');
 
-      // T=10.0 (>= 10, < 20): dipRate=2%, target=7%
+      // T=10.0 (>= 10, < 20): dipRate=2%
       const ctx2 = makeCtx({
         price: {
           stockCode: 'TQQQ', stockName: 'TQQQ',
@@ -347,7 +347,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy2_2!.price).toBe(45.08);
 
       const sell2_2 = signals2.find(s => s.reason.includes('Sell2'));
-      expect(sell2_2!.reason).toContain('target=7%');
+      expect(sell2_2!.reason).toContain('+11.7%');
     });
   });
 
@@ -430,15 +430,15 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy2!.price).toBe(36.86);
       expect(buy2!.price!).toBeLessThan(38.00);
 
-      // Sell1: avgPrice * 1.03 = 40 * 1.03 = 41.20
+      // Sell1: T=30이면 3% 바닥
       const sell1 = signals.find(s => s.reason.includes('Sell1'));
       expect(sell1!.price).toBe(41.20);
       expect(sell1!.quantity).toBe(67); // max(1, round(200/3))
 
-      // Sell2: T>=20 → target=10%, 40 * 1.10 = 44.00
+      // Sell2: T=30이면 8% 바닥, 40 * 1.08 = 43.20
       const sell2 = signals.find(s => s.reason.includes('Sell2'));
-      expect(sell2!.price).toBe(44.00);
-      expect(sell2!.reason).toContain('target=10%');
+      expect(sell2!.price).toBe(43.2);
+      expect(sell2!.reason).toContain('+8.0%');
     });
   });
 

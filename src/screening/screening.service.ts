@@ -5,9 +5,13 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice, StockPriceResult } from '../kis/types/kis-api.types';
 import { DeepAnalysisService } from './deep-analysis.service';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
+import { StrategyRegistryService } from '../trading/strategy/strategy-registry.service';
+import { MarketCondition, StockFundamentals, StockIndicators, StockStrategyContext } from '../trading/types';
 import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy, ScreeningMode, ForeignInstitutionDetail, detectEtf } from './types';
 import { pickNumeric, pickString } from './utils/api-data.util';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
+import { summarizeDividendSchedule } from './utils/dividend.util';
 import { buildDomesticScore, buildOverseasScore, buildEtfScore } from './multi-factor-scorer';
 import { suggestStrategies } from './strategy-matcher';
 
@@ -26,6 +30,7 @@ export class ScreeningService {
     private kisOverseas: KisOverseasService,
     private deepAnalysisService: DeepAnalysisService,
     private marketAnalysis: MarketAnalysisService,
+    private strategyRegistry: StrategyRegistryService,
   ) {}
 
   async screenDomestic(mode: ScreeningMode = 'FULL'): Promise<StockScore[]> {
@@ -98,7 +103,7 @@ export class ScreeningService {
             rank: index + 1,
             reasons: item.reasons as any,
             indicators: item.indicators as any,
-            suggestedStrategies: item.suggestedStrategies as any,
+            suggestedStrategies: this.filterExecutableStrategies(item.suggestedStrategies) as any,
             currentPrice: item.currentPrice,
             changeRate: item.changeRate,
             volume: item.volume,
@@ -116,7 +121,7 @@ export class ScreeningService {
   }
 
   async getRecommendations(date: string, market?: string, limit = 20) {
-    return this.prisma.stockRecommendation.findMany({
+    const rows = await this.prisma.stockRecommendation.findMany({
       where: {
         screeningDate: date,
         ...(market ? { market: market as any } : {}),
@@ -124,6 +129,10 @@ export class ScreeningService {
       orderBy: { rank: 'asc' },
       take: limit,
     });
+    return rows.map((row) => ({
+      ...row,
+      suggestedStrategies: this.filterExecutableStrategies((row.suggestedStrategies as SuggestedStrategy[] | null) ?? []),
+    }));
   }
 
   async getScreeningDates(limit = 10) {
@@ -232,9 +241,17 @@ export class ScreeningService {
           create: this.buildDeepAnalysisUpsert(date, recommendation, analysis),
         });
 
+        const mergedIndicators = this.mergeIndicatorsWithDeepAnalysis(
+          recommendation.indicators,
+          analysis,
+        );
+
         await this.prisma.stockRecommendation.update({
           where: { id: recommendation.id },
-          data: { deepAnalysisId: saved.id },
+          data: {
+            deepAnalysisId: saved.id,
+            indicators: mergedIndicators as any,
+          },
         });
 
         completed += 1;
@@ -387,6 +404,12 @@ export class ScreeningService {
       );
     }
     const financeGroup = await Promise.allSettled(financePromises);
+    const financialRatio = this.getSettledValue<any[]>(financeGroup[0]) ?? [];
+    const growthRatio = this.getSettledValue<any[]>(financeGroup[1]);
+    const profitRatio = this.getSettledValue<any[]>(financeGroup[2]);
+    const otherMajorRatios = this.getSettledValue<any[]>(financeGroup[3]);
+    const incomeStatement = this.getSettledValue<any[]>(financeGroup[4]);
+    const stabilityRatio = this.getSettledValue<any[]>(financeGroup[5]);
 
     const sentimentPromises: Promise<any[] | undefined>[] = [];
     if (mode === 'FULL' && !isEtf) {
@@ -403,6 +426,8 @@ export class ScreeningService {
 
     if (priceDetail?.marketCap) candidate.marketCap = priceDetail.marketCap;
     if (priceDetail?.currentPrice) candidate.currentPrice = priceDetail.currentPrice;
+    if (priceDetail?.volume !== undefined) candidate.volume = priceDetail.volume;
+    if (priceDetail?.changeRate !== undefined) candidate.changeRate = priceDetail.changeRate;
 
     const indicators = this.calculateIndicators(dailyPrices, candidate.currentPrice);
     const fiData = foreignInstMap.get(candidate.stockCode);
@@ -410,18 +435,17 @@ export class ScreeningService {
     this.applyPriceIndicators(priceDetail, indicators);
     this.applyForeignInstitutionIndicators(fiData, indicators);
     this.applyFinancialIndicators(
-      this.getSettledValue<any[]>(financeGroup[0]) ?? [],
-      this.getSettledValue<any[]>(financeGroup[1]),
-      this.getSettledValue<any[]>(financeGroup[2]),
-      this.getSettledValue<any[]>(financeGroup[4]),
-      this.getSettledValue<any[]>(financeGroup[5]),
-      this.getSettledValue<any[]>(financeGroup[3]),
-      priceDetail,
+      financialRatio,
+      growthRatio,
+      profitRatio,
+      incomeStatement,
+      stabilityRatio,
+      otherMajorRatios,
       indicators,
     );
     this.applySentimentIndicators(
       this.getSettledValue<any[]>(sentimentGroup[0]),
-      this.getSettledValue<any[]>(sentimentGroup[1]),
+      this.getSettledValue<any>(sentimentGroup[1]),
       this.getSettledValue<any[]>(sentimentGroup[2]),
       this.getSettledValue<any[]>(sentimentGroup[3]),
       this.getSettledValue<any[]>(sentimentGroup[4]),
@@ -429,15 +453,32 @@ export class ScreeningService {
       indicators,
       candidate.currentPrice,
     );
+    if (!isEtf && priceDetail) {
+      const dcfValuation = await this.deepAnalysisService.calculateDcfValuation(
+        candidate.exchangeCode,
+        dailyPrices,
+        priceDetail,
+        incomeStatement,
+        growthRatio,
+      );
+      if (dcfValuation) {
+        indicators.intrinsicValue = dcfValuation.intrinsicValue;
+        indicators.marginOfSafety = dcfValuation.marginOfSafety;
+      }
+    }
 
     if (!isEtf && (indicators.volatility30d ?? 0) > 300) {
       throw new Error(`Extreme volatility ${indicators.volatility30d?.toFixed(0)}%`);
     }
 
+    const marketCondition = await this.marketAnalysis.getMarketCondition(candidate.exchangeCode);
     const score = isEtf
       ? buildEtfScore(candidate, indicators, false)
       : buildDomesticScore(candidate, indicators);
-    const suggestedStrategiesResult = suggestStrategies(indicators, candidate, false);
+    const suggestedStrategiesResult = await suggestStrategies(
+      this.strategyRegistry.getAllStrategies(),
+      this.buildStrategyContext(candidate, indicators, priceDetail, dailyPrices, marketCondition),
+    );
 
     return {
       ...candidate,
@@ -488,10 +529,14 @@ export class ScreeningService {
       throw new Error(`Extreme volatility ${indicators.volatility30d?.toFixed(0)}%`);
     }
 
+    const marketCondition = await this.marketAnalysis.getMarketCondition(candidate.exchangeCode);
     const score = isEtf
       ? buildEtfScore(candidate, indicators, true)
       : buildOverseasScore(candidate, indicators);
-    const suggestedStrategiesResult = suggestStrategies(indicators, candidate, true);
+    const suggestedStrategiesResult = await suggestStrategies(
+      this.strategyRegistry.getAllStrategies(),
+      this.buildStrategyContext(candidate, indicators, priceDetail, dailyPrices, marketCondition),
+    );
 
     return {
       ...candidate,
@@ -579,6 +624,152 @@ export class ScreeningService {
     return indicators;
   }
 
+  private filterExecutableStrategies(strategies: SuggestedStrategy[]): SuggestedStrategy[] {
+    const executableNames = new Set(this.strategyRegistry.getStrategyNames());
+    return strategies.filter((strategy) => executableNames.has(strategy.name));
+  }
+
+  private buildStrategyContext(
+    candidate: ScreeningCandidate,
+    indicators: StockIndicatorDetail,
+    priceDetail: StockPriceResult | undefined,
+    dailyPrices: DailyPrice[],
+    marketCondition: MarketCondition,
+  ): StockStrategyContext {
+    const latestPrice = dailyPrices[0];
+    const previousPrice = dailyPrices[1];
+    const currentPrice = priceDetail?.currentPrice ?? candidate.currentPrice;
+    const price: StockPriceResult = {
+      stockCode: candidate.stockCode,
+      stockName: candidate.stockName,
+      currentPrice,
+      openPrice: priceDetail?.openPrice ?? latestPrice?.open ?? currentPrice,
+      highPrice: priceDetail?.highPrice ?? latestPrice?.high ?? currentPrice,
+      lowPrice: priceDetail?.lowPrice ?? latestPrice?.low ?? currentPrice,
+      volume: priceDetail?.volume ?? candidate.volume,
+      marketCap: priceDetail?.marketCap ?? candidate.marketCap,
+      per: priceDetail?.per ?? indicators.per,
+      pbr: priceDetail?.pbr ?? indicators.pbr,
+      eps: priceDetail?.eps ?? indicators.eps,
+      bps: priceDetail?.bps ?? indicators.bps,
+      loanBalanceRate: priceDetail?.loanBalanceRate ?? indicators.loanBalanceRate,
+      shortSellable: priceDetail?.shortSellable ?? indicators.shortSellable,
+      d250High: priceDetail?.d250High ?? indicators.d250High,
+      d250Low: priceDetail?.d250Low ?? indicators.d250Low,
+      d250HighRate: priceDetail?.d250HighRate ?? indicators.d250HighRate,
+      d250LowRate: priceDetail?.d250LowRate ?? indicators.d250LowRate,
+      yearHigh: priceDetail?.yearHigh ?? indicators.yearHigh,
+      yearLow: priceDetail?.yearLow ?? indicators.yearLow,
+      yearHighRate: priceDetail?.yearHighRate ?? indicators.yearHighRate,
+      yearLowRate: priceDetail?.yearLowRate ?? indicators.yearLowRate,
+      investCautionYn: priceDetail?.investCautionYn ?? indicators.investCautionYn,
+      marketWarnCode: priceDetail?.marketWarnCode ?? indicators.marketWarnCode,
+      shortOverheatYn: priceDetail?.shortOverheatYn ?? indicators.shortOverheatYn,
+      prevDayVolume: priceDetail?.prevDayVolume,
+      sector: priceDetail?.sector ?? indicators.sector,
+    };
+
+    const derivedMacd = dailyPrices.length >= 35
+      ? this.marketAnalysis.calculateMACD(dailyPrices.map((item) => item.close))
+      : undefined;
+
+    const stockIndicators: StockIndicators = {
+      currentAboveMA200: indicators.priceAboveMa200 ?? (indicators.ma200 ? currentPrice > indicators.ma200 : true),
+      ma200: indicators.ma200,
+      rsi14: indicators.rsi14,
+      volatility30d: indicators.volatility30d,
+      ma20: indicators.ma20,
+      ma60: indicators.ma60,
+      bollingerUpper: indicators.bollingerBands?.upper,
+      bollingerMiddle: indicators.bollingerBands?.middle,
+      bollingerLower: indicators.bollingerBands?.lower,
+      macdLine: indicators.macd?.line ?? derivedMacd?.line,
+      macdSignal: indicators.macd?.signal ?? derivedMacd?.signal,
+      macdHistogram: indicators.macd?.histogram ?? derivedMacd?.histogram,
+      macdPrevHistogram: derivedMacd?.prevHistogram,
+      adx14: indicators.adx14,
+      atr14: indicators.atr14,
+      atrPercent: indicators.atrPercent,
+      avgVolume20: indicators.avgVolume,
+      volumeRatio: indicators.volumeToAvgRatio,
+      prevHigh: previousPrice?.high,
+      prevLow: previousPrice?.low,
+      prevClose: previousPrice?.close,
+      todayOpen: price.openPrice ?? latestPrice?.open,
+      foreignNetBuy: indicators.foreignNetBuy,
+      institutionNetBuy: indicators.institutionNetBuy,
+      fundNetBuy: indicators.fundNetBuy,
+      trustNetBuy: indicators.trustNetBuy,
+      foreignNetBuyAmount: indicators.foreignNetBuyAmount,
+      foreignNetBuyStreak: indicators.foreignNetBuyStreak,
+      programTradeDirection: indicators.programTradeDirection,
+      investCautionYn: price.investCautionYn ?? indicators.investCautionYn,
+      marketWarnCode: price.marketWarnCode ?? indicators.marketWarnCode,
+      shortOverheatYn: price.shortOverheatYn ?? indicators.shortOverheatYn,
+      d250High: indicators.d250High,
+      d250Low: indicators.d250Low,
+      d250HighRate: indicators.d250HighRate,
+      d250LowRate: indicators.d250LowRate,
+      yearHigh: indicators.yearHigh,
+      yearLow: indicators.yearLow,
+      yearHighRate: indicators.yearHighRate,
+      yearLowRate: indicators.yearLowRate,
+      marketCap: candidate.marketCap,
+      loanBalanceRate: indicators.loanBalanceRate,
+      shortSellable: indicators.shortSellable,
+      dividendYield: indicators.dividendYield,
+      payoutRatio: indicators.payoutRatio,
+      consecutiveDividendYears: indicators.consecutiveDividendYears,
+      dividendGrowthRate: indicators.dividendGrowthRate,
+      targetPrice: indicators.targetPrice,
+      targetPriceUpside: indicators.targetPriceUpside,
+      consensusRating: indicators.consensusRating,
+      earningsSurprise: indicators.earningsSurprise,
+      estimatedEps: indicators.estimatedEps,
+      estimatedPer: indicators.estimatedPer,
+      analystCount: indicators.analystCount,
+    };
+
+    const fundamentals = this.buildStrategyFundamentals(indicators);
+    const quota = Math.max(currentPrice * (candidate.market === 'OVERSEAS' ? 12 : 20), candidate.market === 'OVERSEAS' ? 1000 : 500000);
+
+    return {
+      watchStock: {
+        id: `screening:${candidate.exchangeCode}:${candidate.stockCode}`,
+        market: candidate.market,
+        exchangeCode: candidate.exchangeCode,
+        stockCode: candidate.stockCode,
+        stockName: candidate.stockName,
+        cycle: 1,
+        maxCycles: 40,
+        quota,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 0.15,
+      },
+      price,
+      alreadyExecutedToday: false,
+      marketCondition,
+      stockIndicators,
+      fundamentals,
+      buyableAmount: quota,
+      totalPortfolioValue: quota * 10,
+    };
+  }
+
+  private buildStrategyFundamentals(indicators: StockIndicatorDetail): StockFundamentals {
+    return {
+      per: indicators.per,
+      pbr: indicators.pbr,
+      roe: indicators.roe,
+      debtRatio: indicators.debtRatio,
+      eps: indicators.eps,
+      salesGrowthRate: indicators.revenueGrowthRate,
+      operatingProfitGrowthRate: indicators.operatingProfitGrowthRate,
+      evEbitda: indicators.evEbitda,
+      dividendPayoutRate: indicators.payoutRatio,
+    };
+  }
+
   private applyCandidateIndicators(candidate: ScreeningCandidate, indicators: StockIndicatorDetail): void {
     indicators.volumeIncreaseRate = candidate.volumeIncreaseRate;
     indicators.avgVolume = candidate.avgVolume;
@@ -604,6 +795,9 @@ export class ScreeningService {
     indicators.yearLow = priceDetail.yearLow;
     indicators.yearHighRate = priceDetail.yearHighRate;
     indicators.yearLowRate = priceDetail.yearLowRate;
+    indicators.investCautionYn = priceDetail.investCautionYn;
+    indicators.marketWarnCode = priceDetail.marketWarnCode;
+    indicators.shortOverheatYn = priceDetail.shortOverheatYn;
   }
 
   private applyForeignInstitutionIndicators(
@@ -625,7 +819,6 @@ export class ScreeningService {
     incomeStatement: any[] | undefined,
     stabilityRatio: any[] | undefined,
     otherMajorRatios: any[] | undefined,
-    priceDetail: StockPriceResult | undefined,
     indicators: StockIndicatorDetail,
   ): void {
     const growth = growthRatio?.[0];
@@ -666,18 +859,11 @@ export class ScreeningService {
     if (revenue && revenue > 0 && operatingIncome) {
       indicators.operatingMargin = indicators.operatingMargin ?? (operatingIncome / revenue) * 100;
     }
-    if (priceDetail && revenue && indicators.revenueGrowthRate !== undefined) {
-      const intrinsicValue = this.estimateIntrinsicValue(revenue, indicators.revenueGrowthRate, indicators.operatingMargin ?? 8, priceDetail.listedShares);
-      indicators.intrinsicValue = intrinsicValue;
-      indicators.marginOfSafety = intrinsicValue > 0
-        ? ((intrinsicValue - priceDetail.currentPrice) / intrinsicValue) * 100
-        : undefined;
-    }
   }
 
   private applySentimentIndicators(
     investOpinion: any[] | undefined,
-    estimatePerform: any[] | undefined,
+    estimatePerform: any,
     dividendSchedule: any[] | undefined,
     investorTradeDaily: any[] | undefined,
     shortSale: any[] | undefined,
@@ -685,34 +871,53 @@ export class ScreeningService {
     indicators: StockIndicatorDetail,
     currentPrice: number,
   ): void {
-    const opinion = investOpinion?.[0];
-    indicators.targetPrice = this.pickNumeric(opinion, ['goal_pric', 'target_price', '목표가']);
-    indicators.consensusRating = this.pickString(opinion, ['opinion', 'rating', '투자의견']);
-    indicators.analystCount = this.pickNumeric(opinion, ['analyst_cnt', 'nr_analyst', '애널리스트수']);
+    const opinionSummary = summarizeInvestOpinion(investOpinion);
+    const estimateSummary = summarizeEstimatePerform(estimatePerform);
+    indicators.targetPrice = opinionSummary.targetPrice;
+    indicators.consensusRating = opinionSummary.rating ?? estimateSummary.rating;
+    indicators.analystCount = opinionSummary.analystCount;
     indicators.targetPriceUpside = indicators.targetPrice && currentPrice > 0
       ? ((indicators.targetPrice - currentPrice) / currentPrice) * 100
       : undefined;
 
-    const estimate = estimatePerform?.[0];
-    indicators.earningsSurprise = this.pickNumeric(estimate, ['surprise_rt', 'earnings_surprise', '서프라이즈율']);
-    indicators.estimatedEps = this.pickNumeric(estimate, ['eps', 'estimated_eps', '추정EPS']);
-    indicators.estimatedPer = this.pickNumeric(estimate, ['per', 'estimated_per', '추정PER']);
+    indicators.earningsSurprise = estimateSummary.earningsSurprise;
+    indicators.estimatedEps = estimateSummary.estimatedEps;
+    indicators.estimatedPer = estimateSummary.estimatedPer;
 
-    const dividendDates = new Set(
-      (dividendSchedule ?? [])
-        .map((item) => this.pickString(item, ['cash_div_dt', 'ex_dividend_date', '배당기준일']))
-        .filter(Boolean)
-        .map((value) => String(value).slice(0, 4)),
-    );
-    indicators.consecutiveDividendYears = dividendDates.size || undefined;
+    const dividendSummary = summarizeDividendSchedule(dividendSchedule);
+    indicators.consecutiveDividendYears = dividendSummary.consecutiveDividendYears;
+    indicators.dividendGrowthRate = dividendSummary.dividendGrowthRate5y;
+    if ((indicators.dividendYield === undefined || indicators.dividendYield <= 0)
+      && dividendSummary.latestAnnualDividendAmount
+      && currentPrice > 0) {
+      indicators.dividendYield = (dividendSummary.latestAnnualDividendAmount / currentPrice) * 100;
+    }
+    if ((indicators.payoutRatio === undefined || indicators.payoutRatio <= 0)
+      && dividendSummary.latestAnnualDividendAmount
+      && indicators.eps
+      && indicators.eps > 0) {
+      indicators.payoutRatio = (dividendSummary.latestAnnualDividendAmount / indicators.eps) * 100;
+    }
 
-    const dividendAmounts = (dividendSchedule ?? [])
-      .map((item) => this.pickNumeric(item, ['cash_divi_rate', 'dividend_amount', '주당배당금']))
-      .filter((value): value is number => value !== undefined)
-      .slice(0, 5)
-      .reverse();
-    if (dividendAmounts.length >= 2 && dividendAmounts[0] > 0) {
-      indicators.dividendGrowthRate = ((dividendAmounts[dividendAmounts.length - 1] / dividendAmounts[0]) ** (1 / (dividendAmounts.length - 1)) - 1) * 100;
+    const latestInvestor = investorTradeDaily?.[0];
+    const foreignNetQty = this.pickNumeric(latestInvestor, ['frgn_ntby_qty', 'foreign_net_buy_qty']);
+    const institutionNetQty = this.pickNumeric(latestInvestor, ['orgn_ntby_qty', 'institution_net_buy_qty']);
+    const trustNetQty = this.pickNumeric(latestInvestor, ['ivtr_ntby_qty', 'trust_net_buy_qty']);
+    const fundNetQty = this.pickNumeric(latestInvestor, ['fund_ntby_qty', 'fund_net_buy_qty']);
+    if (indicators.foreignNetBuy === undefined && foreignNetQty !== undefined) {
+      indicators.foreignNetBuy = foreignNetQty > 0;
+    }
+    if (indicators.institutionNetBuy === undefined && institutionNetQty !== undefined) {
+      indicators.institutionNetBuy = institutionNetQty > 0;
+    }
+    if (indicators.trustNetBuy === undefined && trustNetQty !== undefined) {
+      indicators.trustNetBuy = trustNetQty > 0;
+    }
+    if (indicators.fundNetBuy === undefined && fundNetQty !== undefined) {
+      indicators.fundNetBuy = fundNetQty > 0;
+    }
+    if (indicators.foreignNetBuyAmount === undefined) {
+      indicators.foreignNetBuyAmount = this.pickNumeric(latestInvestor, ['frgn_ntby_tr_pbmn', 'foreign_net_buy_amount']);
     }
 
     indicators.foreignNetBuyStreak = this.estimateNetBuyStreak(investorTradeDaily, ['frgn_ntby_qty', 'foreign_net_buy_qty']);
@@ -753,27 +958,37 @@ export class ScreeningService {
     };
   }
 
-  private estimateIntrinsicValue(
-    revenue: number,
-    revenueGrowthRate: number,
-    operatingMargin: number,
-    listedShares?: number,
-  ): number {
-    const normalizedGrowth = Math.max(Math.min(revenueGrowthRate, 20), -5) / 100;
-    const margin = Math.max(operatingMargin, 5) / 100;
-    let projectedRevenue = revenue;
-    let value = 0;
+  private mergeIndicatorsWithDeepAnalysis(existingIndicators: unknown, analysis: any): Record<string, unknown> {
+    const indicators = existingIndicators && typeof existingIndicators === 'object' && !Array.isArray(existingIndicators)
+      ? { ...(existingIndicators as Record<string, unknown>) }
+      : {};
 
-    for (let year = 1; year <= 5; year++) {
-      projectedRevenue *= 1 + normalizedGrowth;
-      const cashFlow = projectedRevenue * margin * 0.7;
-      value += cashFlow / Math.pow(1.09, year);
+    if (analysis.dcfValuation) {
+      indicators.intrinsicValue = analysis.dcfValuation.intrinsicValue;
+      indicators.marginOfSafety = analysis.dcfValuation.marginOfSafety;
     }
 
-    const terminalValue = (projectedRevenue * margin * 0.7 * 1.02) / (0.09 - 0.02);
-    value += terminalValue / Math.pow(1.09, 5);
+    if (analysis.dividendAnalysis) {
+      indicators.dividendYield = analysis.dividendAnalysis.currentYield;
+      indicators.payoutRatio = analysis.dividendAnalysis.payoutRatio;
+      indicators.consecutiveDividendYears = analysis.dividendAnalysis.consecutiveDividendYears;
+      indicators.dividendGrowthRate = analysis.dividendAnalysis.dividendGrowthRate5y;
+    }
 
-    return listedShares && listedShares > 0 ? value / listedShares : value;
+    if (analysis.consensusData) {
+      indicators.targetPrice = analysis.consensusData.targetPrice;
+      indicators.consensusRating = analysis.consensusData.rating;
+      indicators.analystCount = analysis.consensusData.analystCount;
+      indicators.estimatedEps = analysis.consensusData.estimatedEps;
+      indicators.earningsSurprise = analysis.consensusData.earningsSurprise?.[0];
+
+      const currentPrice = analysis.dcfValuation?.currentPrice;
+      if (currentPrice && analysis.consensusData.targetPrice) {
+        indicators.targetPriceUpside = ((analysis.consensusData.targetPrice - currentPrice) / currentPrice) * 100;
+      }
+    }
+
+    return indicators;
   }
 
   private detectChartPattern(indicators: StockIndicatorDetail, currentPrice: number): string | undefined {
