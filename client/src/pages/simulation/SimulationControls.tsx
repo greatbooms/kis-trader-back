@@ -16,7 +16,17 @@ const statusConfig: Record<string, { label: string; variant: 'success' | 'warnin
   CREATED: { label: '생성됨', variant: 'outline' },
 }
 
-export function SimulationControls({ sessionId, status, sessionName, strategyDisplayName, market, exchangeCodes, onBack, onStatusChange }: SimulationControlsProps) {
+export function SimulationControls({
+  sessionId,
+  status,
+  sessionName,
+  stockName,
+  strategyDisplayName,
+  market,
+  exchangeCodes,
+  onBack,
+  onStatusChange,
+}: SimulationControlsProps) {
   const [updateStatus] = useUpdateSimulationStatusMutation()
   const [resetSimulation] = useResetSimulationMutation()
   const [deleteSimulation] = useDeleteSimulationMutation()
@@ -43,10 +53,19 @@ export function SimulationControls({ sessionId, status, sessionName, strategyDis
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft size={16} /> 목록으로
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onBack}
+          aria-label="시뮬레이션 목록으로 이동"
+          title="시뮬레이션 목록으로 이동"
+        >
+          <ArrowLeft size={16} />
         </Button>
-        <span className="text-lg font-semibold text-foreground">{sessionName}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-semibold text-foreground">{stockName}</span>
+          <span className="text-sm text-muted-foreground">{sessionName}</span>
+        </div>
         <Badge variant={statusInfo.variant} className="text-sm px-3 py-1">
           {statusInfo.label}
         </Badge>

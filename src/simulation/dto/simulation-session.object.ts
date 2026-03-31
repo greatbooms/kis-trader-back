@@ -1,6 +1,5 @@
 import { ObjectType, Field, Float, ID, registerEnumType } from '@nestjs/graphql';
 import { Market, SimulationStatus } from '@prisma/client';
-import { SimulationWatchStockType } from './simulation-watch-stock.object';
 
 registerEnumType(SimulationStatus, { name: 'SimulationStatus' });
 
@@ -18,6 +17,15 @@ export class SimulationSessionType {
   @Field(() => Market)
   market: Market;
 
+  @Field()
+  exchangeCode: string;
+
+  @Field()
+  stockCode: string;
+
+  @Field()
+  stockName: string;
+
   @Field({ nullable: true })
   countryCode?: string;
 
@@ -28,10 +36,25 @@ export class SimulationSessionType {
   status: SimulationStatus;
 
   @Field(() => Float)
-  initialCapital: number;
+  currentCash: number;
 
   @Field(() => Float)
-  currentCash: number;
+  quota: number;
+
+  @Field(() => Float)
+  cycle: number;
+
+  @Field(() => Float)
+  maxCycles: number;
+
+  @Field(() => Float)
+  stopLossRate: number;
+
+  @Field(() => Float)
+  maxPortfolioRate: number;
+
+  @Field({ nullable: true })
+  strategyParams?: string;
 
   @Field(() => Float, { nullable: true, description: '포지션 평가금 합계' })
   portfolioValue?: number;
@@ -47,7 +70,4 @@ export class SimulationSessionType {
 
   @Field()
   updatedAt: Date;
-
-  @Field(() => [SimulationWatchStockType], { nullable: true })
-  watchStocks?: SimulationWatchStockType[];
 }

@@ -5,6 +5,7 @@ import { AuthGuard } from '@/components/layout/AuthGuard'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { WatchlistPage } from '@/pages/WatchlistPage'
+import { WatchStockDetailPage } from '@/pages/WatchStockDetailPage'
 import { PortfolioPage } from '@/pages/PortfolioPage'
 import { StrategyGuidePage } from '@/pages/StrategyGuidePage'
 import { ScreeningPage } from '@/pages/ScreeningPage'
@@ -29,6 +30,7 @@ function App() {
         >
           <Route path="/" element={<DashboardPage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/watchlist/:id" element={<WatchStockDetailPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/strategy-guide" element={<StrategyGuidePage />} />
           <Route path="/simulation" element={<Suspense fallback={<div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>}><SimulationPage /></Suspense>} />

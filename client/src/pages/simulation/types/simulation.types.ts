@@ -23,27 +23,20 @@ export interface SimulationTradesTableProps {
   sessionId: string
 }
 
-export interface SimulationWatchStocksProps {
-  sessionId: string
-}
-
 export interface SimulationCapitalSummaryProps {
   sessionId: string
-  initialCapital: number
+  stockName: string
   currentCash: number
   market: string
   exchangeCode?: string
-  watchStocks: Array<{
-    id: string
-    stockName: string
-    quota?: number | null
-  }>
+  quota: number
 }
 
 export interface SimulationControlsProps {
   sessionId: string
   status: string
   sessionName: string
+  stockName: string
   strategyDisplayName: string
   market: string
   exchangeCodes: string[]

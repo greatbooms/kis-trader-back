@@ -2,9 +2,8 @@ import { Resolver, Query, Mutation, Args, ID, ObjectType, Field, InputType, Floa
 import { UseGuards } from '@nestjs/common';
 import { WatchStockService } from './watch-stock.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
-import { PrismaService } from '../prisma.service';
 import { Market } from '@prisma/client';
-import { WatchStocksFilterInput } from './dto/watch-stocks-filter.input';
+import { WatchStocksFilterInput, WatchStockExecutionLogType } from './dto';
 
 registerEnumType(Market, { name: 'Market' });
 
@@ -131,40 +130,21 @@ export class UpdateWatchStockInput {
 @Resolver(() => WatchStockType)
 @UseGuards(GqlAuthGuard)
 export class WatchStockResolver {
-  constructor(
-    private watchStockService: WatchStockService,
-    private prisma: PrismaService,
-  ) {}
+  constructor(private watchStockService: WatchStockService) {}
 
   @Query(() => [WatchStockType], { name: 'watchStocks' })
   async findAll(@Args('input', { nullable: true }) input?: WatchStocksFilterInput) {
     const items = await this.watchStockService.findAll(input?.market);
-
-    // 각 종목의 마지막 매매 기록 조회
-    const trades = await this.prisma.tradeRecord.findMany({
-      where: {
-        stockCode: { in: items.map((i) => i.stockCode) },
-        status: 'FILLED',
-      },
-      orderBy: { createdAt: 'desc' },
-      distinct: ['stockCode'],
-    });
-
-    const tradeMap = new Map<string, { side: string; createdAt: Date }>();
-    for (const trade of trades) {
-      if (!tradeMap.has(trade.stockCode)) {
-        tradeMap.set(trade.stockCode, { side: trade.side, createdAt: trade.createdAt });
-      }
-    }
+    const latestLogs = await this.watchStockService.findLatestExecutionLogs(items.map((item) => item.id));
 
     return items.map((item) => {
-      const lastTrade = tradeMap.get(item.stockCode);
+      const lastLog = latestLogs.get(item.id);
 
-      const lastExecutionStatus = lastTrade
-        ? `${lastTrade.side === 'BUY' ? '매수' : '매도'} 체결`
+      const lastExecutionStatus = lastLog
+        ? lastLog.message
         : undefined;
-      const lastExecutionDate = lastTrade
-        ? lastTrade.createdAt.toISOString().slice(0, 10)
+      const lastExecutionDate = lastLog
+        ? lastLog.createdAt.toISOString().slice(0, 16).replace('T', ' ')
         : undefined;
 
       return {
@@ -174,6 +154,36 @@ export class WatchStockResolver {
         lastExecutionDate,
       };
     });
+  }
+
+  @Query(() => WatchStockType, { name: 'watchStock', nullable: true })
+  async findOne(@Args('id', { type: () => ID }) id: string) {
+    const item = await this.watchStockService.findOne(id);
+    if (!item) return null;
+
+    const latestLogs = await this.watchStockService.findLatestExecutionLogs([id]);
+    const lastLog = latestLogs.get(id);
+
+    return {
+      ...item,
+      strategyParams: item.strategyParams ? JSON.stringify(item.strategyParams) : undefined,
+      lastExecutionStatus: lastLog?.message,
+      lastExecutionDate: lastLog?.createdAt?.toISOString().slice(0, 16).replace('T', ' '),
+    };
+  }
+
+  @Query(() => [WatchStockExecutionLogType], { name: 'watchStockExecutionLogs' })
+  async getExecutionLogs(
+    @Args('watchStockId') watchStockId: string,
+    @Args('limit', { nullable: true }) limit?: number,
+  ): Promise<WatchStockExecutionLogType[]> {
+    const logs = await this.watchStockService.findExecutionLogs(watchStockId, limit ?? 50);
+    return logs.map((log) => ({
+      ...log,
+      tradeRecordId: log.tradeRecordId || undefined,
+      strategyName: log.strategyName || undefined,
+      details: log.details ? JSON.stringify(log.details) : undefined,
+    }));
   }
 
   @Mutation(() => WatchStockType)

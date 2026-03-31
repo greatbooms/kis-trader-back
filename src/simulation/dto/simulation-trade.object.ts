@@ -1,5 +1,7 @@
-import { ObjectType, Field, Float, Int, ID } from '@nestjs/graphql';
-import { Market, Side } from '@prisma/client';
+import { ObjectType, Field, Float, Int, ID, registerEnumType } from '@nestjs/graphql';
+import { Market, Side, SimulationTradeStatus } from '@prisma/client';
+
+registerEnumType(SimulationTradeStatus, { name: 'SimulationTradeStatus' });
 
 @ObjectType()
 export class SimulationTradeType {
@@ -32,6 +34,12 @@ export class SimulationTradeType {
 
   @Field(() => Float)
   totalAmount: number;
+
+  @Field(() => SimulationTradeStatus)
+  tradeStatus: SimulationTradeStatus;
+
+  @Field({ nullable: true })
+  failReason?: string;
 
   @Field({ nullable: true })
   strategyName?: string;

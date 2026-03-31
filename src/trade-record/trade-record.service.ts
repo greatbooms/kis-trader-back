@@ -15,7 +15,16 @@ export class TradeRecordService {
     private kisOverseas: KisOverseasService,
   ) {}
 
-  findAll(options?: { market?: Market; side?: Side; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) {
+  findAll(options?: {
+    market?: Market;
+    side?: Side;
+    stockCode?: string;
+    exchangeCode?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+    offset?: number;
+  }) {
     const createdAt: Record<string, Date> = {};
     if (options?.dateFrom) createdAt.gte = new Date(options.dateFrom + 'T00:00:00');
     if (options?.dateTo) createdAt.lte = new Date(options.dateTo + 'T23:59:59');
@@ -24,6 +33,8 @@ export class TradeRecordService {
       where: {
         ...(options?.market && { market: options.market }),
         ...(options?.side && { side: options.side }),
+        ...(options?.stockCode && { stockCode: options.stockCode }),
+        ...(options?.exchangeCode && { exchangeCode: options.exchangeCode }),
         ...(Object.keys(createdAt).length > 0 && { createdAt }),
       },
       orderBy: { createdAt: 'desc' },

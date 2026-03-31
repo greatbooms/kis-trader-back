@@ -8,12 +8,11 @@ import {
   SimulationPositionType,
   SimulationSnapshotType,
   SimulationMetricsType,
-  SimulationWatchStockType,
   CreateSimulationInput,
-  AddSimulationWatchStockInput,
   SimulationSessionsFilterInput,
   SimulationTradesFilterInput,
   UpdateSimulationStatusInput,
+  UpdateSimulationSettingsInput,
 } from './dto';
 
 @Resolver()
@@ -62,7 +61,12 @@ export class SimulationResolver {
   async getTrades(
     @Args('input') input: SimulationTradesFilterInput,
   ): Promise<SimulationTradeType[]> {
-    const trades = await this.simulationService.getTrades(input.sessionId, input.limit, input.offset);
+    const trades = await this.simulationService.getTrades(
+      input.sessionId,
+      input.limit,
+      input.offset,
+      input.tradeStatus,
+    );
     return trades.map((t) => ({
       id: t.id,
       sessionId: t.sessionId,
@@ -74,6 +78,8 @@ export class SimulationResolver {
       quantity: t.quantity,
       price: Number(t.price),
       totalAmount: Number(t.totalAmount),
+      tradeStatus: t.tradeStatus,
+      failReason: t.failReason || undefined,
       strategyName: t.strategyName || undefined,
       reason: t.reason || undefined,
       createdAt: t.createdAt,
@@ -117,26 +123,19 @@ export class SimulationResolver {
     return this.mapSession(session);
   }
 
-  @Mutation(() => SimulationWatchStockType)
-  async addSimulationWatchStock(
-    @Args('input') input: AddSimulationWatchStockInput,
-  ): Promise<SimulationWatchStockType> {
-    const ws = await this.simulationService.addWatchStock(input);
-    return this.mapWatchStock(ws);
-  }
-
-  @Mutation(() => Boolean)
-  async removeSimulationWatchStock(
-    @Args('id') id: string,
-  ): Promise<boolean> {
-    return this.simulationService.removeWatchStock(id);
-  }
-
   @Mutation(() => SimulationSessionType)
   async updateSimulationStatus(
     @Args('input') input: UpdateSimulationStatusInput,
   ): Promise<SimulationSessionType> {
     const session = await this.simulationService.updateStatus(input.id, input.status);
+    return this.mapSession(session);
+  }
+
+  @Mutation(() => SimulationSessionType)
+  async updateSimulationSettings(
+    @Args('input') input: UpdateSimulationSettingsInput,
+  ): Promise<SimulationSessionType> {
+    const session = await this.simulationService.updateSettings(input.id, input);
     return this.mapSession(session);
   }
 
@@ -159,51 +158,32 @@ export class SimulationResolver {
     const portfolioValue = session.positions
       ? session.positions.reduce((sum: number, p: any) => sum + p.quantity * Number(p.currentPrice), 0)
       : undefined;
+    const stockPosition = session.positions?.find((p: any) => p.stockCode === session.stockCode);
+    const cycle = this.simulationService.calculateSessionCycle(session, stockPosition);
 
     return {
       id: session.id,
       name: session.name,
       description: session.description || undefined,
       market: session.market,
+      exchangeCode: session.exchangeCode,
+      stockCode: session.stockCode,
+      stockName: session.stockName,
       countryCode: session.countryCode || undefined,
       strategyName: session.strategyName,
       status: session.status,
-      initialCapital: Number(session.initialCapital),
       currentCash: Number(session.currentCash),
+      quota: Number(session.quota),
+      cycle,
+      maxCycles: session.maxCycles,
+      stopLossRate: Number(session.stopLossRate),
+      maxPortfolioRate: Number(session.maxPortfolioRate),
+      strategyParams: session.strategyParams ? JSON.stringify(session.strategyParams) : undefined,
       portfolioValue,
       startedAt: session.startedAt,
       stoppedAt: session.stoppedAt || undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      watchStocks: session.watchStocks?.map((ws: any) => this.mapWatchStock(ws, session.positions)),
-    };
-  }
-
-  private mapWatchStock(ws: any, positions?: any[]): SimulationWatchStockType {
-    // T(사이클)를 포지션 데이터에서 동적 계산: totalInvested / perCycleQuota
-    let cycle = ws.cycle;
-    if (ws.quota && positions) {
-      const pos = positions.find((p: any) => p.stockCode === ws.stockCode);
-      if (pos) {
-        const perCycleQuota = Number(ws.quota) / ws.maxCycles;
-        cycle = perCycleQuota > 0 ? Number(pos.totalInvested) / perCycleQuota : 0;
-      }
-    }
-
-    return {
-      id: ws.id,
-      sessionId: ws.sessionId,
-      market: ws.market,
-      exchangeCode: ws.exchangeCode,
-      stockCode: ws.stockCode,
-      stockName: ws.stockName,
-      quota: ws.quota ? Number(ws.quota) : undefined,
-      cycle,
-      maxCycles: ws.maxCycles,
-      stopLossRate: Number(ws.stopLossRate),
-      maxPortfolioRate: Number(ws.maxPortfolioRate),
-      strategyParams: ws.strategyParams ? JSON.stringify(ws.strategyParams) : undefined,
-      isActive: ws.isActive,
     };
   }
 }

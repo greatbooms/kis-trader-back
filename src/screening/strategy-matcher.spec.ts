@@ -95,7 +95,7 @@ describe('suggestStrategies', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('momentum-breakout');
-    expect(results[0].reason).toBe('모멘텀돌파');
+    expect(results[0].reason).toBe('가격 돌파와 모멘텀 진입 조건이 맞았습니다.');
   });
 
   it('excludes daily-dca even if it can BUY', async () => {
@@ -146,6 +146,7 @@ describe('suggestStrategies', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('infinite-buy');
+    expect(results[0].reason).toBe('분할매수 시작 조건과 배당 안정성이 확인됐습니다.');
   });
 
   it('filters domestic infinite-buy out when support data is absent even if volatility is reasonable', async () => {
@@ -184,6 +185,7 @@ describe('suggestStrategies', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('infinite-buy');
+    expect(results[0].reason).toBe('분할매수 시작 조건이 충족된 종목입니다.');
   });
 
   it('filters infinite-buy out when momentum is overheated even with positive flow', async () => {
@@ -286,5 +288,28 @@ describe('suggestStrategies', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('trend-following');
+  });
+
+  it('does not expose raw order quantity or price details in screening recommendation reasons', async () => {
+    const context = createContext();
+    context.stockIndicators = {
+      currentAboveMA200: true,
+      volatility30d: 24,
+      dividendYield: 2.4,
+      consecutiveDividendYears: 6,
+    };
+
+    const strategies = [
+      createStrategy('infinite-buy', '무한매수법', [
+        createSignal('005930', 'BUY', 'Initial buy: 5주 @ 4210, 배당안정성+'),
+      ]),
+    ];
+
+    const results = await suggestStrategies(strategies, context);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].reason).toBe('분할매수 시작 조건과 배당 안정성이 확인됐습니다.');
+    expect(results[0].reason).not.toContain('5주');
+    expect(results[0].reason).not.toContain('@ 4210');
   });
 });

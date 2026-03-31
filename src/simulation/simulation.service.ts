@@ -4,14 +4,12 @@ import { StrategyRegistryService } from '../trading/strategy/strategy-registry.s
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
-import { WatchStockService } from '../watch-stock/watch-stock.service';
-import { Market, Side, SimulationStatus, Prisma } from '@prisma/client';
+import { Market, Side, SimulationStatus, SimulationTradeStatus, Prisma } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, StockFundamentals, RiskState, MarketRegimeLabel } from '../trading/types';
 import { MarketRegimeService } from '../trading/market-regime.service';
 import { StockPriceResult } from '../kis/types/kis-api.types';
 import { SimulationMetrics, SimulationPendingOrder } from './types';
 import { CreateSimulationInput } from './dto';
-import { AddSimulationWatchStockInput } from './dto';
 
 @Injectable()
 export class SimulationService {
@@ -26,53 +24,31 @@ export class SimulationService {
     private marketRegimeService: MarketRegimeService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
-    private watchStockService: WatchStockService,
   ) {}
 
   async createSession(input: CreateSimulationInput) {
-    const session = await this.prisma.simulationSession.create({
+    return this.prisma.simulationSession.create({
       data: {
         name: input.name,
         description: input.description,
         market: input.market,
+        exchangeCode: input.exchangeCode,
+        stockCode: input.stockCode,
+        stockName: input.stockName,
         countryCode: input.countryCode,
         strategyName: input.strategyName,
-        initialCapital: new Prisma.Decimal(input.initialCapital),
-        currentCash: new Prisma.Decimal(input.initialCapital),
+        currentCash: new Prisma.Decimal(input.quota),
+        quota: new Prisma.Decimal(input.quota),
+        stopLossRate: input.stopLossRate ? new Prisma.Decimal(input.stopLossRate) : new Prisma.Decimal(0.3),
+        maxPortfolioRate: input.maxPortfolioRate ? new Prisma.Decimal(input.maxPortfolioRate) : new Prisma.Decimal(0.2),
+        strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
       },
-      include: { watchStocks: true },
     });
-
-    if (input.watchStocks && input.watchStocks.length > 0) {
-      for (const ws of input.watchStocks) {
-        await this.prisma.simulationWatchStock.create({
-          data: {
-            sessionId: session.id,
-            market: ws.market,
-            exchangeCode: ws.exchangeCode,
-            stockCode: ws.stockCode,
-            stockName: ws.stockName,
-            quota: ws.quota ? new Prisma.Decimal(ws.quota) : null,
-            stopLossRate: ws.stopLossRate ? new Prisma.Decimal(ws.stopLossRate) : new Prisma.Decimal(0.3),
-            maxPortfolioRate: ws.maxPortfolioRate ? new Prisma.Decimal(ws.maxPortfolioRate) : new Prisma.Decimal(0.2),
-            strategyParams: ws.strategyParams ? JSON.parse(ws.strategyParams) : undefined,
-          },
-        });
-      }
-
-      return this.prisma.simulationSession.findUnique({
-        where: { id: session.id },
-        include: { watchStocks: true },
-      });
-    }
-
-    return session;
   }
 
   async executeSimulationTick(sessionId: string): Promise<void> {
     const session = await this.prisma.simulationSession.findUnique({
       where: { id: sessionId },
-      include: { watchStocks: { where: { isActive: true } } },
     });
 
     if (!session || session.status !== SimulationStatus.RUNNING) return;
@@ -95,179 +71,403 @@ export class SimulationService {
     const today = new Date().toISOString().slice(0, 10);
 
     // 공통 데이터: 세션 단위로 1회만 조회 (실거래 스케줄러와 동일)
-    const primaryExchangeCode = session.watchStocks[0]?.exchangeCode
-      ?? (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+    const primaryExchangeCode = session.exchangeCode
+      || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
     const market = session.market as 'DOMESTIC' | 'OVERSEAS';
     const marketRegime = await this.marketRegimeService.getRegime(market, primaryExchangeCode);
     const riskState = await this.evaluateSimulationRisk(sessionId, positions, Number(session.currentCash));
 
-    for (const ws of session.watchStocks) {
-      try {
-        const exchangeCode = ws.exchangeCode;
+    try {
+      const exchangeCode = session.exchangeCode;
 
-        // Get price
-        const price = session.market === Market.DOMESTIC
-          ? await this.kisDomestic.getPrice(ws.stockCode)
-          : await this.kisOverseas.getPrice(exchangeCode, ws.stockCode);
+      // Get price
+      const price = session.market === Market.DOMESTIC
+        ? await this.kisDomestic.getPrice(session.stockCode)
+        : await this.kisOverseas.getPrice(exchangeCode, session.stockCode);
 
-        // Get indicators
-        const stockIndicators = await this.marketAnalysis.getStockIndicators(
-          market,
-          exchangeCode,
-          ws.stockCode,
-          price.currentPrice,
-        );
+      // Get indicators
+      const stockIndicators = await this.marketAnalysis.getStockIndicators(
+        market,
+        exchangeCode,
+        session.stockCode,
+        price.currentPrice,
+      );
 
-        // 현재가 API에서 제공되는 추가 지표를 stockIndicators에 병합 (실거래와 동일)
-        stockIndicators.foreignHoldRate = price.foreignHoldRate;
-        stockIndicators.foreignNetBuyQty = price.foreignNetBuyQty;
-        stockIndicators.w52High = price.w52High;
-        stockIndicators.w52Low = price.w52Low;
-        stockIndicators.investCautionYn = price.investCautionYn;
-        stockIndicators.marketWarnCode = price.marketWarnCode;
-        stockIndicators.shortOverheatYn = price.shortOverheatYn;
-        stockIndicators.d250High = price.d250High;
-        stockIndicators.d250Low = price.d250Low;
-        stockIndicators.d250HighRate = price.d250HighRate;
-        stockIndicators.d250LowRate = price.d250LowRate;
-        stockIndicators.yearHigh = price.yearHigh;
-        stockIndicators.yearLow = price.yearLow;
-        stockIndicators.yearHighRate = price.yearHighRate;
-        stockIndicators.yearLowRate = price.yearLowRate;
-        stockIndicators.marketCap = price.marketCap;
-        stockIndicators.loanBalanceRate = price.loanBalanceRate;
-        stockIndicators.shortSellable = price.shortSellable;
+      // 현재가 API에서 제공되는 추가 지표를 stockIndicators에 병합 (실거래와 동일)
+      stockIndicators.foreignHoldRate = price.foreignHoldRate;
+      stockIndicators.foreignNetBuyQty = price.foreignNetBuyQty;
+      stockIndicators.w52High = price.w52High;
+      stockIndicators.w52Low = price.w52Low;
+      stockIndicators.investCautionYn = price.investCautionYn;
+      stockIndicators.marketWarnCode = price.marketWarnCode;
+      stockIndicators.shortOverheatYn = price.shortOverheatYn;
+      stockIndicators.d250High = price.d250High;
+      stockIndicators.d250Low = price.d250Low;
+      stockIndicators.d250HighRate = price.d250HighRate;
+      stockIndicators.d250LowRate = price.d250LowRate;
+      stockIndicators.yearHigh = price.yearHigh;
+      stockIndicators.yearLow = price.yearLow;
+      stockIndicators.yearHighRate = price.yearHighRate;
+      stockIndicators.yearLowRate = price.yearLowRate;
+      stockIndicators.marketCap = price.marketCap;
+      stockIndicators.loanBalanceRate = price.loanBalanceRate;
+      stockIndicators.shortSellable = price.shortSellable;
 
-        // Get market condition
-        const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
+      // Get market condition
+      const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
 
-        // Check if already executed today
-        const todayTrade = await this.prisma.simulationTrade.findFirst({
-          where: {
-            sessionId,
-            stockCode: ws.stockCode,
-            createdAt: {
-              gte: new Date(today + 'T00:00:00Z'),
-              lt: new Date(today + 'T23:59:59Z'),
-            },
+      // Check if already executed today
+      const todayTrade = await this.prisma.simulationTrade.findFirst({
+        where: {
+          sessionId,
+          stockCode: session.stockCode,
+          tradeStatus: SimulationTradeStatus.EXECUTED,
+          createdAt: {
+            gte: new Date(today + 'T00:00:00Z'),
+            lt: new Date(today + 'T23:59:59Z'),
           },
+        },
+      });
+
+      const pos = positions.find((p) => p.stockCode === session.stockCode);
+      const currentCycle = this.calculateSessionCycle(session, pos);
+      const persistedCycle = this.getPersistedSessionCycle(currentCycle);
+
+      if (persistedCycle !== session.cycle) {
+        await this.prisma.simulationSession.update({
+          where: { id: session.id },
+          data: { cycle: persistedCycle },
         });
+      }
 
-        const pos = positions.find((p) => p.stockCode === ws.stockCode);
+      const watchStockConfig: WatchStockConfig = {
+        id: session.id,
+        market: session.market as 'DOMESTIC' | 'OVERSEAS',
+        exchangeCode,
+        stockCode: session.stockCode,
+        stockName: session.stockName,
+        strategyName: session.strategyName,
+        quota: Number(session.quota),
+        cycle: currentCycle,
+        maxCycles: session.maxCycles,
+        stopLossRate: Number(session.stopLossRate),
+        maxPortfolioRate: Number(session.maxPortfolioRate),
+        strategyParams: session.strategyParams as Record<string, any> | undefined,
+      };
 
-        const watchStockConfig: WatchStockConfig = {
-          id: ws.id,
-          market: session.market as 'DOMESTIC' | 'OVERSEAS',
+      let fundamentals: StockFundamentals | undefined;
+      if (session.strategyName === 'value-factor') {
+        fundamentals = await this.fetchFundamentals(
+          session.market as string,
           exchangeCode,
-          stockCode: ws.stockCode,
-          stockName: ws.stockName,
-          strategyName: session.strategyName,
-          quota: ws.quota ? Number(ws.quota) : undefined,
-          cycle: ws.cycle,
-          maxCycles: ws.maxCycles,
-          stopLossRate: Number(ws.stopLossRate),
-          maxPortfolioRate: Number(ws.maxPortfolioRate),
-          strategyParams: ws.strategyParams as Record<string, any> | undefined,
-        };
-
-        // 밸류 팩터 전략일 때만 재무 데이터 조회 (API 호출 최소화)
-        let fundamentals: StockFundamentals | undefined;
-        if (session.strategyName === 'value-factor') {
-          fundamentals = await this.fetchFundamentals(
-            session.market as string,
-            exchangeCode,
-            ws.stockCode,
-            price,
-          );
-        }
-
-        const ctx: StockStrategyContext = {
-          watchStock: watchStockConfig,
+          session.stockCode,
           price,
-          position: pos ? {
-            stockCode: pos.stockCode,
-            quantity: pos.quantity,
-            avgPrice: Number(pos.avgPrice),
-            currentPrice: Number(pos.currentPrice),
-            totalInvested: Number(pos.totalInvested),
-          } : undefined,
-          alreadyExecutedToday: !!todayTrade,
-          marketCondition,
-          stockIndicators,
-          fundamentals,
-          buyableAmount: Number(session.currentCash),
-          totalPortfolioValue,
-          marketRegime,
-          riskState,
-        };
+        );
+      }
 
-        const signals = await strategy.evaluateStock(ctx);
+      const ctx: StockStrategyContext = {
+        watchStock: watchStockConfig,
+        price,
+        position: pos ? {
+          stockCode: pos.stockCode,
+          quantity: pos.quantity,
+          avgPrice: Number(pos.avgPrice),
+          currentPrice: Number(pos.currentPrice),
+          totalInvested: Number(pos.totalInvested),
+        } : undefined,
+        alreadyExecutedToday: !!todayTrade,
+        marketCondition,
+        stockIndicators,
+        fundamentals,
+        buyableAmount: Number(session.currentCash),
+        totalPortfolioValue,
+        marketRegime,
+        riskState,
+      };
 
-        if (signals.length === 0) {
-          this.logger.debug(
-            `[SIM] ${ws.stockCode} no signal | price=${price.currentPrice}` +
-            ` ma20=${stockIndicators.ma20 ?? 'N/A'} ma60=${stockIndicators.ma60 ?? 'N/A'}` +
-            ` adx14=${stockIndicators.adx14 ?? 'N/A'}` +
-            ` alreadyToday=${!!todayTrade} pos=${pos ? `qty=${pos.quantity},avg=${Number(pos.avgPrice)}` : 'none'}` +
-            ` cash=${Number(session.currentCash)}`,
+      const signals = await strategy.evaluateStock(ctx);
+      const noSignalReason = signals.length === 0
+        ? this.describeNoSignalReason(session.strategyName, ctx)
+        : undefined;
+
+      if (signals.length === 0) {
+        this.logger.debug(
+          `[SIM] ${session.stockCode} no signal | price=${price.currentPrice}` +
+          ` ma20=${stockIndicators.ma20 ?? 'N/A'} ma60=${stockIndicators.ma60 ?? 'N/A'}` +
+          ` adx14=${stockIndicators.adx14 ?? 'N/A'}` +
+          ` alreadyToday=${!!todayTrade} pos=${pos ? `qty=${pos.quantity},avg=${Number(pos.avgPrice)}` : 'none'}` +
+          ` cash=${Number(session.currentCash)}` +
+          ` reason=${noSignalReason ?? 'strategy conditions not met'}`,
+        );
+      }
+
+      for (const signal of signals) {
+        const signalPrice = signal.price || 0;
+        const canFillNow = this.canFillAtPrice(signal.side, signalPrice, price.currentPrice);
+
+        if (canFillNow) {
+          this.logger.log(`[SIM] ${session.stockCode} fill: ${signal.side} x${signal.quantity} @ ${signalPrice || price.currentPrice} | reason=${signal.reason}`);
+          await this.virtualExecute(sessionId, signal, price.currentPrice);
+        } else {
+          const pending: SimulationPendingOrder = {
+            sessionId,
+            market: signal.market,
+            exchangeCode: signal.exchangeCode,
+            stockCode: signal.stockCode,
+            side: signal.side as 'BUY' | 'SELL',
+            quantity: signal.quantity,
+            price: signalPrice,
+            reason: signal.reason,
+            createdAt: new Date(),
+          };
+          const orders = this.pendingOrders.get(sessionId) || [];
+          orders.push(pending);
+          this.pendingOrders.set(sessionId, orders);
+          this.logger.log(`[SIM] ${session.stockCode} pending: ${signal.side} x${signal.quantity} @ ${signalPrice} | reason=${signal.reason}`);
+        }
+      }
+
+      if (['infinite-buy', 'daily-dca'].includes(session.strategyName) && !todayTrade) {
+        const params = (session.strategyParams as Record<string, any>) || {};
+        const hasBuySignal = signals.some((s) => s.side === 'BUY');
+        const perCycleQuota = Number(session.quota) / session.maxCycles;
+
+        if (hasBuySignal) {
+          if (params.accumulatedQuota) {
+            await this.prisma.simulationSession.update({
+              where: { id: session.id },
+              data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
+            });
+          }
+        } else if (perCycleQuota > 0 && params.lastAccumulatedDate !== today) {
+          const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
+          await this.prisma.simulationSession.update({
+            where: { id: session.id },
+            data: { strategyParams: { ...params, accumulatedQuota: newAccumulated, lastAccumulatedDate: today } },
+          });
+          this.logger.log(
+            `[${session.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} ` +
+            `(reason: ${noSignalReason ?? 'no BUY signal'})`,
           );
         }
+      }
+    } catch (e) {
+      this.logger.error(`Simulation tick error for ${session.stockCode}: ${e.message}`);
+    }
+  }
 
-        for (const signal of signals) {
-          const signalPrice = signal.price || 0;
-          const canFillNow = this.canFillAtPrice(signal.side, signalPrice, price.currentPrice);
+  private describeNoSignalReason(strategyName: string, ctx: StockStrategyContext): string {
+    if (ctx.alreadyExecutedToday) {
+      return 'already executed today';
+    }
 
-          if (canFillNow) {
-            this.logger.log(`[SIM] ${ws.stockCode} fill: ${signal.side} x${signal.quantity} @ ${signalPrice || price.currentPrice} | reason=${signal.reason}`);
-            await this.virtualExecute(sessionId, signal, price.currentPrice);
-          } else {
-            // 지정가 미도달 → pending order로 저장 (장중 가격 변동 시 체결)
-            const pending: SimulationPendingOrder = {
-              sessionId,
-              market: signal.market,
-              exchangeCode: signal.exchangeCode,
-              stockCode: signal.stockCode,
-              side: signal.side as 'BUY' | 'SELL',
-              quantity: signal.quantity,
-              price: signalPrice,
-              reason: signal.reason,
-              createdAt: new Date(),
-            };
-            const orders = this.pendingOrders.get(sessionId) || [];
-            orders.push(pending);
-            this.pendingOrders.set(sessionId, orders);
-            this.logger.log(`[SIM] ${ws.stockCode} pending: ${signal.side} x${signal.quantity} @ ${signalPrice} | reason=${signal.reason}`);
-          }
-        }
+    if (strategyName === 'infinite-buy') {
+      return this.describeInfiniteBuyNoSignal(ctx);
+    }
 
-        // 분할매수 전략: 매수금액 부족 시 다음 사이클로 누적 (1일 1회만)
-        if (['infinite-buy', 'daily-dca'].includes(session.strategyName) && !todayTrade) {
-          const params = (ws.strategyParams as Record<string, any>) || {};
-          const hasBuySignal = signals.some((s) => s.side === 'BUY');
-          const perCycleQuota = ws.quota ? Number(ws.quota) / ws.maxCycles : 0;
+    if (strategyName === 'daily-dca') {
+      return this.describeDailyDcaNoSignal(ctx);
+    }
 
-          if (hasBuySignal) {
-            // 매수 성공 → 누적 리셋
-            if (params.accumulatedQuota) {
-              await this.prisma.simulationWatchStock.update({
-                where: { id: ws.id },
-                data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
-              });
-            }
-          } else if (perCycleQuota > 0 && params.lastAccumulatedDate !== today) {
-            // 매수 불가 + 오늘 첫 시도 → 누적
-            const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
-            await this.prisma.simulationWatchStock.update({
-              where: { id: ws.id },
-              data: { strategyParams: { ...params, accumulatedQuota: newAccumulated, lastAccumulatedDate: today } },
-            });
-            this.logger.log(`[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (can't afford 1 share)`);
-          }
-        }
-      } catch (e) {
-        this.logger.error(`Simulation tick error for ${ws.stockCode}: ${e.message}`);
+    return 'strategy conditions not met';
+  }
+
+  calculateSessionCycle(
+    session: { quota: Prisma.Decimal | number; maxCycles: number },
+    position?: { totalInvested: Prisma.Decimal | number } | null,
+  ): number {
+    const quota = Number(session.quota);
+    if (!quota || quota <= 0 || session.maxCycles <= 0) {
+      return 0;
+    }
+
+    const perCycleQuota = quota / session.maxCycles;
+    if (perCycleQuota <= 0) {
+      return 0;
+    }
+
+    const totalInvested = position?.totalInvested ? Number(position.totalInvested) : 0;
+    if (totalInvested <= 0) {
+      return 0;
+    }
+
+    return Math.round((totalInvested / perCycleQuota) * 10) / 10;
+  }
+
+  private getPersistedSessionCycle(cycle: number): number {
+    return Math.max(0, Math.floor(cycle));
+  }
+
+  private async syncSessionCycle(sessionId: string, exchangeCode: string, stockCode: string): Promise<void> {
+    const [session, position] = await Promise.all([
+      this.prisma.simulationSession.findUnique({
+        where: { id: sessionId },
+        select: { id: true, quota: true, maxCycles: true, cycle: true },
+      }),
+      this.prisma.simulationPosition.findUnique({
+        where: {
+          sessionId_exchangeCode_stockCode: {
+            sessionId,
+            exchangeCode,
+            stockCode,
+          },
+        },
+        select: { totalInvested: true },
+      }),
+    ]);
+
+    if (!session) return;
+
+    const currentCycle = this.calculateSessionCycle(session, position);
+    const persistedCycle = this.getPersistedSessionCycle(currentCycle);
+    if (persistedCycle === session.cycle) return;
+
+    await this.prisma.simulationSession.update({
+      where: { id: sessionId },
+      data: { cycle: persistedCycle },
+    });
+  }
+
+  private describeInfiniteBuyNoSignal(ctx: StockStrategyContext): string {
+    const { watchStock, price, position, marketCondition, stockIndicators, buyableAmount } = ctx;
+    const currentPrice = price.currentPrice;
+    const hasPosition = !!position && position.quantity > 0;
+
+    if (!watchStock.quota || watchStock.quota <= 0) {
+      return 'quota not configured';
+    }
+
+    if (currentPrice <= 0) {
+      return `invalid current price (${currentPrice})`;
+    }
+
+    if (!marketCondition.referenceIndexAboveMA200) {
+      return hasPosition
+        ? `${marketCondition.referenceIndexName} below MA200, buy paused while position is open`
+        : `${marketCondition.referenceIndexName} below MA200, no new entry`;
+    }
+
+    if (!hasPosition) {
+      if (stockIndicators.investCautionYn) {
+        return 'invest caution flag';
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        return `market warning code ${stockIndicators.marketWarnCode}`;
+      }
+      if (this.hasNegativeConsensus(stockIndicators.consensusRating, stockIndicators.targetPriceUpside)) {
+        return 'negative consensus filter';
       }
     }
+
+    const quota = watchStock.quota;
+    const perCycleQuota = quota / watchStock.maxCycles;
+    const totalInvested = position?.totalInvested || 0;
+    const cycleProgress = perCycleQuota > 0 ? totalInvested / perCycleQuota : 0;
+
+    if (cycleProgress >= watchStock.maxCycles) {
+      return `max cycles reached (T=${cycleProgress.toFixed(1)})`;
+    }
+
+    const adjustedQuota = this.estimateInfiniteBuyQuota(ctx);
+    if (adjustedQuota <= 0) {
+      return `buy quota unavailable after adjustments (cash=${buyableAmount.toFixed(2)})`;
+    }
+
+    if (!hasPosition) {
+      if (Math.floor(adjustedQuota / currentPrice) <= 0) {
+        return `insufficient buy quota for 1 share (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
+      }
+      return 'entry conditions not met';
+    }
+
+    const avgPrice = position?.avgPrice || currentPrice;
+    const holdQty = position?.quantity || 0;
+    if (holdQty > 0 && currentPrice < avgPrice * (1 - watchStock.stopLossRate)) {
+      return 'stop loss would trigger';
+    }
+
+    const sell1Rate = Math.max(10 - cycleProgress / 2, 3) / 100;
+    const sell2Rate = Math.max(15 - cycleProgress / 3, 8) / 100;
+    if (currentPrice >= avgPrice * (1 + sell1Rate)) {
+      return 'sell target active';
+    }
+    if (currentPrice >= avgPrice * (1 + sell2Rate)) {
+      return 'sell target active';
+    }
+
+    if (Math.floor(adjustedQuota / currentPrice) <= 0) {
+      return `insufficient adjusted quota for add-on (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
+    }
+
+    return 'waiting for next buy/sell trigger';
+  }
+
+  private estimateInfiniteBuyQuota(ctx: StockStrategyContext): number {
+    const { watchStock, marketCondition, stockIndicators, buyableAmount } = ctx;
+    if (!watchStock.quota || watchStock.quota <= 0) return 0;
+
+    const accumulatedQuota = Number((watchStock.strategyParams as Record<string, unknown> | undefined)?.accumulatedQuota || 0);
+    const perCycleQuota = watchStock.quota / watchStock.maxCycles;
+    const totalInvested = ctx.position?.totalInvested || 0;
+    const cycleProgress = perCycleQuota > 0 ? totalInvested / perCycleQuota : 0;
+    let adjustedQuota = cycleProgress >= watchStock.maxCycles ? 0 : perCycleQuota + accumulatedQuota;
+
+    if (marketCondition.interestRateRising) adjustedQuota *= 0.5;
+    if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) adjustedQuota *= 1.5;
+    if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 10) adjustedQuota *= 0.7;
+    if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) adjustedQuota *= 1.15;
+    if ((stockIndicators.volatility30d ?? 0) >= 45) adjustedQuota *= 0.7;
+    if (this.hasStrongSellFlow(stockIndicators.foreignNetBuy, stockIndicators.institutionNetBuy, stockIndicators.programTradeDirection)) {
+      adjustedQuota *= 0.7;
+    }
+
+    return Math.min(adjustedQuota, buyableAmount);
+  }
+
+  private describeDailyDcaNoSignal(ctx: StockStrategyContext): string {
+    const { watchStock, price, position, buyableAmount } = ctx;
+    const currentPrice = price.currentPrice;
+
+    if (!watchStock.quota || watchStock.quota <= 0) {
+      return 'quota not configured';
+    }
+
+    if (currentPrice <= 0) {
+      return `invalid current price (${currentPrice})`;
+    }
+
+    const totalInvested = position?.totalInvested || 0;
+    if (totalInvested >= watchStock.quota) {
+      return `quota exhausted (${totalInvested.toFixed(2)} >= ${watchStock.quota.toFixed(2)})`;
+    }
+
+    const accumulatedQuota = Number((watchStock.strategyParams as Record<string, unknown> | undefined)?.accumulatedQuota || 0);
+    const adjustedQuota = Math.min((watchStock.quota / watchStock.maxCycles) + accumulatedQuota, buyableAmount);
+    if (Math.floor(adjustedQuota / currentPrice) <= 0) {
+      return `insufficient buy quota for 1 share (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
+    }
+
+    return 'waiting for next DCA execution';
+  }
+
+  private hasNegativeConsensus(rating?: string, targetPriceUpside?: number): boolean {
+    const negativeRating = /(SELL|REDUCE|비중축소|매도)/i.test(rating ?? '');
+    return negativeRating || (targetPriceUpside !== undefined && targetPriceUpside < -15);
+  }
+
+  private hasStrongSellFlow(
+    foreignNetBuy?: boolean,
+    institutionNetBuy?: boolean,
+    programTradeDirection?: string,
+  ): boolean {
+    const hasFlowData =
+      foreignNetBuy !== undefined ||
+      institutionNetBuy !== undefined ||
+      programTradeDirection !== undefined;
+    if (!hasFlowData) return false;
+    return foreignNetBuy === false
+      && institutionNetBuy === false
+      && programTradeDirection === 'SELL';
   }
 
   /** 지정가 체결 가능 여부 판정 */
@@ -302,6 +502,23 @@ export class SimulationService {
       // Check cash
       if (totalAmount > Number(session.currentCash)) {
         this.logger.warn(`Insufficient cash for BUY ${signal.stockCode}: need ${totalAmount}, have ${session.currentCash}`);
+        await this.prisma.simulationTrade.create({
+          data: {
+            sessionId,
+            market: signal.market as Market,
+            exchangeCode: signal.exchangeCode,
+            stockCode: signal.stockCode,
+            stockName: session.stockName,
+            side: Side.BUY,
+            quantity: 0,
+            price: new Prisma.Decimal(0),
+            totalAmount: new Prisma.Decimal(0),
+            tradeStatus: SimulationTradeStatus.FAILED,
+            failReason: 'Insufficient cash',
+            strategyName: session.strategyName,
+            reason: signal.reason,
+          },
+        });
         return;
       }
 
@@ -312,7 +529,7 @@ export class SimulationService {
           market: signal.market as Market,
           exchangeCode: signal.exchangeCode,
           stockCode: signal.stockCode,
-          stockName: signal.stockCode,
+          stockName: session.stockName,
           side: Side.BUY,
           quantity: signal.quantity,
           price: new Prisma.Decimal(price),
@@ -354,7 +571,7 @@ export class SimulationService {
             market: signal.market as Market,
             exchangeCode: signal.exchangeCode,
             stockCode: signal.stockCode,
-            stockName: signal.stockCode,
+            stockName: session.stockName,
             quantity: signal.quantity,
             avgPrice: new Prisma.Decimal(price),
             currentPrice: new Prisma.Decimal(price),
@@ -370,6 +587,8 @@ export class SimulationService {
         where: { id: sessionId },
         data: { currentCash: { decrement: new Prisma.Decimal(totalAmount) } },
       });
+
+      await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
 
       this.logger.log(`[SIM] BUY ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
     } else {
@@ -390,7 +609,7 @@ export class SimulationService {
           market: signal.market as Market,
           exchangeCode: signal.exchangeCode,
           stockCode: signal.stockCode,
-          stockName: signal.stockCode,
+          stockName: session.stockName,
           side: Side.SELL,
           quantity: signal.quantity,
           price: new Prisma.Decimal(price),
@@ -429,6 +648,8 @@ export class SimulationService {
         data: { currentCash: { increment: new Prisma.Decimal(totalAmount) } },
       });
 
+      await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
+
       this.logger.log(`[SIM] SELL ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
     }
   }
@@ -440,7 +661,6 @@ export class SimulationService {
 
     const session = await this.prisma.simulationSession.findUnique({
       where: { id: sessionId },
-      include: { watchStocks: { where: { isActive: true } } },
     });
     if (!session || session.status !== SimulationStatus.RUNNING) {
       this.pendingOrders.delete(sessionId);
@@ -453,8 +673,7 @@ export class SimulationService {
 
     for (const stockCode of stockCodes) {
       try {
-        const ws = session.watchStocks.find((w) => w.stockCode === stockCode);
-        const exchangeCode = ws?.exchangeCode ?? (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+        const exchangeCode = session.exchangeCode || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
         const priceData = session.market === Market.DOMESTIC
           ? await this.kisDomestic.getPrice(stockCode)
           : await this.kisOverseas.getPrice(exchangeCode, stockCode);
@@ -537,20 +756,22 @@ export class SimulationService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const prevTotalValue = prevSnapshot ? Number(prevSnapshot.totalValue) : Number(session.initialCapital);
+    const startingCapital = Number(session.quota);
+    const prevTotalValue = prevSnapshot ? Number(prevSnapshot.totalValue) : startingCapital;
     const dailyPnl = totalValue - prevTotalValue;
     const dailyPnlRate = prevTotalValue > 0 ? dailyPnl / prevTotalValue : 0;
 
     // Drawdown calculation
     const peakValue = prevSnapshot
       ? Math.max(Number(prevSnapshot.peakValue), totalValue)
-      : Math.max(Number(session.initialCapital), totalValue);
+      : Math.max(startingCapital, totalValue);
     const drawdown = peakValue > 0 ? (peakValue - totalValue) / peakValue : 0;
 
     // Trade count today
     const todayTrades = await this.prisma.simulationTrade.count({
       where: {
         sessionId,
+        tradeStatus: SimulationTradeStatus.EXECUTED,
         createdAt: {
           gte: new Date(today + 'T00:00:00Z'),
           lt: new Date(today + 'T23:59:59Z'),
@@ -599,7 +820,7 @@ export class SimulationService {
       orderBy: { snapshotDate: 'asc' },
     });
     const trades = await this.prisma.simulationTrade.findMany({
-      where: { sessionId },
+      where: { sessionId, tradeStatus: SimulationTradeStatus.EXECUTED },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -609,10 +830,10 @@ export class SimulationService {
     );
     const currentCash = Number(session.currentCash);
     const totalValue = currentPortfolioValue + currentCash;
-    const initialCapital = Number(session.initialCapital);
+    const startingCapital = Number(session.quota);
 
-    const totalReturnAmount = totalValue - initialCapital;
-    const totalReturn = initialCapital > 0 ? totalReturnAmount / initialCapital : 0;
+    const totalReturnAmount = totalValue - startingCapital;
+    const totalReturn = startingCapital > 0 ? totalReturnAmount / startingCapital : 0;
 
     // Max drawdown from snapshots
     const maxDrawdown = snapshots.length > 0
@@ -713,11 +934,11 @@ export class SimulationService {
     return this.prisma.simulationSession.update({
       where: { id: sessionId },
       data: {
-        currentCash: session.initialCapital,
+        currentCash: session.quota,
+        cycle: 0,
         status: SimulationStatus.RUNNING,
         stoppedAt: null,
       },
-      include: { watchStocks: true },
     });
   }
 
@@ -760,49 +981,6 @@ export class SimulationService {
     }
   }
 
-  async addWatchStock(input: AddSimulationWatchStockInput) {
-    await this.watchStockService.checkGlobalLimit();
-
-    if (input.quota) {
-      const session = await this.prisma.simulationSession.findUnique({
-        where: { id: input.sessionId },
-        include: { watchStocks: true },
-      });
-      if (!session) {
-        throw new BadRequestException('세션을 찾을 수 없습니다');
-      }
-      const currentTotal = session.watchStocks.reduce(
-        (sum, ws) => sum + (ws.quota ? Number(ws.quota) : 0),
-        0,
-      );
-      if (currentTotal + input.quota > Number(session.initialCapital)) {
-        throw new BadRequestException(
-          `배정 금액이 초기자본을 초과합니다. 초기자본: ${Number(session.initialCapital)}, 현재 배정: ${currentTotal}, 추가 요청: ${input.quota}`,
-        );
-      }
-    }
-
-    return this.prisma.simulationWatchStock.create({
-      data: {
-        sessionId: input.sessionId,
-        market: input.market,
-        exchangeCode: input.exchangeCode,
-        stockCode: input.stockCode,
-        stockName: input.stockName,
-        quota: input.quota ? new Prisma.Decimal(input.quota) : null,
-        maxCycles: input.maxCycles ?? 40,
-        stopLossRate: input.stopLossRate ? new Prisma.Decimal(input.stopLossRate) : new Prisma.Decimal(0.3),
-        maxPortfolioRate: input.maxPortfolioRate ? new Prisma.Decimal(input.maxPortfolioRate) : new Prisma.Decimal(0.2),
-        strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
-      },
-    });
-  }
-
-  async removeWatchStock(id: string): Promise<boolean> {
-    await this.prisma.simulationWatchStock.delete({ where: { id } });
-    return true;
-  }
-
   async updateStatus(id: string, status: SimulationStatus) {
     const data: any = { status };
     if (status === SimulationStatus.COMPLETED) {
@@ -811,7 +989,45 @@ export class SimulationService {
     return this.prisma.simulationSession.update({
       where: { id },
       data,
-      include: { watchStocks: true },
+    });
+  }
+
+  async updateSettings(
+    id: string,
+    data: {
+      name?: string;
+      stopLossRate?: number;
+      maxCycles?: number;
+    },
+  ) {
+    const updateData: Prisma.SimulationSessionUpdateInput = {};
+
+    if (data.name !== undefined) {
+      const name = data.name.trim();
+      if (!name) {
+        throw new BadRequestException('시뮬레이션 이름은 비워둘 수 없습니다.');
+      }
+      updateData.name = name;
+    }
+
+    if (data.stopLossRate !== undefined) {
+      if (data.stopLossRate < 0 || data.stopLossRate >= 1) {
+        throw new BadRequestException('손절률은 0% 이상 100% 미만이어야 합니다.');
+      }
+      updateData.stopLossRate = new Prisma.Decimal(data.stopLossRate);
+    }
+
+    if (data.maxCycles !== undefined) {
+      if (!Number.isInteger(data.maxCycles) || data.maxCycles <= 0) {
+        throw new BadRequestException('사이클 수는 1 이상의 정수여야 합니다.');
+      }
+      updateData.maxCycles = data.maxCycles;
+    }
+
+    return this.prisma.simulationSession.update({
+      where: { id },
+      data: updateData,
+      include: { positions: true },
     });
   }
 
@@ -819,7 +1035,7 @@ export class SimulationService {
     const where = status ? { status } : {};
     return this.prisma.simulationSession.findMany({
       where,
-      include: { watchStocks: true, positions: true },
+      include: { positions: true },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -827,7 +1043,7 @@ export class SimulationService {
   async getSession(id: string) {
     return this.prisma.simulationSession.findUnique({
       where: { id },
-      include: { watchStocks: true, positions: true },
+      include: { positions: true },
     });
   }
 
@@ -838,9 +1054,17 @@ export class SimulationService {
     });
   }
 
-  async getTrades(sessionId: string, limit?: number, offset?: number) {
+  async getTrades(
+    sessionId: string,
+    limit?: number,
+    offset?: number,
+    tradeStatus?: SimulationTradeStatus,
+  ) {
     return this.prisma.simulationTrade.findMany({
-      where: { sessionId },
+      where: {
+        sessionId,
+        ...(tradeStatus ? { tradeStatus } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: limit || 50,
       skip: offset || 0,

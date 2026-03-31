@@ -108,4 +108,3 @@ mutation ManualSell($input: ManualSellInput!) {
     orderNo
   }
 }
-

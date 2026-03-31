@@ -9,12 +9,10 @@ describe('WatchStockService', () => {
     watchStock: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
-      count: jest.fn().mockResolvedValue(0),
-    },
-    simulationWatchStock: {
       count: jest.fn().mockResolvedValue(0),
     },
   };
@@ -132,6 +130,34 @@ describe('WatchStockService', () => {
           strategyName: 'infinite-buy',
         }),
       });
+    });
+
+    it('should throw a friendly error when the stock is already registered', async () => {
+      const input = {
+        market: 'DOMESTIC' as any,
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        stockName: 'Samsung',
+      };
+
+      mockPrisma.watchStock.findFirst.mockResolvedValue({ id: 'existing' });
+
+      await expect(service.create(input)).rejects.toThrow('이미 등록된 관심종목입니다.');
+      expect(mockPrisma.watchStock.create).not.toHaveBeenCalled();
+    });
+
+    it('should translate unique constraint errors into a friendly message', async () => {
+      const input = {
+        market: 'DOMESTIC' as any,
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        stockName: 'Samsung',
+      };
+
+      mockPrisma.watchStock.findFirst.mockResolvedValue(null);
+      mockPrisma.watchStock.create.mockRejectedValue({ code: 'P2002' });
+
+      await expect(service.create(input)).rejects.toThrow('이미 등록된 관심종목입니다.');
     });
   });
 

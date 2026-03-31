@@ -12,14 +12,19 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award, BookOpen } from 'lucide-react'
+import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award, BookOpen, FlaskConical, X } from 'lucide-react'
 import {
   useGetScreeningDateSummariesQuery,
   useGetStockRecommendationsQuery,
   useGetStockDeepAnalysisQuery,
+  useCreateSimulationMutation,
+  GetSimulationSessionsDocument,
+  type Market,
   type GetStockRecommendationsQuery,
 } from '@/graphql/generated'
+import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import { formatNumber } from '@/lib/utils'
 import { EXCHANGE_LABELS, COUNTRY_OPTIONS } from '@/lib/market-constants'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -417,10 +422,12 @@ function StockDetailView({
     <>
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        type="button"
+        aria-label="목록으로 이동"
+        title="목록으로 이동"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
       >
         <ChevronLeft className="h-4 w-4" />
-        목록으로
       </button>
 
       <div className="flex items-center gap-3">
@@ -489,11 +496,15 @@ function RecommendationCard({
   onToggle: () => void
 }) {
   const [showDeepHelp, setShowDeepHelp] = useState(false)
+  const [simTarget, setSimTarget] = useState<{
+    rec: ScreeningRecommendationItem
+    strategy: { name: string; displayName: string; matchScore: number }
+  } | null>(null)
   let reasons: string[] = []
-  try { reasons = JSON.parse(rec.reasons) } catch { }
+  try { reasons = JSON.parse(rec.reasons) } catch { /* ignore invalid JSON */ }
 
   let indicators: Record<string, unknown> = {}
-  try { indicators = JSON.parse(rec.indicators) } catch { }
+  try { indicators = JSON.parse(rec.indicators) } catch { /* ignore invalid JSON */ }
 
   const { data: deepAnalysisData, loading: deepLoading } = useGetStockDeepAnalysisQuery({
     variables: { stockCode: rec.stockCode, date },
@@ -720,6 +731,26 @@ function RecommendationCard({
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">{strategy.reason}</p>
                     </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSimTarget({
+                          rec,
+                          strategy: {
+                            name: strategy.name,
+                            displayName: strategy.displayName,
+                            matchScore: strategy.matchScore,
+                          },
+                        })
+                      }}
+                    >
+                      <FlaskConical size={14} />
+                      시뮬레이션 추가
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -741,7 +772,120 @@ function RecommendationCard({
           )}
         </CardContent>
       )}
+
+      {simTarget && (
+        <AddToSimulationModal
+          rec={simTarget.rec}
+          strategyName={simTarget.strategy.name}
+          strategyDisplayName={simTarget.strategy.displayName}
+          onClose={() => setSimTarget(null)}
+        />
+      )}
     </Card>
+  )
+}
+
+function AddToSimulationModal({
+  rec,
+  strategyName,
+  strategyDisplayName,
+  onClose,
+}: {
+  rec: ScreeningRecommendationItem
+  strategyName: string
+  strategyDisplayName: string
+  onClose: () => void
+}) {
+  const defaultName = `${rec.stockName} × ${strategyDisplayName}`
+  const [name, setName] = useState(defaultName)
+  const [investmentAmount, setInvestmentAmount] = useState('')
+  const [error, setError] = useState('')
+
+  const [createMutation, { loading }] = useCreateSimulationMutation({
+    refetchQueries: [GetSimulationSessionsDocument],
+  })
+
+  const handleCreate = async () => {
+    const missing: string[] = []
+    if (!name.trim()) missing.push('이름')
+    if (!investmentAmount || Number(investmentAmount) <= 0) missing.push('투자금')
+
+    if (missing.length > 0) {
+      setError(`${missing.join(', ')}을(를) 입력해주세요`)
+      return
+    }
+
+    setError('')
+
+    try {
+      await createMutation({
+        variables: {
+          input: {
+            name: name.trim(),
+            market: rec.market as Market,
+            exchangeCode: rec.exchangeCode,
+            stockCode: rec.stockCode,
+            stockName: rec.stockName,
+            strategyName,
+            quota: Number(investmentAmount),
+          },
+        },
+      })
+      onClose()
+    } catch (e: unknown) {
+      setError(getMutationErrorMessage(e, '생성 중 오류가 발생했습니다'))
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+
+      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-bold text-foreground">{rec.stockName} × {strategyDisplayName}</h3>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">이름</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">투자금</label>
+            <Input
+              type="number"
+              value={investmentAmount}
+              onChange={(e) => setInvestmentAmount(e.target.value)}
+            />
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            손절률 등 상세 설정은 시뮬레이션 페이지에서 변경할 수 있습니다.
+          </p>
+
+          {error && <p className="text-sm text-danger">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={onClose}>취소</Button>
+            <Button onClick={handleCreate} disabled={loading}>
+              {loading ? '생성중...' : '생성'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

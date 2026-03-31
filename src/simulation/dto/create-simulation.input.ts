@@ -2,7 +2,13 @@ import { InputType, Field, Float } from '@nestjs/graphql';
 import { Market } from '@prisma/client';
 
 @InputType()
-export class WatchStockInput {
+export class CreateSimulationInput {
+  @Field()
+  name: string;
+
+  @Field({ nullable: true })
+  description?: string;
+
   @Field(() => Market)
   market: Market;
 
@@ -15,8 +21,14 @@ export class WatchStockInput {
   @Field()
   stockName: string;
 
-  @Field(() => Float, { nullable: true })
-  quota?: number;
+  @Field({ nullable: true })
+  countryCode?: string;
+
+  @Field()
+  strategyName: string;
+
+  @Field(() => Float)
+  quota: number;
 
   @Field(() => Float, { nullable: true })
   stopLossRate?: number;
@@ -26,28 +38,4 @@ export class WatchStockInput {
 
   @Field({ nullable: true })
   strategyParams?: string;
-}
-
-@InputType()
-export class CreateSimulationInput {
-  @Field()
-  name: string;
-
-  @Field({ nullable: true })
-  description?: string;
-
-  @Field(() => Market)
-  market: Market;
-
-  @Field({ nullable: true })
-  countryCode?: string;
-
-  @Field()
-  strategyName: string;
-
-  @Field(() => Float)
-  initialCapital: number;
-
-  @Field(() => [WatchStockInput], { nullable: true })
-  watchStocks?: WatchStockInput[];
 }

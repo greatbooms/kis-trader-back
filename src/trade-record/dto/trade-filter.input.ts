@@ -10,6 +10,12 @@ export class TradeFilterInput {
   side?: Side;
 
   @Field({ nullable: true })
+  stockCode?: string;
+
+  @Field({ nullable: true })
+  exchangeCode?: string;
+
+  @Field({ nullable: true })
   dateFrom?: string;
 
   @Field({ nullable: true })

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,9 +19,11 @@ import {
 import { StockSearchInput } from '@/components/StockSearchInput'
 import { formatCurrency } from '@/lib/utils'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
+import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import type { WatchStockUpdateInput } from '@/pages/types'
 
 export function WatchlistPage() {
+  const navigate = useNavigate()
   const [countryFilter, setCountryFilter] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingStock, setEditingStock] = useState<typeof allStocks[number] | null>(null)
@@ -99,6 +102,7 @@ export function WatchlistPage() {
                   key={stock.id}
                   stock={stock}
                   strategies={strategies}
+                  onOpenDetail={() => navigate(`/watchlist/${stock.id}`)}
                   onEdit={() => setEditingStock(stock)}
                   onToggleActive={async () => {
                     await updateMutation({ variables: { id: stock.id, input: { isActive: !stock.isActive } } })
@@ -217,7 +221,7 @@ function AddWatchStockModal({
         strategyParams: Object.keys(params).length > 0 ? JSON.stringify(params) : undefined,
       })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '추가 중 오류가 발생했습니다')
+      setError(getMutationErrorMessage(e, '추가 중 오류가 발생했습니다'))
     } finally {
       setSubmitting(false)
     }
@@ -428,18 +432,23 @@ interface WatchStockItem {
 function WatchStockRow({
   stock,
   strategies,
+  onOpenDetail,
   onEdit,
   onToggleActive,
   onDelete,
 }: {
   stock: WatchStockItem
   strategies: { name: string; displayName: string }[]
+  onOpenDetail: () => void
   onEdit: () => void
   onToggleActive: () => Promise<void>
   onDelete: () => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border/50 p-3 hover:border-primary-200 transition-colors">
+    <div
+      className="flex items-center justify-between rounded-lg border border-border/50 p-3 hover:border-primary-200 transition-colors cursor-pointer"
+      onClick={onOpenDetail}
+    >
       <div className="flex items-center gap-4 flex-1">
         <div>
           <div className="flex items-center gap-2">
@@ -475,15 +484,34 @@ function WatchStockRow({
           size="sm"
           variant={stock.isActive ? 'default' : 'outline'}
           className={`h-8 px-3 text-xs gap-1 ${stock.isActive ? 'bg-success hover:bg-success/80' : ''}`}
-          onClick={onToggleActive}
+          onClick={(e) => {
+            e.stopPropagation()
+            void onToggleActive()
+          }}
         >
           <Power size={12} />
           {stock.isActive ? '활성' : '비활성'}
         </Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onEdit}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit()
+          }}
+        >
           <Pencil size={14} />
         </Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8 text-danger" onClick={onDelete}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 text-danger"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+        >
           <Trash2 size={14} />
         </Button>
       </div>
@@ -597,7 +625,7 @@ function EditWatchStockModal({
         strategyParams,
       })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '수정 중 오류가 발생했습니다')
+      setError(getMutationErrorMessage(e, '수정 중 오류가 발생했습니다'))
     } finally {
       setSubmitting(false)
     }

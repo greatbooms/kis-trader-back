@@ -20,6 +20,45 @@ query GetWatchStocks($input: WatchStocksFilterInput) {
   }
 }
 
+query GetWatchStock($id: ID!) {
+  watchStock(id: $id) {
+    id
+    market
+    exchangeCode
+    stockCode
+    stockName
+    isActive
+    strategyName
+    quota
+    cycle
+    maxCycles
+    stopLossRate
+    maxPortfolioRate
+    strategyParams
+    lastExecutionStatus
+    lastExecutionDate
+    createdAt
+    updatedAt
+  }
+}
+
+query GetWatchStockExecutionLogs($watchStockId: String!, $limit: Float) {
+  watchStockExecutionLogs(watchStockId: $watchStockId, limit: $limit) {
+    id
+    watchStockId
+    tradeRecordId
+    market
+    exchangeCode
+    stockCode
+    stockName
+    strategyName
+    eventType
+    message
+    details
+    createdAt
+  }
+}
+
 mutation CreateWatchStock($input: CreateWatchStockInput!) {
   createWatchStock(input: $input) {
     id

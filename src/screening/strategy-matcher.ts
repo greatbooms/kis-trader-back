@@ -102,6 +102,70 @@ function extractPrimaryBuyReason(signals: TradingSignal[]): string {
   return signals.find((signal) => signal.side === 'BUY')?.reason ?? '전략 진입 조건 충족';
 }
 
+function buildRecommendationReason(
+  strategyName: string,
+  context: StockStrategyContext,
+  buySignals: TradingSignal[],
+): string {
+  const { stockIndicators, fundamentals } = context;
+
+  switch (strategyName) {
+    case 'momentum-breakout':
+      return stockIndicators.volumeRatio && stockIndicators.volumeRatio >= 1.5
+        ? '거래량이 동반된 돌파 흐름이 확인됐습니다.'
+        : '가격 돌파와 모멘텀 진입 조건이 맞았습니다.';
+
+    case 'trend-following': {
+      const hasSupportiveFlow = Boolean(
+        stockIndicators.foreignNetBuy ||
+        stockIndicators.institutionNetBuy ||
+        stockIndicators.programTradeDirection === 'BUY',
+      );
+      if (hasSupportiveFlow) return '상승 추세에 수급 지지까지 확인됐습니다.';
+      if ((stockIndicators.adx14 ?? 0) >= 25) return '상승 추세와 추세 강도가 함께 살아 있습니다.';
+      return '추세 추종 전략의 진입 조건을 충족했습니다.';
+    }
+
+    case 'value-factor': {
+      const valueSignals: string[] = [];
+      if ((fundamentals?.per ?? Number.POSITIVE_INFINITY) < 10) valueSignals.push('저PER');
+      if ((fundamentals?.pbr ?? Number.POSITIVE_INFINITY) < 1) valueSignals.push('저PBR');
+      if ((fundamentals?.roe ?? 0) >= 10) valueSignals.push('수익성');
+      if ((stockIndicators.dividendYield ?? 0) >= 1.5) valueSignals.push('배당');
+      if (valueSignals.length > 0) return `${valueSignals.join('·')} 조건이 고르게 맞습니다.`;
+      return '저평가와 재무 안정성 조건을 함께 충족했습니다.';
+    }
+
+    case 'grid-mean-reversion':
+      return '과매도 구간에서 반등 진입 조건이 확인됐습니다.';
+
+    case 'conservative':
+      return '리스크를 낮춘 보수적 진입 조건에 맞는 흐름입니다.';
+
+    case 'infinite-buy': {
+      const stableDividend = (stockIndicators.dividendYield ?? 0) >= 1.5
+        && (stockIndicators.consecutiveDividendYears ?? 0) >= 3;
+      const flowSupportive = Boolean(
+        stockIndicators.foreignNetBuy ||
+        stockIndicators.institutionNetBuy ||
+        stockIndicators.programTradeDirection === 'BUY',
+      );
+
+      if (stableDividend && flowSupportive) return '분할매수 시작 조건과 배당·수급 안정성이 함께 확인됐습니다.';
+      if (stableDividend) return '분할매수 시작 조건과 배당 안정성이 확인됐습니다.';
+      if (flowSupportive) return '분할매수 시작 조건과 수급 지지가 확인됐습니다.';
+      return '분할매수 시작 조건이 충족된 종목입니다.';
+    }
+
+    default:
+      return extractPrimaryBuyReason(buySignals)
+        .replace(/\s*\d+주\s*@\s*[\d.]+/g, '')
+        .replace(/\s*T=\d+(\.\d+)?/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim() || '전략 진입 조건을 충족했습니다.';
+  }
+}
+
 function buildSignalBackedMatchScore(strategyName: string, buySignals: TradingSignal[]): number {
   const priorityIndex = SCREENING_RECOMMENDATION_PRIORITY.indexOf(strategyName as typeof SCREENING_RECOMMENDATION_PRIORITY[number]);
   const baseScore = priorityIndex >= 0 ? 96 - priorityIndex * 2 : 84;
@@ -133,7 +197,7 @@ export async function suggestStrategies(
           name: strategy.name,
           displayName: strategy.displayName,
           matchScore: buildSignalBackedMatchScore(strategy.name, buySignals),
-          reason: extractPrimaryBuyReason(buySignals),
+          reason: buildRecommendationReason(strategy.name, recommendationContext, buySignals),
         } satisfies SuggestedStrategy;
       }),
   );

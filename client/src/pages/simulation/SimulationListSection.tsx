@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { StockSearchInput } from '@/components/StockSearchInput'
 import { Plus, X } from 'lucide-react'
 import {
   useGetSimulationSessionsQuery,
@@ -12,9 +13,11 @@ import {
   GetSimulationSessionsDocument,
   type SimulationStatus,
   type Market,
+  type StockSearchResult,
 } from '@/graphql/generated'
 import { formatCurrency } from '@/lib/utils'
-import { EXCHANGE_LABELS } from '@/lib/market-constants'
+import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
+import { getMutationErrorMessage } from '@/lib/apollo-utils'
 
 const statusConfig: Record<string, { label: string; variant: 'success' | 'warning' | 'info' | 'outline' }> = {
   RUNNING: { label: '실행중', variant: 'success' },
@@ -68,7 +71,9 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
           {sessions.map((session) => {
             const status = statusConfig[session.status] ?? { label: session.status, variant: 'outline' as const }
             const totalAssets = session.currentCash + (session.portfolioValue ?? 0)
-            const pnl = totalAssets - session.initialCapital
+            const pnl = totalAssets - session.quota
+            const strategyDisplayName = strategies.find((s) => s.name === session.strategyName)?.displayName ?? session.strategyName
+
             return (
               <Card
                 key={session.id}
@@ -76,47 +81,39 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
                 onClick={() => onSelect(session.id)}
               >
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{session.name}</CardTitle>
-                    <Badge variant={status.variant}>{status.label}</Badge>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">{session.stockName}</CardTitle>
+                      <div className="mt-1">
+                        <Badge variant="info">{strategyDisplayName}</Badge>
+                      </div>
+                      <CardDescription className="mt-2">{session.name}</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <Badge variant="outline">{EXCHANGE_LABELS[session.exchangeCode] ?? session.exchangeCode}</Badge>
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Badge>{strategies.find((s) => s.name === session.strategyName)?.displayName ?? session.strategyName}</Badge>
-                    {(() => {
-                      const codes = [...new Set((session.watchStocks ?? []).map((ws) => ws.exchangeCode).filter((c): c is string => !!c))]
-                      return codes.length > 0
-                        ? codes.map((code) => (
-                            <Badge key={code} variant="info">{EXCHANGE_LABELS[code] ?? code}</Badge>
-                          ))
-                        : (
-                            <Badge variant={session.market === 'DOMESTIC' ? 'default' : 'info'}>
-                              {session.market === 'DOMESTIC' ? '국내' : '해외'}
-                            </Badge>
-                          )
-                    })()}
+                    <Badge variant="outline">{session.stockCode}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">초기 자본</span>
-                      <span className="font-medium">{formatCurrency(session.initialCapital, session.market)}</span>
+                      <span className="text-muted-foreground">투자금</span>
+                      <span className="font-medium">{formatCurrency(session.quota, session.market, session.exchangeCode)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">현재 현금</span>
-                      <span className="font-medium">{formatCurrency(session.currentCash, session.market)}</span>
+                      <span className="font-medium">{formatCurrency(session.currentCash, session.market, session.exchangeCode)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">손익</span>
                       <span className={`font-medium ${pnl >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {formatCurrency(pnl, session.market)}
+                        {formatCurrency(pnl, session.market, session.exchangeCode)}
                       </span>
                     </div>
-                    {session.watchStocks && session.watchStocks.length > 0 && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        관심종목 {session.watchStocks.length}개
-                      </div>
-                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -136,15 +133,6 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
   )
 }
 
-const COUNTRY_OPTIONS = [
-  { value: 'KR', label: '한국', market: 'DOMESTIC' as Market, exchanges: ['KRX'] },
-  { value: 'US', label: '미국', market: 'OVERSEAS' as Market, exchanges: ['NASD', 'NYSE', 'AMEX'] },
-  { value: 'HK', label: '홍콩', market: 'OVERSEAS' as Market, exchanges: ['SEHK'] },
-  { value: 'CN', label: '중국', market: 'OVERSEAS' as Market, exchanges: ['SHAA', 'SZAA'] },
-  { value: 'JP', label: '일본', market: 'OVERSEAS' as Market, exchanges: ['TKSE'] },
-  { value: 'VN', label: '베트남', market: 'OVERSEAS' as Market, exchanges: ['HASE', 'VNSE'] },
-]
-
 function CreateSimulationModal({
   strategies,
   statusFilter,
@@ -156,13 +144,16 @@ function CreateSimulationModal({
 }) {
   const [name, setName] = useState('')
   const [country, setCountry] = useState('KR')
+  const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null)
   const [strategyName, setStrategyName] = useState('')
-  const [initialCapital, setInitialCapital] = useState('')
+  const [investmentAmount, setInvestmentAmount] = useState('')
+  const [stopLossRate, setStopLossRate] = useState('')
+  const [strategyParams, setStrategyParams] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === country)
-  const market = selectedCountry?.market ?? 'DOMESTIC'
+  const selectedCountry = COUNTRY_OPTIONS.find((item) => item.value === country)
+  const market = (selectedStock?.market as Market | undefined) ?? selectedCountry?.market ?? 'DOMESTIC'
 
   const [createMutation] = useCreateSimulationMutation({
     refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { input: statusFilter ? { status: statusFilter } : undefined } }],
@@ -171,8 +162,9 @@ function CreateSimulationModal({
   const handleCreate = async () => {
     const missing: string[] = []
     if (!name.trim()) missing.push('이름')
+    if (!selectedStock) missing.push('종목')
     if (!strategyName) missing.push('전략')
-    if (!initialCapital || Number(initialCapital) <= 0) missing.push('초기 자본금')
+    if (!investmentAmount || Number(investmentAmount) <= 0) missing.push('투자금')
 
     if (missing.length > 0) {
       setError(`${missing.join(', ')}을(를) 입력해주세요`)
@@ -181,22 +173,33 @@ function CreateSimulationModal({
 
     setError('')
     setSubmitting(true)
+
+    if (!selectedStock) {
+      setError('종목을 입력해주세요')
+      setSubmitting(false)
+      return
+    }
+
     try {
       await createMutation({
         variables: {
           input: {
             name: name.trim(),
             market,
+            exchangeCode: selectedStock.exchangeCode,
+            stockCode: selectedStock.stockCode,
+            stockName: selectedStock.stockName,
             countryCode: country,
             strategyName,
-            initialCapital: Number(initialCapital),
+            quota: Number(investmentAmount),
+            stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
+            strategyParams: strategyParams.trim() || undefined,
           },
         },
       })
       onClose()
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : '생성 중 오류가 발생했습니다'
-      setError(msg)
+      setError(getMutationErrorMessage(e, '생성 중 오류가 발생했습니다'))
     } finally {
       setSubmitting(false)
     }
@@ -204,11 +207,9 @@ function CreateSimulationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      {/* Modal */}
-      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-md mx-4 p-6">
+      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold text-foreground">새 시뮬레이션</h3>
           <button
@@ -232,36 +233,79 @@ function CreateSimulationModal({
 
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">시장</label>
-            <Select value={country} onChange={(e) => setCountry(e.target.value)}>
-              {COUNTRY_OPTIONS.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
+            <Select
+              value={country}
+              onChange={(e) => {
+                setCountry(e.target.value)
+                setSelectedStock(null)
+              }}
+            >
+              {COUNTRY_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </Select>
           </div>
+
+          {selectedCountry && (
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">종목 검색</label>
+              <StockSearchInput
+                market={selectedCountry.market}
+                exchangeCode={selectedCountry.exchanges.length === 1 ? selectedCountry.exchanges[0] : undefined}
+                onSelect={setSelectedStock}
+                placeholder={`${selectedCountry.label} 종목명 또는 코드 검색`}
+              />
+              {selectedStock && (
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <Badge variant="info">{EXCHANGE_LABELS[selectedStock.exchangeCode ?? ''] ?? selectedStock.exchangeCode}</Badge>
+                  <span className="text-sm font-medium">{selectedStock.stockName}</span>
+                  <span className="text-xs text-muted-foreground">{selectedStock.stockCode}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">전략</label>
             <Select value={strategyName} onChange={(e) => setStrategyName(e.target.value)}>
               <option value="">전략을 선택하세요</option>
-              {strategies.map((s) => (
-                <option key={s.name} value={s.name}>{s.displayName}</option>
+              {strategies.map((strategy) => (
+                <option key={strategy.name} value={strategy.name}>{strategy.displayName}</option>
               ))}
             </Select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">초기 자본금</label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">투자금</label>
             <Input
               placeholder="예: 10000000"
               type="number"
-              value={initialCapital}
-              onChange={(e) => setInitialCapital(e.target.value)}
+              value={investmentAmount}
+              onChange={(e) => setInvestmentAmount(e.target.value)}
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-danger">{error}</p>
-          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">손절률 (%)</label>
+              <Input
+                placeholder="예: 30"
+                type="number"
+                value={stopLossRate}
+                onChange={(e) => setStopLossRate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">고급 설정 (strategyParams)</label>
+              <Input
+                placeholder='예: {"sell1Rate":0.05}'
+                value={strategyParams}
+                onChange={(e) => setStrategyParams(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-danger">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>취소</Button>

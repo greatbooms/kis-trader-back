@@ -1,4 +1,5 @@
 import { InputType, Field, Int } from '@nestjs/graphql';
+import { SimulationTradeStatus } from '@prisma/client';
 
 @InputType()
 export class SimulationTradesFilterInput {
@@ -10,4 +11,7 @@ export class SimulationTradesFilterInput {
 
   @Field(() => Int, { nullable: true })
   offset?: number;
+
+  @Field(() => SimulationTradeStatus, { nullable: true })
+  tradeStatus?: SimulationTradeStatus;
 }

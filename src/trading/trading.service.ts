@@ -8,7 +8,7 @@ import {
   StockStrategyContext,
 } from './types';
 import { BalanceItem } from '../kis/types/kis-api.types';
-import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma } from '@prisma/client';
+import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { TradeAlertContext, FilterLogContext } from '../notification/types/notification.types';
 
@@ -22,6 +22,31 @@ export class TradingService {
     private prisma: PrismaService,
     @Optional() private slackService?: SlackService,
   ) {}
+
+  private async logWatchStockExecution(
+    ctx: StockStrategyContext | undefined,
+    eventType: WatchStockExecutionEventType,
+    message: string,
+    details?: Record<string, any>,
+    tradeRecordId?: string,
+  ): Promise<void> {
+    if (!ctx?.watchStock?.id) return;
+
+    await this.prisma.watchStockExecutionLog.create({
+      data: {
+        watchStockId: ctx.watchStock.id,
+        tradeRecordId,
+        market: ctx.watchStock.market as Market,
+        exchangeCode: ctx.watchStock.exchangeCode,
+        stockCode: ctx.watchStock.stockCode,
+        stockName: ctx.watchStock.stockName,
+        strategyName: ctx.watchStock.strategyName,
+        eventType,
+        message,
+        details,
+      },
+    });
+  }
 
   /** 종목별 전략 실행 */
   async executePerStockStrategy(
@@ -41,6 +66,15 @@ export class TradingService {
           } else if (ctx.alreadyExecutedToday) {
             reason = '오늘 이미 실행됨';
           }
+
+          await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SKIPPED, reason, {
+            marketCondition: ctx.marketCondition.referenceIndexName,
+            referenceIndexAboveMa200: ctx.marketCondition.referenceIndexAboveMA200,
+            alreadyExecutedToday: ctx.alreadyExecutedToday,
+            hasPosition: !!ctx.position,
+            rsi14: ctx.stockIndicators.rsi14,
+            ma200: ctx.stockIndicators.ma200,
+          });
 
           // Send filter skip log to Slack
           if (this.slackService?.isEnabled()) {
@@ -63,6 +97,20 @@ export class TradingService {
           `Strategy "${strategy.name}" generated ${signals.length} signal(s) for ${ctx.watchStock.stockCode}`,
         );
 
+        await this.logWatchStockExecution(
+          ctx,
+          WatchStockExecutionEventType.SIGNAL_CREATED,
+          `${signals.length}개 시그널 생성`,
+          {
+            signals: signals.map((signal) => ({
+              side: signal.side,
+              quantity: signal.quantity,
+              price: signal.price,
+              reason: signal.reason,
+            })),
+          },
+        );
+
         for (const signal of signals) {
           await this.executeSignal(signal, strategy.name, ctx);
         }
@@ -75,6 +123,12 @@ export class TradingService {
           }
         }
       } catch (e) {
+        await this.logWatchStockExecution(
+          ctx,
+          WatchStockExecutionEventType.ERROR,
+          `전략 실행 오류: ${e.message}`,
+          { error: e.message },
+        );
         this.logger.error(
           `Error executing strategy for ${ctx.watchStock.stockCode}: ${e.message}`,
         );
@@ -186,6 +240,20 @@ export class TradingService {
       const currentPrice = ctx?.price?.currentPrice || Number(signal.price);
       const lossRate = avgPrice > 0 ? (avgPrice - currentPrice) / avgPrice : 0;
 
+      await this.logWatchStockExecution(
+        ctx,
+        WatchStockExecutionEventType.ORDER_AWAITING_APPROVAL,
+        `손절 승인 대기: ${signal.side} ${signal.quantity}주`,
+        {
+          side: signal.side,
+          quantity: signal.quantity,
+          price: signal.price,
+          reason: signal.reason,
+          lossRate,
+        },
+        record.id,
+      );
+
       const approval = await this.prisma.stopLossApproval.create({
         data: {
           tradeRecordId: record.id,
@@ -240,6 +308,20 @@ export class TradingService {
               where: { id: record.id },
               data: { status: OrderStatus.CANCELLED, reason: 'Stop-loss approval timed out (auto-skipped)' },
             });
+            await this.prisma.watchStockExecutionLog.create({
+              data: {
+                watchStockId: ctx!.watchStock.id,
+                tradeRecordId: record.id,
+                market: ctx!.watchStock.market as Market,
+                exchangeCode: ctx!.watchStock.exchangeCode,
+                stockCode: ctx!.watchStock.stockCode,
+                stockName: ctx!.watchStock.stockName,
+                strategyName: strategyName || 'unknown',
+                eventType: WatchStockExecutionEventType.ORDER_CANCELLED,
+                message: '손절 승인 시간 초과로 주문 취소',
+                details: { reason: 'approval timeout' },
+              },
+            });
 
             if (current.slackMessageTs && current.slackChannel) {
               await this.slackService!.updateStopLossApprovalMessage(
@@ -273,6 +355,20 @@ export class TradingService {
       },
     });
 
+    await this.logWatchStockExecution(
+      ctx,
+      WatchStockExecutionEventType.ORDER_SUBMITTED,
+      `주문 제출: ${signal.side} ${signal.quantity}주`,
+      {
+        side: signal.side,
+        quantity: signal.quantity,
+        price: signal.price,
+        reason: signal.reason,
+        orderType,
+      },
+      record.id,
+    );
+
     try {
       let result;
       if (signal.market === 'DOMESTIC') {
@@ -295,6 +391,23 @@ export class TradingService {
           reason: result.message,
         },
       });
+
+      await this.logWatchStockExecution(
+        ctx,
+        result.success ? WatchStockExecutionEventType.ORDER_FILLED : WatchStockExecutionEventType.ORDER_FAILED,
+        result.success
+          ? `주문 체결: ${signal.side} ${signal.quantity}주`
+          : `주문 실패: ${result.message ?? '실패'}`,
+        {
+          side: signal.side,
+          quantity: signal.quantity,
+          price: signal.price,
+          orderNo: result.orderNo,
+          reason: signal.reason,
+          brokerMessage: result.message,
+        },
+        record.id,
+      );
 
       if (result.success) {
         this.logger.log(`Order executed: ${signal.side} ${signal.stockCode} x ${signal.quantity}`);
@@ -349,6 +462,19 @@ export class TradingService {
         where: { id: record.id },
         data: { status: OrderStatus.FAILED, reason: e.message },
       });
+      await this.logWatchStockExecution(
+        ctx,
+        WatchStockExecutionEventType.ORDER_FAILED,
+        `주문 예외: ${e.message}`,
+        {
+          side: signal.side,
+          quantity: signal.quantity,
+          price: signal.price,
+          reason: signal.reason,
+          error: e.message,
+        },
+        record.id,
+      );
       this.logger.error(`Order exception: ${e.message}`);
     }
   }

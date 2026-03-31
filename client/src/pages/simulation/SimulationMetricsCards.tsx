@@ -36,7 +36,7 @@ export function SimulationMetricsCards({ sessionId, market, exchangeCode }: Simu
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <MetricTitle label="총 수익률" tooltip="초기 자본 대비 현재 총 자산의 변화율입니다. 실현 손익과 미실현 평가 손익을 모두 포함합니다." />
+            <MetricTitle label="총 수익률" tooltip="투자금 대비 현재 총 자산의 변화율입니다. 실현 손익과 미실현 평가 손익을 모두 포함합니다." />
             <TrendingUp className="h-4 w-4 text-primary-500" />
           </div>
         </CardHeader>

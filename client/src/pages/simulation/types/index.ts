@@ -4,7 +4,6 @@ export type {
   SimulationMetricsCardsProps,
   SimulationPositionsTableProps,
   SimulationTradesTableProps,
-  SimulationWatchStocksProps,
   SimulationControlsProps,
   SimulationCapitalSummaryProps,
 } from './simulation.types'

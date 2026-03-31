@@ -149,6 +149,32 @@ type ManualSellResult {
   orderNo: String
 }
 
+type WatchStockExecutionLogType {
+  id: ID!
+  watchStockId: String!
+  tradeRecordId: String
+  market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  strategyName: String
+  eventType: WatchStockExecutionEventType!
+  message: String!
+  details: String
+  createdAt: DateTime!
+}
+
+enum WatchStockExecutionEventType {
+  SKIPPED
+  SIGNAL_CREATED
+  ORDER_SUBMITTED
+  ORDER_FILLED
+  ORDER_FAILED
+  ORDER_AWAITING_APPROVAL
+  ORDER_CANCELLED
+  ERROR
+}
+
 type WatchStockType {
   id: ID!
   market: Market!
@@ -177,32 +203,24 @@ type AuthPayload {
   success: Boolean!
 }
 
-type SimulationWatchStockType {
-  id: ID!
-  sessionId: String!
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  quota: Float
-  cycle: Float!
-  maxCycles: Int!
-  stopLossRate: Float!
-  maxPortfolioRate: Float!
-  strategyParams: String
-  isActive: Boolean!
-}
-
 type SimulationSessionType {
   id: ID!
   name: String!
   description: String
   market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
   countryCode: String
   strategyName: String!
   status: SimulationStatus!
-  initialCapital: Float!
   currentCash: Float!
+  quota: Float!
+  cycle: Float!
+  maxCycles: Float!
+  stopLossRate: Float!
+  maxPortfolioRate: Float!
+  strategyParams: String
 
   """포지션 평가금 합계"""
   portfolioValue: Float
@@ -210,7 +228,6 @@ type SimulationSessionType {
   stoppedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
-  watchStocks: [SimulationWatchStockType!]
 }
 
 enum SimulationStatus {
@@ -230,9 +247,16 @@ type SimulationTradeType {
   quantity: Int!
   price: Float!
   totalAmount: Float!
+  tradeStatus: SimulationTradeStatus!
+  failReason: String
   strategyName: String
   reason: String
   createdAt: DateTime!
+}
+
+enum SimulationTradeStatus {
+  EXECUTED
+  FAILED
 }
 
 type SimulationPositionType {
@@ -399,6 +423,8 @@ type Query {
   accountSummary: AccountSummaryType!
   dashboardSummary: DashboardSummaryType!
   watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
+  watchStock(id: ID!): WatchStockType
+  watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
   simulationSessions(input: SimulationSessionsFilterInput): [SimulationSessionType!]!
   simulationSession(id: String!): SimulationSessionType
   simulationPositions(sessionId: String!): [SimulationPositionType!]!
@@ -429,6 +455,8 @@ input RiskStateFilterInput {
 input TradeFilterInput {
   market: Market
   side: Side
+  stockCode: String
+  exchangeCode: String
   dateFrom: String
   dateTo: String
   limit: Int
@@ -456,6 +484,7 @@ input SimulationTradesFilterInput {
   sessionId: String!
   limit: Int
   offset: Int
+  tradeStatus: SimulationTradeStatus
 }
 
 input SearchStocksInput {
@@ -484,9 +513,8 @@ type Mutation {
   login(input: LoginInput!): AuthPayload!
   logout: AuthPayload!
   createSimulation(input: CreateSimulationInput!): SimulationSessionType!
-  addSimulationWatchStock(input: AddSimulationWatchStockInput!): SimulationWatchStockType!
-  removeSimulationWatchStock(id: String!): Boolean!
   updateSimulationStatus(input: UpdateSimulationStatusInput!): SimulationSessionType!
+  updateSimulationSettings(input: UpdateSimulationSettingsInput!): SimulationSessionType!
   resetSimulation(id: String!): SimulationSessionType!
   deleteSimulation(id: String!): Boolean!
   runScreeningNow(input: RunScreeningInput!): Boolean!
@@ -545,31 +573,12 @@ input CreateSimulationInput {
   name: String!
   description: String
   market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
   countryCode: String
   strategyName: String!
-  initialCapital: Float!
-  watchStocks: [WatchStockInput!]
-}
-
-input WatchStockInput {
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  quota: Float
-  stopLossRate: Float
-  maxPortfolioRate: Float
-  strategyParams: String
-}
-
-input AddSimulationWatchStockInput {
-  sessionId: String!
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  quota: Float
-  maxCycles: Int
+  quota: Float!
   stopLossRate: Float
   maxPortfolioRate: Float
   strategyParams: String
@@ -578,6 +587,13 @@ input AddSimulationWatchStockInput {
 input UpdateSimulationStatusInput {
   id: String!
   status: SimulationStatus!
+}
+
+input UpdateSimulationSettingsInput {
+  id: String!
+  name: String
+  stopLossRate: Float
+  maxCycles: Int
 }
 
 input RunScreeningInput {
