@@ -155,6 +155,9 @@ model StockRecommendation {
   isEtf               Boolean  @default(false) @map("is_etf")
   factorScores        Json?    @map("factor_scores")
   deepAnalysisId      String?  @map("deep_analysis_id")
+  deepAnalysisStatus  String?  @map("deep_analysis_status")
+  deepAnalysisMessage String?  @map("deep_analysis_message") @db.Text
+  deepAnalysisUpdatedAt DateTime? @map("deep_analysis_updated_at")
   createdAt           DateTime @default(now()) @map("created_at")
   suggestedStrategies Json?    @map("suggested_strategies")
 

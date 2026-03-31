@@ -24,6 +24,9 @@ query GetStockRecommendations($input: StockRecommendationsFilterInput) {
     volume
     marketCap
     isEtf
+    deepAnalysisStatus
+    deepAnalysisMessage
+    deepAnalysisUpdatedAt
     factorScores {
       technical
       valuation

@@ -19,6 +19,29 @@ const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
   NASD: 150000, NYSE: 150000, AMEX: 50000, TKSE: 20000000,
   SEHK: 1200000, SHAA: 1100000, SZAA: 1100000, HASE: 4000000000, VNSE: 4000000000,
 };
+const MAX_SCREENING_RESULTS = 20;
+const MAX_SCREENING_ETFS = 5;
+
+export function pickRecommendationsForStorage(
+  scores: StockScore[],
+  maxTotal = MAX_SCREENING_RESULTS,
+  maxEtf = MAX_SCREENING_ETFS,
+): StockScore[] {
+  const sortedStocks = scores
+    .filter((item) => !item.isEtf)
+    .sort((a, b) => b.totalScore - a.totalScore);
+  const sortedEtfs = scores
+    .filter((item) => item.isEtf)
+    .sort((a, b) => b.totalScore - a.totalScore);
+
+  const selectedEtfs = sortedEtfs.slice(0, maxEtf);
+  const stockSlots = Math.max(0, maxTotal - selectedEtfs.length);
+  const selectedStocks = sortedStocks.slice(0, stockSlots);
+
+  return [...selectedStocks, ...selectedEtfs]
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .slice(0, maxTotal);
+}
 
 @Injectable()
 export class ScreeningService {
@@ -83,41 +106,37 @@ export class ScreeningService {
       where: { screeningDate: date, market: market as any },
     });
 
-    const etfs = scores.filter((item) => item.isEtf).sort((a, b) => b.totalScore - a.totalScore);
-    const stocks = scores.filter((item) => !item.isEtf).sort((a, b) => b.totalScore - a.totalScore);
-
-    const saveGroup = async (group: StockScore[]) => {
-      for (let index = 0; index < group.length; index++) {
-        const item = group[index];
-        await this.prisma.stockRecommendation.create({
-          data: {
-            screeningDate: date,
-            market: item.market,
-            exchangeCode: item.exchangeCode,
-            stockCode: item.stockCode,
-            stockName: item.stockName,
-            totalScore: item.totalScore,
-            technicalScore: item.technicalScore,
-            fundamentalScore: item.fundamentalScore,
-            momentumScore: item.momentumScore,
-            rank: index + 1,
-            reasons: item.reasons as any,
-            indicators: item.indicators as any,
-            suggestedStrategies: this.filterExecutableStrategies(item.suggestedStrategies) as any,
-            currentPrice: item.currentPrice,
-            changeRate: item.changeRate,
-            volume: item.volume,
-            marketCap: item.marketCap,
-            isEtf: item.isEtf,
-            factorScores: (item.factorScores ?? null) as any,
-            deepAnalysisId: item.deepAnalysisId,
-          },
-        });
-      }
-    };
-
-    await saveGroup(stocks);
-    await saveGroup(etfs);
+    const selected = pickRecommendationsForStorage(scores);
+    for (let index = 0; index < selected.length; index++) {
+      const item = selected[index];
+      await this.prisma.stockRecommendation.create({
+        data: {
+          screeningDate: date,
+          market: item.market,
+          exchangeCode: item.exchangeCode,
+          stockCode: item.stockCode,
+          stockName: item.stockName,
+          totalScore: item.totalScore,
+          technicalScore: item.technicalScore,
+          fundamentalScore: item.fundamentalScore,
+          momentumScore: item.momentumScore,
+          rank: index + 1,
+          reasons: item.reasons as any,
+          indicators: item.indicators as any,
+          suggestedStrategies: this.filterExecutableStrategies(item.suggestedStrategies) as any,
+          currentPrice: item.currentPrice,
+          changeRate: item.changeRate,
+          volume: item.volume,
+          marketCap: item.marketCap,
+          isEtf: item.isEtf,
+          factorScores: (item.factorScores ?? null) as any,
+          deepAnalysisId: item.deepAnalysisId,
+          deepAnalysisStatus: 'PENDING',
+          deepAnalysisMessage: '딥 분석 대기 중입니다.',
+          deepAnalysisUpdatedAt: new Date(),
+        },
+      });
+    }
   }
 
   async getRecommendations(date: string, market?: string, limit = 20) {
@@ -217,7 +236,33 @@ export class ScreeningService {
         ...(exchangeCodes?.length ? { exchangeCode: { in: exchangeCodes } } : {}),
       },
       orderBy: { rank: 'asc' },
-      take: 15,
+      take: MAX_SCREENING_RESULTS,
+    });
+
+    if (recommendations.length === 0) return 0;
+
+    const targetKeys = recommendations.map((recommendation) => ({
+      screeningDate: date,
+      exchangeCode: recommendation.exchangeCode,
+      stockCode: recommendation.stockCode,
+    }));
+
+    await this.prisma.stockDeepAnalysis.deleteMany({
+      where: {
+        OR: targetKeys,
+      },
+    });
+
+    await this.prisma.stockRecommendation.updateMany({
+      where: {
+        id: { in: recommendations.map((recommendation) => recommendation.id) },
+      },
+      data: {
+        deepAnalysisId: null,
+        deepAnalysisStatus: 'PENDING',
+        deepAnalysisMessage: '딥 분석 대기 중입니다.',
+        deepAnalysisUpdatedAt: new Date(),
+      },
     });
 
     let completed = 0;
@@ -250,13 +295,26 @@ export class ScreeningService {
           where: { id: recommendation.id },
           data: {
             deepAnalysisId: saved.id,
+            deepAnalysisStatus: 'SUCCESS',
+            deepAnalysisMessage: analysis.reportSummary || '딥 분석이 완료되었습니다.',
+            deepAnalysisUpdatedAt: new Date(),
             indicators: mergedIndicators as any,
           },
         });
 
         completed += 1;
       } catch (e) {
-        this.logger.warn(`Deep analysis failed for ${recommendation.stockCode}: ${e.message}`);
+        const message = this.formatDeepAnalysisErrorMessage(e);
+        this.logger.warn(`Deep analysis failed for ${recommendation.stockCode}: ${message}`);
+        await this.prisma.stockRecommendation.update({
+          where: { id: recommendation.id },
+          data: {
+            deepAnalysisId: null,
+            deepAnalysisStatus: 'FAILED',
+            deepAnalysisMessage: message,
+            deepAnalysisUpdatedAt: new Date(),
+          },
+        });
       }
 
       await this.delay(500);
@@ -956,6 +1014,17 @@ export class ScreeningService {
       consensusDetail: analysis.consensusData ?? null,
       reportSummary: analysis.reportSummary ?? null,
     };
+  }
+
+  private formatDeepAnalysisErrorMessage(error: unknown): string {
+    const raw = error instanceof Error ? error.message : String(error ?? '알 수 없는 오류');
+    const normalized = raw
+      .replace(/\s+/g, ' ')
+      .replace(/^Error:\s*/i, '')
+      .trim();
+
+    if (normalized.length <= 220) return normalized;
+    return `${normalized.slice(0, 217)}...`;
   }
 
   private mergeIndicatorsWithDeepAnalysis(existingIndicators: unknown, analysis: any): Record<string, unknown> {

@@ -67,6 +67,9 @@ export class ScreeningResolver {
       marketCap: Number(r.marketCap),
       isEtf: r.isEtf,
       factorScores: r.factorScores ? (r.factorScores as Record<string, number>) : undefined,
+      deepAnalysisStatus: r.deepAnalysisStatus ?? undefined,
+      deepAnalysisMessage: r.deepAnalysisMessage ?? undefined,
+      deepAnalysisUpdatedAt: r.deepAnalysisUpdatedAt ?? undefined,
       createdAt: r.createdAt,
     }));
   }

@@ -31,5 +31,8 @@ export class StockRecommendationType {
   @Field(() => Float) marketCap: number;
   @Field() isEtf: boolean;
   @Field(() => FactorScoreType, { nullable: true }) factorScores?: FactorScoreType;
+  @Field({ nullable: true }) deepAnalysisStatus?: string;
+  @Field({ nullable: true }) deepAnalysisMessage?: string;
+  @Field({ nullable: true }) deepAnalysisUpdatedAt?: Date;
   @Field() createdAt: Date;
 }

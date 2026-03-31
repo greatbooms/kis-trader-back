@@ -386,7 +386,7 @@ function StockDetailView({
   onBack: () => void
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [tab, setTab] = useState<'stock' | 'etf'>('stock')
+  const [tab, setTab] = useState<'all' | 'stock' | 'etf'>('all')
   const [sortBy, setSortBy] = useState<'total' | 'dividend' | 'safety' | 'risk'>('total')
   const [factorFilter, setFactorFilter] = useState<'all' | 'income' | 'safe'>('all')
   const countryOption = COUNTRY_OPTIONS.find((item) => item.value === country)
@@ -405,7 +405,11 @@ function StockDetailView({
 
   const stockRecs = countryFiltered.filter((item) => !item.isEtf)
   const etfRecs = countryFiltered.filter((item) => item.isEtf)
-  const baseRecommendations = tab === 'stock' ? stockRecs : etfRecs
+  const baseRecommendations = tab === 'stock'
+    ? stockRecs
+    : tab === 'etf'
+      ? etfRecs
+      : countryFiltered
   const filteredRecommendations = baseRecommendations.filter((item) => {
     if (factorFilter === 'income') return (item.factorScores?.dividend ?? 0) >= 2
     if (factorFilter === 'safe') return (item.factorScores?.risk ?? 0) >= 7
@@ -439,6 +443,9 @@ function StockDetailView({
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <Button variant={tab === 'all' ? 'default' : 'outline'} size="sm" onClick={() => { setTab('all'); setExpandedId(null) }}>
+          전체 ({countryFiltered.length})
+        </Button>
         <Button variant={tab === 'stock' ? 'default' : 'outline'} size="sm" onClick={() => { setTab('stock'); setExpandedId(null) }}>
           개별주 ({stockRecs.length})
         </Button>
@@ -512,6 +519,21 @@ function RecommendationCard({
   })
 
   const deepAnalysis = deepAnalysisData?.stockDeepAnalysis ?? null
+  const deepAnalysisStatusMessage = (() => {
+    if (deepAnalysis) return null
+    if (rec.deepAnalysisStatus === 'FAILED') {
+      return rec.deepAnalysisMessage
+        ? `딥 분석 실패: ${rec.deepAnalysisMessage}`
+        : '딥 분석이 실패했습니다.'
+    }
+    if (rec.deepAnalysisStatus === 'PENDING') {
+      return rec.deepAnalysisMessage || '딥 분석 대기 중입니다.'
+    }
+    if (rec.deepAnalysisStatus === 'SUCCESS') {
+      return '딥 분석 저장 결과를 아직 불러오지 못했습니다.'
+    }
+    return '딥 분석 결과가 아직 없습니다.'
+  })()
   const technicalDetail = parseJson<Record<string, unknown>>(deepAnalysis?.technicalDetail)
   const dividendDetail = parseJson<Record<string, unknown>>(deepAnalysis?.dividendDetail)
   const consensusDetail = parseJson<Record<string, unknown>>(deepAnalysis?.consensusDetail)
@@ -651,7 +673,7 @@ function RecommendationCard({
             {deepLoading ? (
               <p className="text-sm text-muted-foreground">딥 분석 로딩중...</p>
             ) : !deepAnalysis ? (
-              <p className="text-sm text-muted-foreground">딥 분석 결과가 아직 없습니다.</p>
+              <p className="text-sm text-muted-foreground">{deepAnalysisStatusMessage}</p>
             ) : (
               <div className="space-y-4">
                 {showDeepHelp && (

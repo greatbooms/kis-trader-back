@@ -623,6 +623,9 @@ export type StockRecommendationType = {
   changeRate: Scalars['Float']['output'];
   createdAt: Scalars['DateTime']['output'];
   currentPrice: Scalars['Float']['output'];
+  deepAnalysisMessage?: Maybe<Scalars['String']['output']>;
+  deepAnalysisStatus?: Maybe<Scalars['String']['output']>;
+  deepAnalysisUpdatedAt?: Maybe<Scalars['DateTime']['output']>;
   exchangeCode: Scalars['String']['output'];
   factorScores?: Maybe<FactorScoreType>;
   fundamentalScore: Scalars['Float']['output'];
@@ -833,7 +836,7 @@ export type GetStockRecommendationsQueryVariables = Exact<{
 }>;
 
 
-export type GetStockRecommendationsQuery = { __typename?: 'Query', stockRecommendations: Array<{ __typename?: 'StockRecommendationType', id: string, screeningDate: string, market: string, exchangeCode: string, stockCode: string, stockName: string, totalScore: number, technicalScore: number, fundamentalScore: number, momentumScore: number, rank: number, reasons: string, indicators: string, currentPrice: number, changeRate: number, volume: number, marketCap: number, isEtf: boolean, createdAt: any, suggestedStrategies: Array<{ __typename?: 'SuggestedStrategyType', name: string, displayName: string, matchScore: number, reason: string }>, factorScores?: { __typename?: 'FactorScoreType', technical?: number | null, valuation?: number | null, growth?: number | null, profitability?: number | null, risk?: number | null, momentum?: number | null, supplyDemand?: number | null, dividend?: number | null, consensus?: number | null, pattern?: number | null, fundamental?: number | null } | null }> };
+export type GetStockRecommendationsQuery = { __typename?: 'Query', stockRecommendations: Array<{ __typename?: 'StockRecommendationType', id: string, screeningDate: string, market: string, exchangeCode: string, stockCode: string, stockName: string, totalScore: number, technicalScore: number, fundamentalScore: number, momentumScore: number, rank: number, reasons: string, indicators: string, currentPrice: number, changeRate: number, volume: number, marketCap: number, isEtf: boolean, deepAnalysisStatus?: string | null, deepAnalysisMessage?: string | null, deepAnalysisUpdatedAt?: any | null, createdAt: any, suggestedStrategies: Array<{ __typename?: 'SuggestedStrategyType', name: string, displayName: string, matchScore: number, reason: string }>, factorScores?: { __typename?: 'FactorScoreType', technical?: number | null, valuation?: number | null, growth?: number | null, profitability?: number | null, risk?: number | null, momentum?: number | null, supplyDemand?: number | null, dividend?: number | null, consensus?: number | null, pattern?: number | null, fundamental?: number | null } | null }> };
 
 export type GetScreeningDatesQueryVariables = Exact<{
   input?: InputMaybe<ScreeningListFilterInput>;
@@ -1155,6 +1158,9 @@ export const GetStockRecommendationsDocument = gql`
     volume
     marketCap
     isEtf
+    deepAnalysisStatus
+    deepAnalysisMessage
+    deepAnalysisUpdatedAt
     factorScores {
       technical
       valuation
