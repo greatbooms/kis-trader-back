@@ -16,6 +16,7 @@ import { NotificationModule } from './notification/notification.module';
 import { SimulationModule } from './simulation/simulation.module';
 import { StockMasterModule } from './stock-master/stock-master.module';
 import { ScreeningModule } from './screening/screening.module';
+import { MarketDataModule } from './market-data/market-data.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ScreeningModule } from './screening/screening.module';
       exclude: ['/graphql', '/health'],
     }),
     ScheduleModule.forRoot(),
+    MarketDataModule,
     KisModule,
     TradingModule,
     WatchStockModule,

@@ -28,6 +28,11 @@ function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicator
     && stockIndicators.programTradeDirection === 'SELL';
 }
 
+function hasEventDrivenRisk(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  return (stockIndicators.recentMaterialDisclosureCount30d ?? 0) >= 1
+    || (stockIndicators.recentSecForm8KCount30d ?? 0) >= 2;
+}
+
 @Injectable()
 export class ConservativeStrategy implements PerStockTradingStrategy {
   readonly name = 'conservative';
@@ -56,6 +61,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
     '- 투자유의/시장경고 종목은 진입 차단',
     '- 공매도 불가 + 융자잔고 3% 미만 종목은 하방 방어력이 높아 투자 비중 40%로 완화',
     '- 변동성 과다 또는 외인/기관/프로그램 동반 매도 종목은 진입 차단',
+    '- 최근 주요 공시/8-K 이벤트가 많으면 진입 차단',
     '- 리스크 전량청산 시그널 시 즉시 매도',
   ].join('\n');
   readonly meta: StrategyMeta = {
@@ -192,6 +198,10 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
       }
       if (hasStrongSellFlow(stockIndicators)) {
         skipReasons.push('외인/기관/프로그램 동반 매도 수급');
+        return { signals, skipReasons };
+      }
+      if (hasEventDrivenRisk(stockIndicators)) {
+        skipReasons.push('최근 공시/SEC 이벤트 과다');
         return { signals, skipReasons };
       }
 

@@ -265,18 +265,18 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     expect(signals).toHaveLength(1);
   });
 
-  it('해외: 매출액증가율/ROE/부채비율/EV-EBITDA 필터 적용 안함 (EPS는 공통 적용)', async () => {
+  it('해외: SEC 재무가 있으면 매출액증가율/부채비율 필터도 적용하고 ROE/EV-EBITDA는 계속 제외', async () => {
     const ctx = createContext({
-      fundamentals: { per: 8, pbr: 0.5, eps: 100, salesGrowthRate: -50, roe: 1, debtRatio: 300, evEbitda: 50 }, // 국내면 실패하는 값이지만 해외는 ROE/부채/매출증가율/EV-EBITDA 미적용
+      fundamentals: { per: 8, pbr: 0.5, eps: 100, salesGrowthRate: -50, roe: 1, debtRatio: 300, evEbitda: 50 },
       stockIndicators: { currentAboveMA200: true, rsi14: 35 },
     });
     ctx.watchStock.market = 'OVERSEAS';
     ctx.watchStock.exchangeCode = 'NASD';
     ctx.price.currentPrice = 25.50;
 
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('BUY');
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((reason) => reason.includes('부채비율') || reason.includes('매출액증가율'))).toBe(true);
   });
 
   it('해외: EPS 음수 → 매수 차단 (EPS 공통 필터)', async () => {

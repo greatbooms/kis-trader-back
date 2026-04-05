@@ -25,6 +25,11 @@ function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicator
     && stockIndicators.programTradeDirection === 'SELL';
 }
 
+function hasEventDrivenRisk(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
+  return (stockIndicators.recentMaterialDisclosureCount30d ?? 0) >= 2
+    || (stockIndicators.recentSecForm8KCount30d ?? 0) >= 3;
+}
+
 
 @Injectable()
 export class InfiniteBuyStrategy implements PerStockTradingStrategy {
@@ -84,6 +89,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 지수 MA200 하회 시 매수 중단, 매도만 허용',
     '- 금리 급등 시 매수금액 50% 축소',
     '- 부정적 컨센서스면 신규 진입 차단, 배당 안정성 높으면 매수금액 소폭 확대',
+    '- 최근 주요 공시/8-K가 과도하면 신규 진입 차단, 내부자 지분 증가는 매수금액 소폭 확대',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
@@ -196,6 +202,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         skipReasons.push(`부정적 컨센서스: ${stockIndicators.consensusRating ?? '목표가 하락'}`);
         return { signals, skipReasons };
       }
+      if (hasEventDrivenRisk(stockIndicators)) {
+        skipReasons.push('최근 공시/SEC 이벤트 과다');
+        return { signals, skipReasons };
+      }
     }
 
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
@@ -229,6 +239,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) {
       adjustedQuota *= 1.15;
       details.quotaAdjust_dividend = true;
+    }
+
+    if ((stockIndicators.insiderOwnershipChangeRate ?? 0) > 0.05) {
+      adjustedQuota *= 1.1;
+      details.quotaAdjust_insider = true;
     }
 
     if ((stockIndicators.volatility30d ?? 0) >= 45) {

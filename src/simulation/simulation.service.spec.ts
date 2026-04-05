@@ -21,6 +21,7 @@ describe('SimulationService', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   });
 

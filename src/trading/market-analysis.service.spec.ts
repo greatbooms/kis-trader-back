@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { MarketAnalysisService } from './market-analysis.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 
 describe('MarketAnalysisService', () => {
   let service: MarketAnalysisService;
@@ -25,6 +26,11 @@ describe('MarketAnalysisService', () => {
     }),
   };
 
+  const mockMarketDataCache = {
+    getFredRateSnapshot: jest.fn(),
+    getKisDomesticInterestRates: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -32,6 +38,7 @@ describe('MarketAnalysisService', () => {
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: MarketDataCacheService, useValue: mockMarketDataCache },
       ],
     }).compile();
 

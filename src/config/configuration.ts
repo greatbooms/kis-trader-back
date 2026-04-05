@@ -7,6 +7,15 @@ export default () => ({
     prodCode: process.env.KIS_PROD_CODE || '01',
     env: (process.env.KIS_ENV || 'paper') as 'paper' | 'prod',
   },
+  openDart: {
+    apiKey: process.env.OPENDART_API_KEY || '',
+  },
+  sec: {
+    userAgent: process.env.SEC_USER_AGENT || '',
+  },
+  fred: {
+    apiKey: process.env.FRED_API_KEY || '',
+  },
   trading: {},
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',

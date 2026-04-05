@@ -4,6 +4,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import { MarketCondition, StockIndicators } from './types';
 
 interface CacheEntry<T> {
@@ -22,6 +23,7 @@ export class MarketAnalysisService {
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private configService: ConfigService,
+    private marketDataCache: MarketDataCacheService,
   ) {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
@@ -167,12 +169,23 @@ export class MarketAnalysisService {
       this.logger.warn(`Failed to get index data for ${refIndex.name}: ${e.message}`);
     }
 
-    // 금리 조회 (실전 모드만)
-    if (!this.isPaper) {
+    const isUsExchange = ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode);
+
+    if (isUsExchange) {
       try {
-        const rates = await this.kisDomestic.getInterestRates();
+        const fedFunds = await this.marketDataCache.getFredRateSnapshot('FEDFUNDS');
+        if (fedFunds?.currentRate !== undefined) {
+          interestRate = fedFunds.currentRate;
+          interestRateRising = (fedFunds.change ?? 0) > 0.1;
+        }
+      } catch (e) {
+        this.logger.warn(`Failed to get FRED policy rate: ${e.message}`);
+      }
+    } else if (!this.isPaper) {
+      try {
+        const rates = await this.marketDataCache.getKisDomesticInterestRates();
         // US Fed Funds Rate 또는 첫 번째 항목
-        const fedRate = rates.find((r) => r.name.includes('미국')) || rates[0];
+        const fedRate = rates?.find((r) => r.name.includes('미국')) || rates?.[0];
         if (fedRate) {
           interestRate = fedRate.rate;
           interestRateRising = fedRate.change > 0.1; // 0.1%p 이상 급등

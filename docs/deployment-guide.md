@@ -78,6 +78,9 @@ Settings → Environment Variables:
 | `KIS_ACCOUNT_NO` | 계좌번호 (10자리) | |
 | `KIS_PROD_CODE` | `01` | |
 | `KIS_ENV` | `prod` | |
+| `OPENDART_API_KEY` | OpenDART API 키 | [보조 데이터 가이드](market-data-setup.md) 참고 |
+| `SEC_USER_AGENT` | SEC 요청용 User-Agent | 예: `MyCompany kis-trader admin@example.com` |
+| `FRED_API_KEY` | FRED API 키 | 미국 금리 보강용 |
 | `ADMIN_USERNAME` | 관리자 아이디 | |
 | `ADMIN_PASSWORD` | 관리자 비밀번호 | 강한 비밀번호 사용 |
 | `JWT_SECRET` | JWT 시크릿 키 | 32자 이상 랜덤 문자열 |

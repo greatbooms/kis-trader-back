@@ -9,6 +9,7 @@ import { pickNumeric, pickString } from './utils/api-data.util';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
 import { summarizeDividendSchedule } from './utils/dividend.util';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 
 @Injectable()
 export class DeepAnalysisService {
@@ -24,6 +25,7 @@ export class DeepAnalysisService {
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private marketAnalysis: MarketAnalysisService,
+    private marketDataCache: MarketDataCacheService,
   ) {}
 
   async analyzeStock(
@@ -47,16 +49,16 @@ export class DeepAnalysisService {
 
     const domesticFinanceGroup = market === 'DOMESTIC'
       ? await Promise.allSettled([
-        this.kisDomestic.getIncomeStatement(stockCode),
-        this.kisDomestic.getGrowthRatio(stockCode),
-        this.kisDomestic.getStabilityRatio(stockCode),
-        this.kisDomestic.getOtherMajorRatios(stockCode),
-        this.kisDomestic.getDividendSchedule(stockCode),
-        this.kisDomestic.getInvestOpinion(stockCode),
-        this.kisDomestic.getEstimatePerform(stockCode),
+        this.marketDataCache.getKisDomesticIncomeStatement(stockCode),
+        this.marketDataCache.getKisDomesticGrowthRatio(stockCode),
+        this.marketDataCache.getKisDomesticStabilityRatio(stockCode),
+        this.marketDataCache.getKisDomesticOtherMajorRatios(stockCode),
+        this.marketDataCache.getKisDomesticDividendSchedule(stockCode),
+        this.marketDataCache.getKisDomesticInvestOpinion(stockCode),
+        this.marketDataCache.getKisDomesticEstimatePerform(stockCode),
         this.kisDomestic.getDailyShortSale(stockCode),
         this.kisDomestic.getDailyCreditBalance(stockCode),
-        this.kisDomestic.getBalanceSheet(stockCode),
+        this.marketDataCache.getKisDomesticBalanceSheet(stockCode),
       ])
       : [];
 

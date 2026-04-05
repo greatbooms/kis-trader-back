@@ -10,6 +10,9 @@ import { MarketRegimeService } from '../trading/market-regime.service';
 import { StockPriceResult } from '../kis/types/kis-api.types';
 import { SimulationMetrics, SimulationPendingOrder } from './types';
 import { CreateSimulationInput } from './dto';
+import { OpenDartDomesticSignals } from '../opendart/types';
+import { SecFundamentals } from '../sec/types';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 
 @Injectable()
 export class SimulationService {
@@ -24,6 +27,7 @@ export class SimulationService {
     private marketRegimeService: MarketRegimeService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private marketDataCache: MarketDataCacheService,
   ) {}
 
   async createSession(input: CreateSimulationInput) {
@@ -112,6 +116,20 @@ export class SimulationService {
       stockIndicators.marketCap = price.marketCap;
       stockIndicators.loanBalanceRate = price.loanBalanceRate;
       stockIndicators.shortSellable = price.shortSellable;
+
+      if (session.market === Market.DOMESTIC && ['infinite-buy', 'conservative'].includes(session.strategyName)) {
+        const openDartSignals = await this.marketDataCache.getOpenDartDomesticSignals(session.stockCode);
+        this.applyOpenDartSignals(stockIndicators, openDartSignals);
+      }
+
+      if (session.market === Market.OVERSEAS && ['value-factor', 'infinite-buy', 'conservative'].includes(session.strategyName)) {
+        const secFundamentals = await this.marketDataCache.getSecFundamentals(
+          session.stockCode,
+          price.currentPrice,
+          exchangeCode,
+        );
+        this.applySecSignals(stockIndicators, secFundamentals);
+      }
 
       // Get market condition
       const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
@@ -273,6 +291,19 @@ export class SimulationService {
     }
 
     return Math.round((totalInvested / perCycleQuota) * 10) / 10;
+  }
+
+  private describeNoSignalReason(
+    strategyName: string,
+    ctx: Partial<StockStrategyContext>,
+  ): string {
+    if (ctx.alreadyExecutedToday) return 'already executed today';
+
+    if (strategyName === 'infinite-buy' && !ctx.position && ctx.marketCondition?.referenceIndexAboveMA200 === false) {
+      return `${ctx.marketCondition.referenceIndexName} below MA200`;
+    }
+
+    return 'strategy conditions not met';
   }
 
   private getPersistedSessionCycle(cycle: number): number {
@@ -1076,6 +1107,49 @@ export class SimulationService {
   }
 
   /** 재무 데이터 조회 (밸류 팩터 전략용) */
+  private applyOpenDartSignals(
+    stockIndicators: StockStrategyContext['stockIndicators'],
+    openDartSignals: OpenDartDomesticSignals | undefined,
+  ): void {
+    if (!openDartSignals) return;
+    stockIndicators.recentDisclosureCount30d = openDartSignals.recentDisclosureCount30d;
+    stockIndicators.recentPeriodicDisclosureCount30d = openDartSignals.recentPeriodicDisclosureCount30d;
+    stockIndicators.recentMaterialDisclosureCount30d = openDartSignals.recentMaterialDisclosureCount30d;
+    stockIndicators.lastDisclosureDate = openDartSignals.lastDisclosureDate;
+    stockIndicators.lastDisclosureTitle = openDartSignals.lastDisclosureTitle;
+    stockIndicators.insiderOwnershipRate = openDartSignals.insiderOwnershipRate;
+    stockIndicators.insiderOwnershipChangeRate = openDartSignals.insiderOwnershipChangeRate;
+    stockIndicators.latestOwnershipReportDate = openDartSignals.latestOwnershipReportDate;
+  }
+
+  private applySecSignals(
+    stockIndicators: StockStrategyContext['stockIndicators'],
+    secFundamentals: SecFundamentals | undefined,
+  ): void {
+    if (!secFundamentals) return;
+    stockIndicators.dividendYield = secFundamentals.dividendYield ?? stockIndicators.dividendYield;
+    stockIndicators.payoutRatio = secFundamentals.payoutRatio ?? stockIndicators.payoutRatio;
+    stockIndicators.latestSecFilingDate = secFundamentals.latestFilingDate;
+    stockIndicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    stockIndicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
+    stockIndicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
+  }
+
+  private mergeSecFundamentals(
+    fundamentals: StockFundamentals | undefined,
+    secFundamentals: SecFundamentals | undefined,
+  ): StockFundamentals | undefined {
+    if (!fundamentals && !secFundamentals) return undefined;
+    return {
+      ...fundamentals,
+      debtRatio: secFundamentals?.debtRatio ?? fundamentals?.debtRatio,
+      eps: fundamentals?.eps,
+      salesGrowthRate: secFundamentals?.revenueGrowthRate ?? fundamentals?.salesGrowthRate,
+      operatingProfitGrowthRate: secFundamentals?.operatingProfitGrowthRate ?? fundamentals?.operatingProfitGrowthRate,
+      dividendPayoutRate: secFundamentals?.payoutRatio ?? fundamentals?.dividendPayoutRate,
+    };
+  }
+
   private async fetchFundamentals(
     market: string,
     exchangeCode: string,
@@ -1089,7 +1163,7 @@ export class SimulationService {
           pbr: price.pbr,
         };
 
-        const rows = await this.kisDomestic.getFinancialRatio(stockCode);
+        const rows = await this.marketDataCache.getKisDomesticFinancialRatio(stockCode);
         if (rows.length > 0) {
           const latest = rows[0];
           fundamentals.roe = parseFloat(latest.roe_val) || undefined;
@@ -1103,7 +1177,7 @@ export class SimulationService {
         }
 
         try {
-          const otherRows = await this.kisDomestic.getOtherMajorRatios(stockCode);
+          const otherRows = await this.marketDataCache.getKisDomesticOtherMajorRatios(stockCode);
           if (otherRows.length > 0) {
             const latest = otherRows[0];
             const evEbitda = parseFloat(latest.ev_ebitda);
@@ -1120,11 +1194,17 @@ export class SimulationService {
 
       // 해외: 현재가상세 API에서 PER/PBR/EPS 제공
       if (price.per || price.pbr || price.eps) {
-        return {
+        const fundamentals: StockFundamentals = {
           per: price.per,
           pbr: price.pbr,
           eps: price.eps,
         };
+        const secFundamentals = await this.marketDataCache.getSecFundamentals(
+          stockCode,
+          price.currentPrice,
+          exchangeCode,
+        );
+        return this.mergeSecFundamentals(fundamentals, secFundamentals);
       }
       return undefined;
     } catch (e) {

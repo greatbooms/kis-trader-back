@@ -134,6 +134,24 @@ model KisToken {
   @@map("kis_tokens")
 }
 
+model MarketDataSnapshot {
+  id          String   @id @default(uuid())
+  snapshotKey String   @unique @map("snapshot_key")
+  source      String
+  category    String
+  market      String?
+  exchangeCode String? @map("exchange_code")
+  stockCode   String?  @map("stock_code")
+  data        Json
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([source, category])
+  @@index([market, exchangeCode, stockCode])
+  @@map("market_data_snapshots")
+}
+
 model StockRecommendation {
   id                  String   @id @default(uuid())
   screeningDate       String   @map("screening_date")

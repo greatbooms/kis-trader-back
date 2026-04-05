@@ -39,9 +39,9 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '- PBR < 1.0 (자산 대비 저평가) — 국내/해외',
     '- EPS > 0 (흑자기업만) — 국내/해외',
     '- ROE > 10% (수익성 양호) — 국내 전용',
-    '- 부채비율 < 150% (재무 안정성) — 국내 전용',
-    '- 매출액증가율 > -20% (심한 역성장 제외) — 국내 전용',
-    '- 영업이익증가율 > -30% (수익성 악화 제외) — 국내 전용',
+    '- 부채비율 < 150% (재무 안정성) — 국내/미국',
+    '- 매출액증가율 > -20% (심한 역성장 제외) — 국내/미국',
+    '- 영업이익증가율 > -30% (수익성 악화 제외) — 국내/미국',
     '- EV/EBITDA < 15 (기업가치 대비 저평가) — 국내 전용',
     '- RSI < 40 (과열되지 않은 구간)',
     '',
@@ -53,8 +53,8 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
     '',
     '【해외 종목 제한사항】',
     '- 해외 종목은 현재가상세 API에서 PER, PBR, EPS 제공',
-    '- ROE, 부채비율, 매출액/영업이익 증가율, EV/EBITDA는 국내만',
-    '- 해외 종목은 PER + PBR + EPS + RSI 조건으로 진입 판단',
+    '- 미국 종목은 SEC 공시 기반 부채비율/매출·영업이익 성장률/배당성향을 추가 반영',
+    '- EV/EBITDA와 ROE는 현재 국내 데이터가 더 풍부합니다',
     '',
     '【특징】',
     '- 중장기 보유 전략 (수주~수개월)',
@@ -238,33 +238,31 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         return { signals, skipReasons };
       }
 
-      // 국내 전용 필터: ROE, 부채비율, 매출액증가율, 영업이익증가율, EV/EBITDA
-      if (!isOverseas) {
-        if (fundamentals.roe !== undefined && fundamentals.roe < params.minRoe) {
-          this.logger.debug(`[${watchStock.stockCode}] ROE filter failed: ${fundamentals.roe}`);
-          skipReasons.push(`ROE 미달: ${fundamentals.roe.toFixed(1)}% < ${params.minRoe}%`);
-          return { signals, skipReasons };
-        }
-        if (fundamentals.debtRatio !== undefined && fundamentals.debtRatio >= params.maxDebtRatio) {
-          this.logger.debug(`[${watchStock.stockCode}] DebtRatio filter failed: ${fundamentals.debtRatio}`);
-          skipReasons.push(`부채비율 초과: ${fundamentals.debtRatio.toFixed(0)}% ≥ ${params.maxDebtRatio}%`);
-          return { signals, skipReasons };
-        }
-        if (fundamentals.salesGrowthRate !== undefined && fundamentals.salesGrowthRate < params.minSalesGrowthRate) {
-          this.logger.debug(`[${watchStock.stockCode}] SalesGrowth filter failed: ${fundamentals.salesGrowthRate}% < ${params.minSalesGrowthRate}%`);
-          skipReasons.push(`매출액증가율 미달: ${fundamentals.salesGrowthRate.toFixed(1)}% < ${params.minSalesGrowthRate}%`);
-          return { signals, skipReasons };
-        }
-        if (fundamentals.operatingProfitGrowthRate !== undefined && fundamentals.operatingProfitGrowthRate < params.minOperatingProfitGrowthRate) {
-          this.logger.debug(`[${watchStock.stockCode}] OpProfitGrowth filter failed: ${fundamentals.operatingProfitGrowthRate}% < ${params.minOperatingProfitGrowthRate}%`);
-          skipReasons.push(`영업이익증가율 미달: ${fundamentals.operatingProfitGrowthRate.toFixed(1)}% < ${params.minOperatingProfitGrowthRate}%`);
-          return { signals, skipReasons };
-        }
-        if (fundamentals.evEbitda !== undefined && fundamentals.evEbitda > params.maxEvEbitda) {
-          this.logger.debug(`[${watchStock.stockCode}] EV/EBITDA filter failed: ${fundamentals.evEbitda} > ${params.maxEvEbitda}`);
-          skipReasons.push(`EV/EBITDA 초과: ${fundamentals.evEbitda.toFixed(1)} > ${params.maxEvEbitda}`);
-          return { signals, skipReasons };
-        }
+      // ROE / EV/EBITDA는 현재 국내 데이터에서만 안정적으로 사용
+      if (!isOverseas && fundamentals.roe !== undefined && fundamentals.roe < params.minRoe) {
+        this.logger.debug(`[${watchStock.stockCode}] ROE filter failed: ${fundamentals.roe}`);
+        skipReasons.push(`ROE 미달: ${fundamentals.roe.toFixed(1)}% < ${params.minRoe}%`);
+        return { signals, skipReasons };
+      }
+      if (fundamentals.debtRatio !== undefined && fundamentals.debtRatio >= params.maxDebtRatio) {
+        this.logger.debug(`[${watchStock.stockCode}] DebtRatio filter failed: ${fundamentals.debtRatio}`);
+        skipReasons.push(`부채비율 초과: ${fundamentals.debtRatio.toFixed(0)}% ≥ ${params.maxDebtRatio}%`);
+        return { signals, skipReasons };
+      }
+      if (fundamentals.salesGrowthRate !== undefined && fundamentals.salesGrowthRate < params.minSalesGrowthRate) {
+        this.logger.debug(`[${watchStock.stockCode}] SalesGrowth filter failed: ${fundamentals.salesGrowthRate}% < ${params.minSalesGrowthRate}%`);
+        skipReasons.push(`매출액증가율 미달: ${fundamentals.salesGrowthRate.toFixed(1)}% < ${params.minSalesGrowthRate}%`);
+        return { signals, skipReasons };
+      }
+      if (fundamentals.operatingProfitGrowthRate !== undefined && fundamentals.operatingProfitGrowthRate < params.minOperatingProfitGrowthRate) {
+        this.logger.debug(`[${watchStock.stockCode}] OpProfitGrowth filter failed: ${fundamentals.operatingProfitGrowthRate}% < ${params.minOperatingProfitGrowthRate}%`);
+        skipReasons.push(`영업이익증가율 미달: ${fundamentals.operatingProfitGrowthRate.toFixed(1)}% < ${params.minOperatingProfitGrowthRate}%`);
+        return { signals, skipReasons };
+      }
+      if (!isOverseas && fundamentals.evEbitda !== undefined && fundamentals.evEbitda > params.maxEvEbitda) {
+        this.logger.debug(`[${watchStock.stockCode}] EV/EBITDA filter failed: ${fundamentals.evEbitda} > ${params.maxEvEbitda}`);
+        skipReasons.push(`EV/EBITDA 초과: ${fundamentals.evEbitda.toFixed(1)} > ${params.maxEvEbitda}`);
+        return { signals, skipReasons };
       }
 
       // RSI 체크

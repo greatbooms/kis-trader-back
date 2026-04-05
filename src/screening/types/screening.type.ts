@@ -189,6 +189,18 @@ export interface StockIndicatorDetail {
   analystCount?: number;
   factors?: Record<string, number>;
   dataAvailability?: number; // 팩터 데이터 가용률 (%)
+  recentDisclosureCount30d?: number;
+  recentPeriodicDisclosureCount30d?: number;
+  recentMaterialDisclosureCount30d?: number;
+  lastDisclosureDate?: string;
+  lastDisclosureTitle?: string;
+  insiderOwnershipRate?: number;
+  insiderOwnershipChangeRate?: number;
+  latestOwnershipReportDate?: string;
+  latestSecFilingDate?: string;
+  latestSecFilingForm?: string;
+  recentSecForm8KCount30d?: number;
+  secPeriodicReportAgeDays?: number;
   // 해외 추가
   sector?: string; // 업종/섹터
   prevDayVolumeChangeRate?: number; // 전일거래량 대비 변화율 (해외)

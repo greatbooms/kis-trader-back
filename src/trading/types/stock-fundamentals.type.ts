@@ -5,16 +5,16 @@ export interface StockFundamentals {
   pbr?: number;
   /** ROE (Return on Equity, %) — 국내: 재무비율 API */
   roe?: number;
-  /** 부채비율 (%) — 국내: 재무비율 API */
+  /** 부채비율 (%) — 국내: 재무비율 API, 미국: SEC */
   debtRatio?: number;
-  /** EPS (원) — 국내: 재무비율 API, 해외: 현재가상세 API. 양수 = 흑자기업 */
+  /** EPS (원/달러) — 국내: 재무비율 API, 해외: 현재가상세 API. 양수 = 흑자기업 */
   eps?: number;
-  /** 매출액 증가율 (%) — 국내: 재무비율 API. 양수 = 성장기업 */
+  /** 매출액 증가율 (%) — 국내: 재무비율 API, 미국: SEC. 양수 = 성장기업 */
   salesGrowthRate?: number;
-  /** 영업이익 증가율 (%) — 국내: 재무비율 API */
+  /** 영업이익 증가율 (%) — 국내: 재무비율 API, 미국: SEC */
   operatingProfitGrowthRate?: number;
   /** EV/EBITDA (배) — 국내: 기타주요비율 API. 낮을수록 저평가 */
   evEbitda?: number;
-  /** 배당성향 (%) — 국내: 기타주요비율 API */
+  /** 배당성향 (%) — 국내: 기타주요비율 API, 미국: SEC */
   dividendPayoutRate?: number;
 }

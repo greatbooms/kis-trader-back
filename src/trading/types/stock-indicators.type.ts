@@ -61,4 +61,16 @@ export interface StockIndicators {
   estimatedEps?: number; // 추정 EPS
   estimatedPer?: number; // 추정 PER
   analystCount?: number; // 애널리스트 수
+  recentDisclosureCount30d?: number; // 최근 30일 공시 건수 (OpenDART)
+  recentPeriodicDisclosureCount30d?: number; // 최근 30일 정기공시 건수 (OpenDART)
+  recentMaterialDisclosureCount30d?: number; // 최근 30일 주요사항 공시 건수 (OpenDART)
+  lastDisclosureDate?: string; // 최근 공시일 (OpenDART)
+  lastDisclosureTitle?: string; // 최근 공시 제목 (OpenDART)
+  insiderOwnershipRate?: number; // 주요주주 지분율 (%)
+  insiderOwnershipChangeRate?: number; // 주요주주 지분 증감 (%p)
+  latestOwnershipReportDate?: string; // 최근 지분공시일
+  latestSecFilingDate?: string; // 최근 SEC filing 일자
+  latestSecFilingForm?: string; // 최근 SEC filing 양식
+  recentSecForm8KCount30d?: number; // 최근 30일 8-K 건수
+  secPeriodicReportAgeDays?: number; // 최근 정기보고서 경과일
 }

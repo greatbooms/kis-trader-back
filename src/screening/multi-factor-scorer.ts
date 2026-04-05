@@ -39,17 +39,20 @@ export function buildDomesticScore(candidate: ScreeningCandidate, indicators: St
 }
 
 export function buildOverseasScore(candidate: ScreeningCandidate, indicators: StockIndicatorDetail) {
-  const technical = scoreTechnical(indicators, candidate, 25);
-  const valuation = scoreValuation(indicators, 15);
-  const momentum = scoreMomentum(indicators, candidate, 20);
-  const supplyDemand = scoreOverseasSupply(indicators, candidate, 15);
-  const pattern = scorePattern(indicators, candidate, 25, true);
+  const technical = scoreTechnical(indicators, candidate, 20);
+  const valuation = scoreValuation(indicators, 10);
+  const growth = scoreGrowth(indicators, 15);
+  const profitability = scoreProfitability(indicators, 15);
+  const risk = scoreRisk(indicators, 10);
+  const momentum = scoreMomentum(indicators, candidate, 10);
+  const supplyDemand = scoreOverseasSupply(indicators, candidate, 10);
+  const dividend = scoreDividend(indicators, 5);
+  const pattern = scorePattern(indicators, candidate, 20, true);
 
   return composeScore(candidate, indicators, {
-    technical, valuation,
-    growth: emptyFactor(0), profitability: emptyFactor(0), risk: emptyFactor(0),
+    technical, valuation, growth, profitability, risk,
     momentum, supplyDemand,
-    dividend: emptyFactor(0), consensus: emptyFactor(0),
+    dividend, consensus: emptyFactor(0),
     pattern,
   });
 }
@@ -171,6 +174,8 @@ export function scoreGrowth(indicators: StockIndicatorDetail, max: number): Fact
   if (indicators.operatingProfitGrowthRate !== undefined) { hasData = true; if (indicators.operatingProfitGrowthRate >= 10) { score += max * 0.3; reasons.push(`영업이익 성장률 ${indicators.operatingProfitGrowthRate.toFixed(1)}%`); } else if (indicators.operatingProfitGrowthRate >= 5) { score += max * 0.15; } }
   if (indicators.epsGrowthRate !== undefined) { hasData = true; if (indicators.epsGrowthRate >= 10) { score += max * 0.2; reasons.push(`EPS 성장률 ${indicators.epsGrowthRate.toFixed(1)}%`); } else if (indicators.epsGrowthRate >= 5) { score += max * 0.1; } }
   if (indicators.equityGrowthRate !== undefined) { hasData = true; if (indicators.equityGrowthRate >= 10) { score += max * 0.2; reasons.push(`자기자본 성장률 ${indicators.equityGrowthRate.toFixed(1)}%`); } else if (indicators.equityGrowthRate >= 5) { score += max * 0.1; } }
+  if (indicators.secPeriodicReportAgeDays !== undefined) { hasData = true; if (indicators.secPeriodicReportAgeDays <= 120) { score += max * 0.1; reasons.push('최근 10-Q/10-K 반영'); } }
+  if ((indicators.recentPeriodicDisclosureCount30d ?? 0) > 0) { hasData = true; score += max * 0.08; reasons.push('최근 정기공시 반영'); }
   return { score: capScore(score, max), max, reasons, hasData };
 }
 
@@ -207,11 +212,19 @@ export function scoreMomentum(indicators: StockIndicatorDetail, candidate: Scree
 
 export function scoreSupplyDemand(indicators: StockIndicatorDetail, max: number): FactorComponent {
   let score = 0; const reasons: string[] = [];
-  const hasData = indicators.foreignNetBuy !== undefined || indicators.institutionNetBuy !== undefined || indicators.foreignNetBuyStreak !== undefined;
+  const hasData =
+    indicators.foreignNetBuy !== undefined ||
+    indicators.institutionNetBuy !== undefined ||
+    indicators.foreignNetBuyStreak !== undefined ||
+    indicators.insiderOwnershipChangeRate !== undefined;
   if (indicators.foreignNetBuy && indicators.institutionNetBuy) { score += max * 0.45; reasons.push('외인/기관 동시 순매수'); } else if (indicators.foreignNetBuy || indicators.institutionNetBuy) { score += max * 0.25; reasons.push(indicators.foreignNetBuy ? '외국인 순매수' : '기관 순매수'); }
   if ((indicators.foreignNetBuyStreak ?? 0) >= 3) { score += max * 0.25; reasons.push(`외국인 연속 순매수 ${indicators.foreignNetBuyStreak}일`); }
   if (indicators.programTradeDirection === 'BUY') { score += max * 0.15; reasons.push('프로그램 매수 우위'); }
   if (indicators.fundNetBuy) score += max * 0.15;
+  if ((indicators.insiderOwnershipChangeRate ?? 0) > 0.05) {
+    score += max * 0.15;
+    reasons.push(`주요주주 지분 +${indicators.insiderOwnershipChangeRate?.toFixed(2)}%p`);
+  }
   return { score: capScore(score, max), max, reasons, hasData };
 }
 

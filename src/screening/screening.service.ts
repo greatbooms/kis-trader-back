@@ -7,6 +7,8 @@ import { DeepAnalysisService } from './deep-analysis.service';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { StrategyRegistryService } from '../trading/strategy/strategy-registry.service';
 import { MarketCondition, StockFundamentals, StockIndicators, StockStrategyContext } from '../trading/types';
+import { OpenDartDomesticSignals } from '../opendart/types';
+import { SecFundamentals } from '../sec/types';
 import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy, ScreeningMode, ForeignInstitutionDetail, detectEtf } from './types';
 import { pickNumeric, pickString } from './utils/api-data.util';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
@@ -14,6 +16,7 @@ import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
 import { summarizeDividendSchedule } from './utils/dividend.util';
 import { buildDomesticScore, buildOverseasScore, buildEtfScore } from './multi-factor-scorer';
 import { suggestStrategies } from './strategy-matcher';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 
 const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
   NASD: 150000, NYSE: 150000, AMEX: 50000, TKSE: 20000000,
@@ -54,6 +57,7 @@ export class ScreeningService {
     private deepAnalysisService: DeepAnalysisService,
     private marketAnalysis: MarketAnalysisService,
     private strategyRegistry: StrategyRegistryService,
+    private marketDataCache: MarketDataCacheService,
   ) {}
 
   async screenDomestic(mode: ScreeningMode = 'FULL'): Promise<StockScore[]> {
@@ -450,15 +454,15 @@ export class ScreeningService {
     const dailyPrices = this.getSettledValue<DailyPrice[]>(priceGroup[1]) ?? [];
 
     const financePromises: Promise<any[] | undefined>[] = [
-      this.kisDomestic.getFinancialRatio(candidate.stockCode),
-      this.kisDomestic.getGrowthRatio(candidate.stockCode),
-      this.kisDomestic.getProfitRatio(candidate.stockCode),
-      this.kisDomestic.getOtherMajorRatios(candidate.stockCode),
+      this.marketDataCache.getKisDomesticFinancialRatio(candidate.stockCode),
+      this.marketDataCache.getKisDomesticGrowthRatio(candidate.stockCode),
+      this.marketDataCache.getKisDomesticProfitRatio(candidate.stockCode),
+      this.marketDataCache.getKisDomesticOtherMajorRatios(candidate.stockCode),
     ];
     if (mode === 'FULL' && !isEtf) {
       financePromises.push(
-        this.kisDomestic.getIncomeStatement(candidate.stockCode),
-        this.kisDomestic.getStabilityRatio(candidate.stockCode),
+        this.marketDataCache.getKisDomesticIncomeStatement(candidate.stockCode),
+        this.marketDataCache.getKisDomesticStabilityRatio(candidate.stockCode),
       );
     }
     const financeGroup = await Promise.allSettled(financePromises);
@@ -472,10 +476,10 @@ export class ScreeningService {
     const sentimentPromises: Promise<any[] | undefined>[] = [];
     if (mode === 'FULL' && !isEtf) {
       sentimentPromises.push(
-        this.kisDomestic.getInvestOpinion(candidate.stockCode),
-        this.kisDomestic.getEstimatePerform(candidate.stockCode),
-        this.kisDomestic.getDividendSchedule(candidate.stockCode),
-        this.kisDomestic.getInvestorTradeDaily(candidate.stockCode),
+        this.marketDataCache.getKisDomesticInvestOpinion(candidate.stockCode),
+        this.marketDataCache.getKisDomesticEstimatePerform(candidate.stockCode),
+        this.marketDataCache.getKisDomesticDividendSchedule(candidate.stockCode),
+        this.marketDataCache.getKisDomesticInvestorTradeDaily(candidate.stockCode),
         this.kisDomestic.getDailyShortSale(candidate.stockCode),
         this.kisDomestic.getDailyCreditBalance(candidate.stockCode),
       );
@@ -511,6 +515,10 @@ export class ScreeningService {
       indicators,
       candidate.currentPrice,
     );
+    if (mode === 'FULL' && !isEtf) {
+      const openDartSignals = await this.marketDataCache.getOpenDartDomesticSignals(candidate.stockCode);
+      this.applyOpenDartIndicators(openDartSignals, indicators);
+    }
     if (!isEtf && priceDetail) {
       const dcfValuation = await this.deepAnalysisService.calculateDcfValuation(
         candidate.exchangeCode,
@@ -581,6 +589,14 @@ export class ScreeningService {
     indicators.sector = priceDetail?.sector ?? candidate.sector;
     if (priceDetail?.prevDayVolume && priceDetail.prevDayVolume > 0) {
       indicators.prevDayVolumeChangeRate = ((candidate.volume / priceDetail.prevDayVolume) - 1) * 100;
+    }
+    if (mode === 'FULL' && !isEtf && ['NASD', 'NYSE', 'AMEX'].includes(candidate.exchangeCode)) {
+      const secFundamentals = await this.marketDataCache.getSecFundamentals(
+        candidate.stockCode,
+        candidate.currentPrice,
+        candidate.exchangeCode,
+      );
+      this.applySecFundamentalIndicators(secFundamentals, indicators);
     }
 
     if (!isEtf && (indicators.volatility30d ?? 0) > 300) {
@@ -856,6 +872,44 @@ export class ScreeningService {
     indicators.investCautionYn = priceDetail.investCautionYn;
     indicators.marketWarnCode = priceDetail.marketWarnCode;
     indicators.shortOverheatYn = priceDetail.shortOverheatYn;
+  }
+
+  private applyOpenDartIndicators(
+    openDartSignals: OpenDartDomesticSignals | undefined,
+    indicators: StockIndicatorDetail,
+  ): void {
+    if (!openDartSignals) return;
+    indicators.recentDisclosureCount30d = openDartSignals.recentDisclosureCount30d;
+    indicators.recentPeriodicDisclosureCount30d = openDartSignals.recentPeriodicDisclosureCount30d;
+    indicators.recentMaterialDisclosureCount30d = openDartSignals.recentMaterialDisclosureCount30d;
+    indicators.lastDisclosureDate = openDartSignals.lastDisclosureDate;
+    indicators.lastDisclosureTitle = openDartSignals.lastDisclosureTitle;
+    indicators.insiderOwnershipRate = openDartSignals.insiderOwnershipRate;
+    indicators.insiderOwnershipChangeRate = openDartSignals.insiderOwnershipChangeRate;
+    indicators.latestOwnershipReportDate = openDartSignals.latestOwnershipReportDate;
+  }
+
+  private applySecFundamentalIndicators(
+    secFundamentals: SecFundamentals | undefined,
+    indicators: StockIndicatorDetail,
+  ): void {
+    if (!secFundamentals) return;
+    indicators.revenueGrowthRate = secFundamentals.revenueGrowthRate ?? indicators.revenueGrowthRate;
+    indicators.operatingProfitGrowthRate = secFundamentals.operatingProfitGrowthRate ?? indicators.operatingProfitGrowthRate;
+    indicators.epsGrowthRate = secFundamentals.epsGrowthRate ?? indicators.epsGrowthRate;
+    indicators.operatingMargin = secFundamentals.operatingMargin ?? indicators.operatingMargin;
+    indicators.netMargin = secFundamentals.netMargin ?? indicators.netMargin;
+    indicators.grossMargin = secFundamentals.grossMargin ?? indicators.grossMargin;
+    indicators.debtRatio = secFundamentals.debtRatio ?? indicators.debtRatio;
+    indicators.currentRatio = secFundamentals.currentRatio ?? indicators.currentRatio;
+    indicators.totalAssetGrowthRate = secFundamentals.totalAssetGrowthRate ?? indicators.totalAssetGrowthRate;
+    indicators.equityGrowthRate = secFundamentals.equityGrowthRate ?? indicators.equityGrowthRate;
+    indicators.dividendYield = secFundamentals.dividendYield ?? indicators.dividendYield;
+    indicators.payoutRatio = secFundamentals.payoutRatio ?? indicators.payoutRatio;
+    indicators.latestSecFilingDate = secFundamentals.latestFilingDate;
+    indicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    indicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
+    indicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
   }
 
   private applyForeignInstitutionIndicators(

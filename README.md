@@ -68,6 +68,7 @@ NestJS 백엔드와 React 프론트엔드가 하나의 레포에 통합된 풀�
 - Node.js 20+
 - PostgreSQL 15+
 - KIS 실전투자 계좌 ([키 발급 가이드](docs/kis-api-setup.md))
+- (선택) OpenDART / SEC / FRED 키 ([보조 데이터 설정 가이드](docs/market-data-setup.md))
 - (선택) Slack 워크스페이스 ([설정 가이드](docs/slack-setup-guide.md))
 
 ## 빠른 시작
@@ -96,6 +97,9 @@ cp .env.example .env
 | `KIS_ACCOUNT_NO` | 계좌번호 (10자리) | (필수) |
 | `KIS_PROD_CODE` | 상품코드 | `01` |
 | `KIS_ENV` | 환경 (`prod` / `paper`) | `prod` |
+| `OPENDART_API_KEY` | OpenDART API 키 (국내 공시 보강) | |
+| `SEC_USER_AGENT` | SEC 요청용 User-Agent (미국 재무 보강) | |
+| `FRED_API_KEY` | FRED API 키 (미국 금리 보강) | |
 | `DATABASE_URL` | PostgreSQL 접속 URL | (필수) |
 | `ADMIN_USERNAME` | 관리자 아이디 | `admin` |
 | `ADMIN_PASSWORD` | 관리자 비밀번호 | (필수) |
@@ -208,6 +212,7 @@ kis-trader-back/
 ## 문서
 
 - [KIS API 키 발급 가이드](docs/kis-api-setup.md)
+- [보조 시장데이터 설정 가이드](docs/market-data-setup.md)
 - [배포 가이드](docs/deployment-guide.md) — Koyeb 무료 배포
 - [Slack 설정 가이드](docs/slack-setup-guide.md)
 

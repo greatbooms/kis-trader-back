@@ -19,6 +19,9 @@ import { SlackCommandsService } from '../notification/slack-commands.service';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from '../screening/utils/consensus.util';
 import { summarizeDividendSchedule } from '../screening/utils/dividend.util';
 import { pickNumeric } from '../screening/utils/api-data.util';
+import { MarketDataCacheService } from '../market-data/market-data-cache.service';
+import { OpenDartDomesticSignals } from '../opendart/types';
+import { SecFundamentals } from '../sec/types';
 
 @Injectable()
 export class TradingScheduler implements OnModuleInit {
@@ -43,6 +46,7 @@ export class TradingScheduler implements OnModuleInit {
     private prisma: PrismaService,
     private configService: ConfigService,
     private schedulerRegistry: SchedulerRegistry,
+    private marketDataCache: MarketDataCacheService,
     @Optional() private slackService?: SlackService,
     @Optional() private slackCommandsService?: SlackCommandsService,
   ) {
@@ -240,6 +244,8 @@ export class TradingScheduler implements OnModuleInit {
     const dividendScheduleCache = new Map<string, Promise<any[] | undefined>>();
     const investOpinionCache = new Map<string, Promise<any[] | undefined>>();
     const estimatePerformCache = new Map<string, Promise<any | undefined>>();
+    const openDartCache = new Map<string, Promise<OpenDartDomesticSignals | undefined>>();
+    const secFundamentalsCache = new Map<string, Promise<SecFundamentals | undefined>>();
 
     for (const [strategyName, stocks] of byStrategy) {
       const strategy = this.strategyRegistry.getStrategy(strategyName);
@@ -340,11 +346,33 @@ export class TradingScheduler implements OnModuleInit {
             fundamentals = await this.fetchFundamentals(market, ws.exchangeCode, ws.stockCode, price);
           }
 
+          if (market === 'DOMESTIC' && this.needsOpenDartSignals(strategyName)) {
+            const openDartSignals = await this.getCachedValue(
+              openDartCache,
+              ws.stockCode,
+              () => this.marketDataCache.getOpenDartDomesticSignals(ws.stockCode),
+            );
+            this.applyOpenDartSignals(stockIndicators, openDartSignals);
+          }
+
+          if (market === 'OVERSEAS' && this.needsSecSignals(strategyName)) {
+            const secKey = `${ws.exchangeCode}:${ws.stockCode}`;
+            const secFundamentals = await this.getCachedValue(
+              secFundamentalsCache,
+              secKey,
+              () => this.marketDataCache.getSecFundamentals(ws.stockCode, price.currentPrice, ws.exchangeCode),
+            );
+            this.applySecSignals(stockIndicators, secFundamentals);
+            if (strategyName === 'value-factor') {
+              fundamentals = this.mergeSecFundamentals(fundamentals, secFundamentals);
+            }
+          }
+
           if (market === 'DOMESTIC' && this.needsInvestorFlow(strategyName)) {
             const investorTradeDaily = await this.getCachedValue(
               investorTradeCache,
               ws.stockCode,
-              () => this.kisDomestic.getInvestorTradeDaily(ws.stockCode),
+              () => this.marketDataCache.getKisDomesticInvestorTradeDaily(ws.stockCode),
             );
             this.applyInvestorTradeSignals(stockIndicators, investorTradeDaily);
           }
@@ -355,21 +383,21 @@ export class TradingScheduler implements OnModuleInit {
                 ? this.getCachedValue(
                     dividendScheduleCache,
                     ws.stockCode,
-                    () => this.kisDomestic.getDividendSchedule(ws.stockCode),
+                    () => this.marketDataCache.getKisDomesticDividendSchedule(ws.stockCode),
                   )
                 : Promise.resolve(undefined),
               this.needsConsensusSignals(strategyName)
                 ? this.getCachedValue(
                     investOpinionCache,
                     ws.stockCode,
-                    () => this.kisDomestic.getInvestOpinion(ws.stockCode),
+                    () => this.marketDataCache.getKisDomesticInvestOpinion(ws.stockCode),
                   )
                 : Promise.resolve(undefined),
               this.needsConsensusSignals(strategyName)
                 ? this.getCachedValue(
                     estimatePerformCache,
                     ws.stockCode,
-                    () => this.kisDomestic.getEstimatePerform(ws.stockCode),
+                    () => this.marketDataCache.getKisDomesticEstimatePerform(ws.stockCode),
                   )
                 : Promise.resolve(undefined),
             ]);
@@ -640,6 +668,14 @@ export class TradingScheduler implements OnModuleInit {
     return ['trend-following', 'value-factor', 'infinite-buy'].includes(strategyName);
   }
 
+  private needsOpenDartSignals(strategyName: string): boolean {
+    return ['infinite-buy', 'conservative'].includes(strategyName);
+  }
+
+  private needsSecSignals(strategyName: string): boolean {
+    return ['value-factor', 'infinite-buy', 'conservative'].includes(strategyName);
+  }
+
   private async getCachedValue<T>(
     cache: Map<string, Promise<T>>,
     key: string,
@@ -718,6 +754,49 @@ export class TradingScheduler implements OnModuleInit {
     }
   }
 
+  private applyOpenDartSignals(
+    stockIndicators: StockIndicators,
+    openDartSignals: OpenDartDomesticSignals | undefined,
+  ): void {
+    if (!openDartSignals) return;
+    stockIndicators.recentDisclosureCount30d = openDartSignals.recentDisclosureCount30d;
+    stockIndicators.recentPeriodicDisclosureCount30d = openDartSignals.recentPeriodicDisclosureCount30d;
+    stockIndicators.recentMaterialDisclosureCount30d = openDartSignals.recentMaterialDisclosureCount30d;
+    stockIndicators.lastDisclosureDate = openDartSignals.lastDisclosureDate;
+    stockIndicators.lastDisclosureTitle = openDartSignals.lastDisclosureTitle;
+    stockIndicators.insiderOwnershipRate = openDartSignals.insiderOwnershipRate;
+    stockIndicators.insiderOwnershipChangeRate = openDartSignals.insiderOwnershipChangeRate;
+    stockIndicators.latestOwnershipReportDate = openDartSignals.latestOwnershipReportDate;
+  }
+
+  private applySecSignals(
+    stockIndicators: StockIndicators,
+    secFundamentals: SecFundamentals | undefined,
+  ): void {
+    if (!secFundamentals) return;
+    stockIndicators.dividendYield = secFundamentals.dividendYield ?? stockIndicators.dividendYield;
+    stockIndicators.payoutRatio = secFundamentals.payoutRatio ?? stockIndicators.payoutRatio;
+    stockIndicators.latestSecFilingDate = secFundamentals.latestFilingDate;
+    stockIndicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    stockIndicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
+    stockIndicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
+  }
+
+  private mergeSecFundamentals(
+    fundamentals: StockFundamentals | undefined,
+    secFundamentals: SecFundamentals | undefined,
+  ): StockFundamentals | undefined {
+    if (!fundamentals && !secFundamentals) return undefined;
+    return {
+      ...fundamentals,
+      debtRatio: secFundamentals?.debtRatio ?? fundamentals?.debtRatio,
+      eps: fundamentals?.eps,
+      salesGrowthRate: secFundamentals?.revenueGrowthRate ?? fundamentals?.salesGrowthRate,
+      operatingProfitGrowthRate: secFundamentals?.operatingProfitGrowthRate ?? fundamentals?.operatingProfitGrowthRate,
+      dividendPayoutRate: secFundamentals?.payoutRatio ?? fundamentals?.dividendPayoutRate,
+    };
+  }
+
   private estimateNetBuyStreak(rows: any[] | undefined, keys: string[]): number | undefined {
     if (!rows?.length) return undefined;
     let streak = 0;
@@ -750,7 +829,7 @@ export class TradingScheduler implements OnModuleInit {
         };
 
         // ROE, 부채비율, EPS, 매출액증가율, 영업이익증가율: 재무비율 API에서 제공
-        const rows = await this.kisDomestic.getFinancialRatio(stockCode);
+        const rows = await this.marketDataCache.getKisDomesticFinancialRatio(stockCode);
         if (rows.length > 0) {
           const latest = rows[0];
           fundamentals.roe = parseFloat(latest.roe_val) || undefined;
@@ -765,7 +844,7 @@ export class TradingScheduler implements OnModuleInit {
 
         // EV/EBITDA, 배당성향: 기타주요비율 API에서 제공
         try {
-          const otherRows = await this.kisDomestic.getOtherMajorRatios(stockCode);
+          const otherRows = await this.marketDataCache.getKisDomesticOtherMajorRatios(stockCode);
           if (otherRows.length > 0) {
             const latest = otherRows[0];
             const evEbitda = parseFloat(latest.ev_ebitda);
@@ -781,11 +860,17 @@ export class TradingScheduler implements OnModuleInit {
       }
       // 해외: 현재가상세 API에서 PER/PBR/EPS 제공 (재무비율 API는 없음)
       if (price.per || price.pbr || price.eps) {
-        return {
+        const fundamentals: StockFundamentals = {
           per: price.per,
           pbr: price.pbr,
           eps: price.eps,
         };
+        const secFundamentals = await this.marketDataCache.getSecFundamentals(
+          stockCode,
+          price.currentPrice,
+          exchangeCode,
+        );
+        return this.mergeSecFundamentals(fundamentals, secFundamentals);
       }
       return undefined;
     } catch (e) {
