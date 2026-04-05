@@ -65,7 +65,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
 
   it('RSI<25 + volumeRatio>=2 → 매수 (자금의 30%만)', async () => {
     const ctx = createContext();
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     // buyAmount = min(3000000 * 0.3, 3000000) = 900000 / 70000 = 12
@@ -77,7 +77,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 25, volumeRatio: 2.5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -85,7 +85,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 24, volumeRatio: 2.5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -94,7 +94,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 20, volumeRatio: 1.5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -102,7 +102,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 20, volumeRatio: 2.0 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -124,7 +124,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 72200;
     // profitRate = (72200-70000)/70000 = 3.14%
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(12);
@@ -143,7 +143,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 71750;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -163,7 +163,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(12);
@@ -182,7 +182,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66850;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
   });
@@ -205,7 +205,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals[0].reason).toContain('손절');
   });
 
@@ -217,7 +217,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     const ctx = createContext();
     ctx.watchStock.strategyParams = { cashRate: 0.5 };
     // buyAmount = 3000000 * 0.5 = 1500000 / 70000 = 21
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].quantity).toBe(Math.floor(1500000 / 70000));
   });
@@ -225,7 +225,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
   it('cashRate=1.0 → 100% 현금 → 매수 불가', async () => {
     const ctx = createContext();
     ctx.watchStock.strategyParams = { cashRate: 1.0 };
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -236,7 +236,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
   it('buyableAmount < quota*availableRate → buyableAmount 기준', async () => {
     const ctx = createContext({ buyableAmount: 200000 });
     // buyAmount = min(900000, 200000) = 200000 / 70000 = 2
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].quantity).toBe(Math.floor(200000 / 70000));
   });
@@ -251,7 +251,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     ctx.watchStock.exchangeCode = 'NYSE';
     ctx.price.currentPrice = 45.678;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].price).toBe(45.68);
     expect(signals[0].exchangeCode).toBe('NYSE');
@@ -282,7 +282,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 68000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('리스크 전량청산');
   });
@@ -308,7 +308,7 @@ describe('ConservativeStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 71000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // 포지션 있으면 hasPosition=true → 익절/손절 분기로 감
     // +1.4%라 익절(3%) 미달, 손절(-5%) 미달 → 시그널 없음
     expect(signals).toHaveLength(0);

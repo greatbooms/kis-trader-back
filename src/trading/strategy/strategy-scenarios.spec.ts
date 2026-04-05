@@ -92,7 +92,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       // Day 1: 첫 매수 @ 70000
       const ctx1 = createBaseContext();
       ctx1.price.currentPrice = 70000;
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1.length).toBeGreaterThan(0);
       expect(signals1[0].side).toBe('BUY');
 
@@ -113,7 +113,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx2.price.currentPrice = 60000;
       ctx2.stockIndicators.rsi14 = 25; // oversold → 1.5x quota
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
 
       // Should have buy + sell signals
       const buys2 = signals2.filter((s) => s.side === 'BUY');
@@ -142,7 +142,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
         },
       });
       ctx3.price.currentPrice = avgPrice3 * 0.65;
-      const signals3 = await strategy.evaluateStock(ctx3);
+      const { signals: signals3 } = await strategy.evaluateStock(ctx3);
 
       const stopLoss = signals3.find((s) => s.reason.includes('Stop loss'));
       expect(stopLoss).toBeDefined();
@@ -154,7 +154,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       // T=0: should do initial buy
       const ctx0 = createBaseContext();
       ctx0.price.currentPrice = 70000;
-      const signals0 = await strategy.evaluateStock(ctx0);
+      const { signals: signals0 } = await strategy.evaluateStock(ctx0);
       expect(signals0.some((s) => s.side === 'BUY')).toBe(true);
 
       const perCycleQuota = 4000000 / 40;
@@ -170,7 +170,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
         },
       });
       ctx19.price.currentPrice = 68000;
-      const signals19 = await strategy.evaluateStock(ctx19);
+      const { signals: signals19 } = await strategy.evaluateStock(ctx19);
       const buys19 = signals19.filter((s) => s.side === 'BUY');
       // T < 20 → Buy1 + Buy2
       expect(buys19.some((s) => s.reason.includes('Buy1'))).toBe(true);
@@ -186,7 +186,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
         },
       });
       ctx25.price.currentPrice = 66000;
-      const signals25 = await strategy.evaluateStock(ctx25);
+      const { signals: signals25 } = await strategy.evaluateStock(ctx25);
       const buys25 = signals25.filter((s) => s.side === 'BUY');
       expect(buys25.every((s) => s.reason.includes('Buy2'))).toBe(true);
     });
@@ -223,7 +223,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx1.price.currentPrice = 64500; // below BB lower
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(1);
       expect(signals1[0].side).toBe('BUY');
       expect(signals1[0].reason).toContain('그리드진입');
@@ -261,7 +261,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx2.price.currentPrice = avgPrice * 0.95;
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const gridBuys = signals2.filter((s) => s.side === 'BUY');
       expect(gridBuys.length).toBe(1);
       expect(gridBuys[0].reason).toContain('그리드매수');
@@ -296,7 +296,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx3.price.currentPrice = 70000;
 
-      const signals3 = await strategy.evaluateStock(ctx3);
+      const { signals: signals3 } = await strategy.evaluateStock(ctx3);
       expect(signals3).toHaveLength(1);
       expect(signals3[0].side).toBe('SELL');
       expect(signals3[0].quantity).toBe(14); // floor(28/2)
@@ -332,7 +332,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx4.price.currentPrice = 76000;
 
-      const signals4 = await strategy.evaluateStock(ctx4);
+      const { signals: signals4 } = await strategy.evaluateStock(ctx4);
       expect(signals4).toHaveLength(1);
       expect(signals4[0].side).toBe('SELL');
       expect(signals4[0].quantity).toBe(14); // full exit
@@ -371,7 +371,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx1.price.currentPrice = 72000; // > breakout(69000 + 4000*0.5 = 71000)
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(1);
       expect(signals1[0].side).toBe('BUY');
       const buyQty = signals1[0].quantity;
@@ -402,7 +402,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       ctx2.price.currentPrice = 76000;
       ctx2.price.highPrice = 76000;
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       expect(signals2).toHaveLength(1);
       expect(signals2[0].side).toBe('SELL');
       expect(signals2[0].reason).toContain('익절');
@@ -435,7 +435,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
         ctx3.price.currentPrice = 74500;
         ctx3.price.highPrice = 78000; // 74500 < 78000 * 0.98(76440) → trailing
 
-        const signals3 = await strategy.evaluateStock(ctx3);
+        const { signals: signals3 } = await strategy.evaluateStock(ctx3);
         expect(signals3).toHaveLength(1);
         expect(signals3[0].side).toBe('SELL');
         expect(signals3[0].reason).toContain('트레일링스탑');
@@ -470,7 +470,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx1.price.currentPrice = 70000;
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(1);
       expect(signals1[0].side).toBe('BUY');
       // buyAmount = min(1000000 * 0.3, 5000000) = 300000
@@ -502,7 +502,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx2.price.currentPrice = 72500;
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       expect(signals2).toHaveLength(1);
       expect(signals2[0].side).toBe('SELL');
       expect(signals2[0].quantity).toBe(4);
@@ -538,7 +538,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx1.price.currentPrice = 72000;
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(1);
       expect(signals1[0].side).toBe('BUY');
       expect(signals1[0].reason).toContain('추세진입');
@@ -575,7 +575,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx2.price.currentPrice = 77760;
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       expect(signals2).toHaveLength(1);
       expect(signals2[0].side).toBe('BUY');
       expect(signals2[0].reason).toContain('피라미딩');
@@ -612,7 +612,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       });
       ctx3.price.currentPrice = 73000;
 
-      const signals3 = await strategy.evaluateStock(ctx3);
+      const { signals: signals3 } = await strategy.evaluateStock(ctx3);
       expect(signals3).toHaveLength(1);
       expect(signals3[0].side).toBe('SELL');
       expect(signals3[0].quantity).toBe(totalQty);

@@ -93,7 +93,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
 
   it('국내: PER<10, PBR<1, ROE>10%, 부채<150%, RSI<40 → 매수', async () => {
     const ctx = createContext();
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     expect(signals[0].quantity).toBe(Math.floor(5000000 / 60000)); // 83
@@ -112,7 +112,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 10, pbr: 0.8, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -120,7 +120,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 9.9, pbr: 0.8, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -129,7 +129,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 0, pbr: 0.8, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -137,7 +137,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: -5, pbr: 0.8, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -149,7 +149,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 1.0, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -157,7 +157,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.99, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -169,7 +169,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 9, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -177,7 +177,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 10, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -189,7 +189,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 150 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -197,7 +197,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 149 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -209,7 +209,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 0, salesGrowthRate: 5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -217,7 +217,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: -500, salesGrowthRate: 5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -225,7 +225,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 100, salesGrowthRate: 5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -233,7 +233,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: undefined, salesGrowthRate: 5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -245,7 +245,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -25 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -253,7 +253,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -20 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -261,7 +261,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: -19 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -274,7 +274,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.exchangeCode = 'NASD';
     ctx.price.currentPrice = 25.50;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -288,7 +288,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.exchangeCode = 'NASD';
     ctx.price.currentPrice = 25.50;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -300,7 +300,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 40 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -308,7 +308,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 39 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -327,7 +327,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.stockName = 'Intel';
     ctx.price.currentPrice = 25.50;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     expect(signals[0].price).toBe(25.50);
@@ -345,7 +345,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.exchangeCode = 'NASD';
     ctx.price.currentPrice = 25.50;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -359,7 +359,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.exchangeCode = 'NASD';
     ctx.price.currentPrice = 25.50;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -371,7 +371,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.market = 'OVERSEAS';
     ctx.watchStock.exchangeCode = 'NASD';
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -382,7 +382,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.market = 'OVERSEAS';
     ctx.watchStock.exchangeCode = 'NASD';
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -402,7 +402,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 53500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(83);
@@ -421,7 +421,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 54600;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
   });
@@ -442,7 +442,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 69000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(83);
@@ -466,7 +466,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 65000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(83);
@@ -486,7 +486,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 65000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -507,7 +507,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 53000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('손절');
   });
@@ -529,14 +529,14 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 53000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('손절');
   });
 
   it('alreadyExecutedToday=true + 신규 진입 → 차단', async () => {
     const ctx = createContext({ alreadyExecutedToday: true });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -565,7 +565,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 58000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('리스크 전량청산');
   });
@@ -582,7 +582,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
         reasons: ['포지션 초과'],
       },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -592,7 +592,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
 
   it('fundamentals=undefined → 매수 안함', async () => {
     const ctx = createContext({ fundamentals: undefined });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -606,7 +606,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.watchStock.strategyParams = { maxPer: 15 };
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -623,7 +623,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     ctx.watchStock.strategyParams = { takeProfitRate: 0.20 };
     ctx.price.currentPrice = 69000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const takeProfit = signals.find(s => s.reason?.includes('익절'));
     expect(takeProfit).toBeUndefined();
   });
@@ -636,7 +636,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: undefined, roe: 15, debtRatio: 80 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1); // PBR undefined면 체크 안함
   });
 
@@ -647,7 +647,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
   it('quota=0 → 매수 0주', async () => {
     const ctx = createContext();
     ctx.watchStock.quota = 0;
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -668,7 +668,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 63000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -680,7 +680,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 35, investCautionYn: true },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -688,7 +688,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 35, marketWarnCode: '01' },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -696,7 +696,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       stockIndicators: { currentAboveMA200: true, rsi14: 35, marketWarnCode: '00' },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -709,7 +709,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, operatingProfitGrowthRate: -31 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -717,7 +717,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, operatingProfitGrowthRate: -30 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -729,7 +729,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, evEbitda: 16 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -737,7 +737,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5, evEbitda: 15 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 
@@ -745,7 +745,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
     const ctx = createContext({
       fundamentals: { per: 7, pbr: 0.8, roe: 15, debtRatio: 80, eps: 5000, salesGrowthRate: 5 },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
   });
 });

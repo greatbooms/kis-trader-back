@@ -72,14 +72,14 @@ describe('ConservativeStrategy', () => {
     it('should return empty when price is 0', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 0;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should return empty when price is negative', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = -100;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -105,7 +105,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -125,7 +125,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // No position, so no liquidation signal; buy blocked so no buy either
       expect(signals).toHaveLength(0);
     });
@@ -144,7 +144,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.price.currentPrice = 66000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -163,7 +163,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.price.currentPrice = 68000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
     });
@@ -181,7 +181,7 @@ describe('ConservativeStrategy', () => {
       ctx.price.currentPrice = 66500;
       ctx.watchStock.strategyParams = { stopLossRate: 0.10 }; // 10%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // -5% is within custom 10% threshold
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
@@ -201,7 +201,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.price.currentPrice = 72500;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -220,7 +220,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.price.currentPrice = 71000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const takeProfit = signals.find((s) => s.reason?.includes('익절'));
       expect(takeProfit).toBeUndefined();
     });
@@ -238,7 +238,7 @@ describe('ConservativeStrategy', () => {
       ctx.price.currentPrice = 72500;
       ctx.watchStock.strategyParams = { takeProfitRate: 0.05 }; // 5%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // +3.6% is below custom 5% threshold
       const takeProfit = signals.find((s) => s.reason?.includes('익절'));
       expect(takeProfit).toBeUndefined();
@@ -255,7 +255,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       // quota=1000000, cashRate=0.7 → available=30% → 300000
@@ -273,7 +273,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -286,7 +286,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -299,7 +299,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -312,7 +312,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -334,7 +334,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -348,7 +348,7 @@ describe('ConservativeStrategy', () => {
         buyableAmount: 100000, // Less than quota * 0.3 (300000)
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       // buyAmount = min(300000, 100000) = 100000
       // buyQty = floor(100000 / 70000) = 1
@@ -365,7 +365,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.watchStock.quota = 0;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -379,7 +379,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -395,7 +395,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -409,7 +409,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(5);
       expect(signals[0].reason).toContain('바닥권근접');
@@ -425,7 +425,7 @@ describe('ConservativeStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(3);
     });
@@ -445,7 +445,7 @@ describe('ConservativeStrategy', () => {
         volumeThreshold: 1.0,
       };
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
     });
@@ -460,7 +460,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.watchStock.strategyParams = { cashRate: 0.5 }; // 50% available instead of 30%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       // quota=1000000, cashRate=0.5 → available=50% → 500000
       // buyAmount = min(500000, 500000) = 500000
@@ -482,7 +482,7 @@ describe('ConservativeStrategy', () => {
       ctx.watchStock.exchangeCode = 'NASD';
       ctx.price.currentPrice = 150.567;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       if (signals.length > 0 && signals[0].price) {
         const decimal = signals[0].price.toString().split('.')[1] || '';
         expect(decimal.length).toBeLessThanOrEqual(2);
@@ -504,7 +504,7 @@ describe('ConservativeStrategy', () => {
       ctx.watchStock.stockCode = 'AAPL';
       ctx.price.currentPrice = 142;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].exchangeCode).toBe('NASD');
     });
@@ -524,7 +524,7 @@ describe('ConservativeStrategy', () => {
       });
       ctx.price.currentPrice = 65000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('손절');
     });

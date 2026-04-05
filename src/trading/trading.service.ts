@@ -55,19 +55,13 @@ export class TradingService {
   ): Promise<void> {
     for (const ctx of contexts) {
       try {
-        const signals = await strategy.evaluateStock(ctx);
+        const { signals, skipReasons } = await strategy.evaluateStock(ctx);
 
         if (signals.length === 0) {
-          let reason = '시그널 없음';
-          if (!ctx.marketCondition.referenceIndexAboveMA200 && !ctx.position) {
-            reason = `${ctx.marketCondition.referenceIndexName} 200일선 아래 — 신규 매수 중단`;
-          } else if (!ctx.stockIndicators.currentAboveMA200 && !ctx.position) {
-            reason = '종목 현재가 MA200 아래 — 신규 진입 차단';
-          } else if (ctx.alreadyExecutedToday) {
-            reason = '오늘 이미 실행됨';
-          }
+          const reason = skipReasons.length > 0 ? skipReasons.join('; ') : '시그널 없음';
 
           await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SKIPPED, reason, {
+            skipReasons,
             marketCondition: ctx.marketCondition.referenceIndexName,
             referenceIndexAboveMa200: ctx.marketCondition.referenceIndexAboveMA200,
             alreadyExecutedToday: ctx.alreadyExecutedToday,
@@ -174,7 +168,6 @@ export class TradingService {
         data: {
           status: result.success ? OrderStatus.FILLED : OrderStatus.FAILED,
           orderNo: result.orderNo,
-          reason: result.message,
         },
       });
 
@@ -388,7 +381,6 @@ export class TradingService {
         data: {
           status: result.success ? OrderStatus.FILLED : OrderStatus.FAILED,
           orderNo: result.orderNo,
-          reason: result.message,
         },
       });
 

@@ -185,10 +185,7 @@ export class SimulationService {
         riskState,
       };
 
-      const signals = await strategy.evaluateStock(ctx);
-      const noSignalReason = signals.length === 0
-        ? this.describeNoSignalReason(session.strategyName, ctx)
-        : undefined;
+      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
 
       if (signals.length === 0) {
         this.logger.debug(
@@ -197,7 +194,7 @@ export class SimulationService {
           ` adx14=${stockIndicators.adx14 ?? 'N/A'}` +
           ` alreadyToday=${!!todayTrade} pos=${pos ? `qty=${pos.quantity},avg=${Number(pos.avgPrice)}` : 'none'}` +
           ` cash=${Number(session.currentCash)}` +
-          ` reason=${noSignalReason ?? 'strategy conditions not met'}`,
+          ` reason=${skipReasons.join('; ') || 'strategy conditions not met'}`,
         );
       }
 
@@ -247,29 +244,13 @@ export class SimulationService {
           });
           this.logger.log(
             `[${session.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} ` +
-            `(reason: ${noSignalReason ?? 'no BUY signal'})`,
+            `(reason: ${skipReasons.join('; ') || 'no BUY signal'})`,
           );
         }
       }
     } catch (e) {
       this.logger.error(`Simulation tick error for ${session.stockCode}: ${e.message}`);
     }
-  }
-
-  private describeNoSignalReason(strategyName: string, ctx: StockStrategyContext): string {
-    if (ctx.alreadyExecutedToday) {
-      return 'already executed today';
-    }
-
-    if (strategyName === 'infinite-buy') {
-      return this.describeInfiniteBuyNoSignal(ctx);
-    }
-
-    if (strategyName === 'daily-dca') {
-      return this.describeDailyDcaNoSignal(ctx);
-    }
-
-    return 'strategy conditions not met';
   }
 
   calculateSessionCycle(
@@ -328,80 +309,6 @@ export class SimulationService {
     });
   }
 
-  private describeInfiniteBuyNoSignal(ctx: StockStrategyContext): string {
-    const { watchStock, price, position, marketCondition, stockIndicators, buyableAmount } = ctx;
-    const currentPrice = price.currentPrice;
-    const hasPosition = !!position && position.quantity > 0;
-
-    if (!watchStock.quota || watchStock.quota <= 0) {
-      return 'quota not configured';
-    }
-
-    if (currentPrice <= 0) {
-      return `invalid current price (${currentPrice})`;
-    }
-
-    if (!marketCondition.referenceIndexAboveMA200) {
-      return hasPosition
-        ? `${marketCondition.referenceIndexName} below MA200, buy paused while position is open`
-        : `${marketCondition.referenceIndexName} below MA200, no new entry`;
-    }
-
-    if (!hasPosition) {
-      if (stockIndicators.investCautionYn) {
-        return 'invest caution flag';
-      }
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
-        return `market warning code ${stockIndicators.marketWarnCode}`;
-      }
-      if (this.hasNegativeConsensus(stockIndicators.consensusRating, stockIndicators.targetPriceUpside)) {
-        return 'negative consensus filter';
-      }
-    }
-
-    const quota = watchStock.quota;
-    const perCycleQuota = quota / watchStock.maxCycles;
-    const totalInvested = position?.totalInvested || 0;
-    const cycleProgress = perCycleQuota > 0 ? totalInvested / perCycleQuota : 0;
-
-    if (cycleProgress >= watchStock.maxCycles) {
-      return `max cycles reached (T=${cycleProgress.toFixed(1)})`;
-    }
-
-    const adjustedQuota = this.estimateInfiniteBuyQuota(ctx);
-    if (adjustedQuota <= 0) {
-      return `buy quota unavailable after adjustments (cash=${buyableAmount.toFixed(2)})`;
-    }
-
-    if (!hasPosition) {
-      if (Math.floor(adjustedQuota / currentPrice) <= 0) {
-        return `insufficient buy quota for 1 share (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
-      }
-      return 'entry conditions not met';
-    }
-
-    const avgPrice = position?.avgPrice || currentPrice;
-    const holdQty = position?.quantity || 0;
-    if (holdQty > 0 && currentPrice < avgPrice * (1 - watchStock.stopLossRate)) {
-      return 'stop loss would trigger';
-    }
-
-    const sell1Rate = Math.max(10 - cycleProgress / 2, 3) / 100;
-    const sell2Rate = Math.max(15 - cycleProgress / 3, 8) / 100;
-    if (currentPrice >= avgPrice * (1 + sell1Rate)) {
-      return 'sell target active';
-    }
-    if (currentPrice >= avgPrice * (1 + sell2Rate)) {
-      return 'sell target active';
-    }
-
-    if (Math.floor(adjustedQuota / currentPrice) <= 0) {
-      return `insufficient adjusted quota for add-on (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
-    }
-
-    return 'waiting for next buy/sell trigger';
-  }
-
   private estimateInfiniteBuyQuota(ctx: StockStrategyContext): number {
     const { watchStock, marketCondition, stockIndicators, buyableAmount } = ctx;
     if (!watchStock.quota || watchStock.quota <= 0) return 0;
@@ -422,32 +329,6 @@ export class SimulationService {
     }
 
     return Math.min(adjustedQuota, buyableAmount);
-  }
-
-  private describeDailyDcaNoSignal(ctx: StockStrategyContext): string {
-    const { watchStock, price, position, buyableAmount } = ctx;
-    const currentPrice = price.currentPrice;
-
-    if (!watchStock.quota || watchStock.quota <= 0) {
-      return 'quota not configured';
-    }
-
-    if (currentPrice <= 0) {
-      return `invalid current price (${currentPrice})`;
-    }
-
-    const totalInvested = position?.totalInvested || 0;
-    if (totalInvested >= watchStock.quota) {
-      return `quota exhausted (${totalInvested.toFixed(2)} >= ${watchStock.quota.toFixed(2)})`;
-    }
-
-    const accumulatedQuota = Number((watchStock.strategyParams as Record<string, unknown> | undefined)?.accumulatedQuota || 0);
-    const adjustedQuota = Math.min((watchStock.quota / watchStock.maxCycles) + accumulatedQuota, buyableAmount);
-    if (Math.floor(adjustedQuota / currentPrice) <= 0) {
-      return `insufficient buy quota for 1 share (${adjustedQuota.toFixed(2)} < ${currentPrice.toFixed(2)})`;
-    }
-
-    return 'waiting for next DCA execution';
   }
 
   private hasNegativeConsensus(rating?: string, targetPriceUpside?: number): boolean {
@@ -510,11 +391,11 @@ export class SimulationService {
             stockCode: signal.stockCode,
             stockName: session.stockName,
             side: Side.BUY,
-            quantity: 0,
-            price: new Prisma.Decimal(0),
-            totalAmount: new Prisma.Decimal(0),
+            quantity: signal.quantity,
+            price: new Prisma.Decimal(price),
+            totalAmount: new Prisma.Decimal(totalAmount),
             tradeStatus: SimulationTradeStatus.FAILED,
-            failReason: 'Insufficient cash',
+            failReason: `Insufficient cash: need ${totalAmount.toLocaleString()}, have ${Number(session.currentCash).toLocaleString()}`,
             strategyName: session.strategyName,
             reason: signal.reason,
           },
@@ -597,8 +478,47 @@ export class SimulationService {
         where: { sessionId_exchangeCode_stockCode: { sessionId, exchangeCode: signal.exchangeCode, stockCode: signal.stockCode } },
       });
 
-      if (!existingPos || existingPos.quantity < signal.quantity) {
-        this.logger.warn(`Insufficient position for SELL ${signal.stockCode}`);
+      if (!existingPos) {
+        this.logger.warn(`No position for SELL ${signal.stockCode}`);
+        await this.prisma.simulationTrade.create({
+          data: {
+            sessionId,
+            market: signal.market as Market,
+            exchangeCode: signal.exchangeCode,
+            stockCode: signal.stockCode,
+            stockName: session.stockName,
+            side: Side.SELL,
+            quantity: signal.quantity,
+            price: new Prisma.Decimal(price),
+            totalAmount: new Prisma.Decimal(totalAmount),
+            tradeStatus: SimulationTradeStatus.FAILED,
+            failReason: 'No position held',
+            strategyName: session.strategyName,
+            reason: signal.reason,
+          },
+        });
+        return;
+      }
+
+      if (existingPos.quantity < signal.quantity) {
+        this.logger.warn(`Insufficient quantity for SELL ${signal.stockCode}: need ${signal.quantity}, have ${existingPos.quantity}`);
+        await this.prisma.simulationTrade.create({
+          data: {
+            sessionId,
+            market: signal.market as Market,
+            exchangeCode: signal.exchangeCode,
+            stockCode: signal.stockCode,
+            stockName: session.stockName,
+            side: Side.SELL,
+            quantity: signal.quantity,
+            price: new Prisma.Decimal(price),
+            totalAmount: new Prisma.Decimal(totalAmount),
+            tradeStatus: SimulationTradeStatus.FAILED,
+            failReason: `Insufficient quantity: need ${signal.quantity}, have ${existingPos.quantity}`,
+            strategyName: session.strategyName,
+            reason: signal.reason,
+          },
+        });
         return;
       }
 

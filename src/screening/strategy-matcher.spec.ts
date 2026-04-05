@@ -1,5 +1,10 @@
 import { suggestStrategies } from './strategy-matcher';
-import { PerStockTradingStrategy, StockStrategyContext, TradingSignal } from '../trading/types';
+import {
+  PerStockTradingStrategy,
+  StockStrategyContext,
+  StrategyEvaluationResult,
+  TradingSignal,
+} from '../trading/types';
 
 function createSignal(stockCode: string, side: 'BUY' | 'SELL', reason: string): TradingSignal {
   return {
@@ -57,7 +62,7 @@ function createContext(): StockStrategyContext {
 function createStrategy(
   name: string,
   displayName: string,
-  signalsOrEvaluator: TradingSignal[] | ((context: StockStrategyContext) => Promise<TradingSignal[]>),
+  signalsOrEvaluator: TradingSignal[] | ((context: StockStrategyContext) => Promise<StrategyEvaluationResult>),
 ): PerStockTradingStrategy {
   return {
     name,
@@ -78,7 +83,7 @@ function createStrategy(
     evaluateStock: async (context) => (
       typeof signalsOrEvaluator === 'function'
         ? signalsOrEvaluator(context)
-        : signalsOrEvaluator
+        : { signals: signalsOrEvaluator, skipReasons: [] }
     ),
   };
 }
@@ -277,11 +282,12 @@ describe('suggestStrategies', () => {
     context.totalPortfolioValue = 100_000;
 
     const strategies = [
-      createStrategy('trend-following', '추세 추종', async (strategyContext) => (
-        strategyContext.buyableAmount >= strategyContext.price.currentPrice * 1.5
+      createStrategy('trend-following', '추세 추종', async (strategyContext) => ({
+        signals: strategyContext.buyableAmount >= strategyContext.price.currentPrice * 1.5
           ? [createSignal('005930', 'BUY', '추세진입')]
-          : []
-      )),
+          : [],
+        skipReasons: [],
+      })),
     ];
 
     const results = await suggestStrategies(strategies, context);

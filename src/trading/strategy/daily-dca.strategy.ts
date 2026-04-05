@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
 } from '../types';
@@ -53,20 +54,23 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(DailyDcaStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
 
     // quota 미설정 → skip
     if (!watchStock.quota || watchStock.quota <= 0) {
       this.logger.debug(`[${watchStock.stockCode}] No quota set, skip`);
-      return signals;
+      skipReasons.push('Quota 미설정');
+      return { signals, skipReasons };
     }
 
     const curPrice = price.currentPrice;
     if (curPrice <= 0) {
       this.logger.warn(`[${watchStock.stockCode}] Invalid current price: ${curPrice}`);
-      return signals;
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
     }
 
     const market = watchStock.market;
@@ -97,16 +101,17 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
         side: 'SELL',
         quantity: holdQty,
         price: roundPrice(curPrice),
-        reason: `Stop loss: loss=${((1 - curPrice / avgPrice) * 100).toFixed(1)}%`,
+        reason: `손절: -${((1 - curPrice / avgPrice) * 100).toFixed(1)}% (기준 -${(watchStock.stopLossRate * 100).toFixed(0)}%)`,
         orderDivision: '00',
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     // 오늘 이미 실행 → skip (손절은 위에서 이미 체크)
     if (ctx.alreadyExecutedToday) {
       this.logger.debug(`[${watchStock.stockCode}] Already executed today, skip`);
-      return signals;
+      skipReasons.push('오늘 이미 실행됨');
+      return { signals, skipReasons };
     }
 
     // --- 익절: 평균단가 +10% ---
@@ -121,17 +126,18 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
         side: 'SELL',
         quantity: holdQty,
         price: roundPrice(curPrice),
-        reason: `Take profit: +${((curPrice / avgPrice - 1) * 100).toFixed(1)}%`,
+        reason: `익절: +${((curPrice / avgPrice - 1) * 100).toFixed(1)}% >= +10%`,
         orderDivision: '00',
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     // --- 매수: quota 소진 전까지 매일 매수 ---
     const maxCyclesReached = totalInvested >= quota;
     if (maxCyclesReached) {
       this.logger.debug(`[${watchStock.stockCode}] Quota exhausted (${totalInvested.toFixed(0)} >= ${quota}), buy stopped`);
-      return signals;
+      skipReasons.push(`Quota 소진: 투자금 ${totalInvested.toFixed(0)} ≥ 목표 ${quota}`);
+      return { signals, skipReasons };
     }
 
     // 누적 이월금 포함
@@ -147,15 +153,17 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
         side: 'BUY',
         quantity: buyQty,
         price: roundPrice(curPrice),
-        reason: `DCA buy: ${buyQty}주 @ ${roundPrice(curPrice)}`,
+        reason: `DCA 매수: ${buyQty}주 @ ${roundPrice(curPrice)}`,
         orderDivision: '00',
       });
+    } else {
+      skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)}`);
     }
 
     this.logger.log(
       `[${watchStock.stockCode}] invested=${totalInvested.toFixed(0)}/${quota}, signals=${signals.length}`,
     );
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

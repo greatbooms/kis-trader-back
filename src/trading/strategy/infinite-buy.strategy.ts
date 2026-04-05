@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
 } from '../types';
@@ -97,21 +98,24 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(InfiniteBuyStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, marketCondition, stockIndicators } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const details: Record<string, any> = {};
 
     // 2. quota 미설정 → skip
     if (!watchStock.quota || watchStock.quota <= 0) {
       this.logger.debug(`[${watchStock.stockCode}] No quota set, skip`);
-      return signals;
+      skipReasons.push('Quota 미설정');
+      return { signals, skipReasons };
     }
 
     const curPrice = price.currentPrice;
     if (curPrice <= 0) {
       this.logger.warn(`[${watchStock.stockCode}] Invalid current price: ${curPrice}`);
-      return signals;
+      skipReasons.push(`유효하지 않은 현재가 (${curPrice})`);
+      return { signals, skipReasons };
     }
 
     const market = watchStock.market;
@@ -151,13 +155,14 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         reason: `Stop loss: T=${T.toFixed(1)}, loss=${((1 - curPrice / avgPrice) * 100).toFixed(1)}%`,
         orderDivision: '00', // 손절은 지정가
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     // 1. 오늘 이미 실행 → skip (손절은 위에서 이미 체크)
     if (ctx.alreadyExecutedToday) {
       this.logger.debug(`[${watchStock.stockCode}] Already executed today, skip`);
-      return signals;
+      skipReasons.push('오늘 이미 실행됨');
+      return { signals, skipReasons };
     }
 
     // --- 개선 E: 시장 상황 필터 ---
@@ -170,20 +175,26 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         `[${watchStock.stockCode}] ${marketCondition.referenceIndexName} below MA200, no new entry`,
       );
       details.skippedReason = 'index_below_ma200_no_position';
-      return signals;
+      skipReasons.push(`${marketCondition.referenceIndexName} 200일선 아래 — 신규 매수 중단`);
+      return { signals, skipReasons };
     }
 
     // --- 개선 C: 종목 선별 필터 ---
     details.stockIndicators = stockIndicators;
-    // 종목 MA200 체크 제거: 무한매수법은 하락장에서 분할매수하여 평균단가를 낮추는 전략이므로
-    // 개별 종목 MA200 필터는 전략 취지에 맞지 않음. 지수 MA200만 유지.
 
     if (!hasPosition) {
-      if (stockIndicators.investCautionYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
       if (hasNegativeConsensus(stockIndicators)) {
         this.logger.debug(`[${watchStock.stockCode}] Negative consensus, skip new entry`);
-        return signals;
+        skipReasons.push(`부정적 컨센서스: ${stockIndicators.consensusRating ?? '목표가 하락'}`);
+        return { signals, skipReasons };
       }
     }
 
@@ -365,12 +376,19 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           }
         }
       }
+    } else if (!hasPosition && !buyAllowed) {
+      // 포지션 없고 매수 불가 (maxCycles 도달 또는 지수 MA200 아래)
+      if (maxCyclesReached) {
+        skipReasons.push(`최대 사이클 도달: T=${T.toFixed(1)} ≥ ${watchStock.maxCycles}`);
+      } else if (indexBelowMA200) {
+        skipReasons.push(`${marketCondition.referenceIndexName} 200일선 아래 — 매수 중단`);
+      }
     }
 
     this.logger.log(
       `[${watchStock.stockCode}] T=${T.toFixed(1)}, signals=${signals.length}, quota=${adjustedQuota.toFixed(0)}`,
     );
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

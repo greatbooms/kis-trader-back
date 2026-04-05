@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
@@ -70,13 +71,17 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(ConservativeStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, stockIndicators, riskState } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
 
     const curPrice = price.currentPrice;
-    if (curPrice <= 0) return signals;
+    if (curPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
+    }
 
     const market = watchStock.market;
     const exchangeCode = watchStock.exchangeCode;
@@ -99,7 +104,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
         price: roundPrice(curPrice),
         reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     if (hasPosition) {
@@ -122,7 +127,7 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절: +3%
@@ -139,33 +144,56 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `익절: +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitRate * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
     } else {
       // --- 포지션 없음: 진입 조건 ---
 
       // 리스크 체크
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
-        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`);
-        return signals;
+        const reason = riskState?.reasons?.join(', ') ?? 'MDD';
+        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${reason}`);
+        skipReasons.push(`리스크 매수 차단: ${reason}`);
+        return { signals, skipReasons };
       }
 
       const { rsi14, volumeRatio } = stockIndicators;
 
       // 투자유의/시장경고 종목 진입 차단
-      if (stockIndicators.investCautionYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
 
-      if (rsi14 === undefined || volumeRatio === undefined) return signals;
+      if (rsi14 === undefined || volumeRatio === undefined) {
+        skipReasons.push('필수 지표 부재 (RSI14, 거래량비율)');
+        return { signals, skipReasons };
+      }
 
       // RSI < 25
-      if (rsi14 >= params.rsiThreshold) return signals;
+      if (rsi14 >= params.rsiThreshold) {
+        skipReasons.push(`RSI=${rsi14.toFixed(1)} ≥ 임계값 ${params.rsiThreshold} (과매도 아님)`);
+        return { signals, skipReasons };
+      }
 
       // 거래량 >= 2배
-      if (volumeRatio < params.volumeThreshold) return signals;
+      if (volumeRatio < params.volumeThreshold) {
+        skipReasons.push(`거래량비율=${volumeRatio.toFixed(1)} < 최소 ${params.volumeThreshold}배`);
+        return { signals, skipReasons };
+      }
 
-      if ((stockIndicators.volatility30d ?? 0) >= 60) return signals;
-      if (hasStrongSellFlow(stockIndicators)) return signals;
+      if ((stockIndicators.volatility30d ?? 0) >= 60) {
+        skipReasons.push(`변동성 과다: ${(stockIndicators.volatility30d ?? 0).toFixed(1)}% ≥ 60%`);
+        return { signals, skipReasons };
+      }
+      if (hasStrongSellFlow(stockIndicators)) {
+        skipReasons.push('외인/기관/프로그램 동반 매도 수급');
+        return { signals, skipReasons };
+      }
 
       // 보수적 모드: 기본 자금의 30%만 사용
       const quota = watchStock.quota || 0;
@@ -209,6 +237,6 @@ export class ConservativeStrategy implements PerStockTradingStrategy {
       }
     }
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

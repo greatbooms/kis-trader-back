@@ -62,28 +62,28 @@ describe('InfiniteBuyStrategy', () => {
   describe('basic skips', () => {
     it('should skip when already executed today', async () => {
       const ctx = createContext({ alreadyExecutedToday: true });
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should skip when quota is not set', async () => {
       const ctx = createContext();
       ctx.watchStock.quota = 0;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should skip when quota is undefined', async () => {
       const ctx = createContext();
       ctx.watchStock.quota = undefined;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should skip when current price is 0', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 0;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -97,7 +97,7 @@ describe('InfiniteBuyStrategy', () => {
           interestRateRising: false,
         },
       });
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -118,7 +118,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 10000000,
       });
       // Should still generate sell signals even when index below MA200
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // Buy should be blocked but sells should be generated
       const buySignals = signals.filter((s) => s.side === 'BUY');
       const sellSignals = signals.filter((s) => s.side === 'SELL');
@@ -132,7 +132,7 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: false, ma200: 75000 },
       });
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
     });
@@ -149,7 +149,7 @@ describe('InfiniteBuyStrategy', () => {
         },
         totalPortfolioValue: 10000000,
       });
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals.length).toBeGreaterThan(0);
     });
   });
@@ -165,7 +165,7 @@ describe('InfiniteBuyStrategy', () => {
           totalInvested: 4000000, // perCycleQuota=100000, T = 4000000 / 100000 = 40 >= maxCycles(40)
         },
       });
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // 매수 없음
       const buys = signals.filter((s) => s.side === 'BUY');
       expect(buys).toHaveLength(0);
@@ -188,7 +188,7 @@ describe('InfiniteBuyStrategy', () => {
       });
       ctx.price.currentPrice = 60000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
@@ -208,7 +208,7 @@ describe('InfiniteBuyStrategy', () => {
       });
       ctx.price.currentPrice = 60000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       const stopLoss = signals.find((s) => s.reason?.includes('Stop loss'));
       expect(stopLoss).toBeUndefined();
@@ -218,7 +218,7 @@ describe('InfiniteBuyStrategy', () => {
   describe('initial buy (no position)', () => {
     it('should generate initial buy signal', async () => {
       const ctx = createContext();
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
@@ -231,7 +231,7 @@ describe('InfiniteBuyStrategy', () => {
       ctx.price.currentPrice = 200000; // 1 share costs more than quota
       ctx.watchStock.quota = 100000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       // buyQty = floor(100000 / 200000) = 0
       expect(signals).toHaveLength(0);
@@ -253,7 +253,7 @@ describe('InfiniteBuyStrategy', () => {
       ctx.price.currentPrice = 1000;
       ctx.watchStock.quota = 500000; // Large quota relative to price
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       const buys = signals.filter((s) => s.side === 'BUY');
       const sells = signals.filter((s) => s.side === 'SELL');
@@ -274,7 +274,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 10000000,
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter((s) => s.side === 'BUY');
 
       // halfQuota=50000 < 주가 70000 → 분할 불가 → 전액(100000)으로 1주 매수
@@ -295,7 +295,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 10000000, // Large portfolio to avoid maxPortfolioRate
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
 
       expect(sell2).toBeDefined();
@@ -317,7 +317,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 100000000, // Large portfolio to avoid maxPortfolioRate
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter((s) => s.side === 'BUY');
 
       // Only Buy2 should exist
@@ -336,7 +336,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 100000000, // Large portfolio to avoid maxPortfolioRate
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
 
       expect(sell2).toBeDefined();
@@ -355,7 +355,7 @@ describe('InfiniteBuyStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // With halved quota (50000), buyQty = floor(50000/70000) = 0
       // So no buy signal when quota is halved and price is high
       expect(signals.length).toBeLessThanOrEqual(1);
@@ -367,7 +367,7 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       // quota = 100000 * 1.5 = 150000
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal) {
@@ -379,7 +379,7 @@ describe('InfiniteBuyStrategy', () => {
     it('should limit quota to buyable amount', async () => {
       const ctx = createContext({ buyableAmount: 50000 });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal) {
@@ -398,7 +398,7 @@ describe('InfiniteBuyStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -421,7 +421,7 @@ describe('InfiniteBuyStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(3);
       expect(signals[0].reason).toContain('배당안정성+');
@@ -448,7 +448,7 @@ describe('InfiniteBuyStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(2);
     });
@@ -461,7 +461,7 @@ describe('InfiniteBuyStrategy', () => {
       ctx.watchStock.market = 'OVERSEAS';
       ctx.watchStock.exchangeCode = 'NASD';
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal) {
@@ -476,7 +476,7 @@ describe('InfiniteBuyStrategy', () => {
       ctx.watchStock.exchangeCode = 'NASD';
       ctx.price.currentPrice = 150.567;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal && buySignal.price) {
@@ -491,7 +491,7 @@ describe('InfiniteBuyStrategy', () => {
       ctx.watchStock.market = 'DOMESTIC';
       ctx.price.currentPrice = 70123.456;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignal = signals.find((s) => s.side === 'BUY');
 
       if (buySignal && buySignal.price) {
@@ -518,7 +518,7 @@ describe('InfiniteBuyStrategy', () => {
         totalPortfolioValue: 10000000,
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const sells = signals.filter((s) => s.side === 'SELL');
       expect(sells.length).toBeGreaterThan(0);
     });

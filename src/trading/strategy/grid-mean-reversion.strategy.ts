@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
@@ -62,13 +63,17 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(GridMeanReversionStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, stockIndicators, riskState } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
 
     const curPrice = price.currentPrice;
-    if (curPrice <= 0) return signals;
+    if (curPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
+    }
 
     const market = watchStock.market;
     const exchangeCode = watchStock.exchangeCode;
@@ -91,7 +96,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
         price: roundPrice(curPrice),
         reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     if (hasPosition) {
@@ -115,7 +120,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절(2차): BB 상단 도달 → 나머지 매도
@@ -132,7 +137,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `BB상단 익절: ${curPrice} >= BB상단 ${bollingerUpper.toFixed(0)}`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절(1차): BB 중심선 도달 → 50% 매도
@@ -150,7 +155,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `BB중심선 익절: ${curPrice} >= BB중심 ${bollingerMiddle.toFixed(0)}, 50%매도`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 그리드 추가 매수: 보유 중이더라도 추가 그리드 레벨에 도달하면 추가 매수
@@ -186,34 +191,58 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
 
       // 리스크 체크
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
-        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`);
-        return signals;
+        const reason = riskState?.reasons?.join(', ') ?? 'MDD';
+        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${reason}`);
+        skipReasons.push(`리스크 매수 차단: ${reason}`);
+        return { signals, skipReasons };
       }
 
       const { bollingerLower, rsi14, macdHistogram, macdPrevHistogram } = stockIndicators;
 
       // 투자유의/시장경고 종목 진입 차단
-      if (stockIndicators.investCautionYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
 
       // 융자잔고 15% 초과 시 진입 차단 (레버리지 청산 리스크)
       if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 15) {
         this.logger.debug(`[${watchStock.stockCode}] Loan balance too high: ${stockIndicators.loanBalanceRate.toFixed(1)}%`);
-        return signals;
+        skipReasons.push(`융자잔고 초과: ${stockIndicators.loanBalanceRate.toFixed(1)}% > 15%`);
+        return { signals, skipReasons };
       }
 
       // 진입 조건: BB 하단 터치
-      if (bollingerLower === undefined || rsi14 === undefined) return signals;
-      if (macdHistogram === undefined || macdPrevHistogram === undefined) return signals;
+      if (bollingerLower === undefined || rsi14 === undefined) {
+        skipReasons.push('필수 지표 부재 (볼린저밴드 하단, RSI14)');
+        return { signals, skipReasons };
+      }
+      if (macdHistogram === undefined || macdPrevHistogram === undefined) {
+        skipReasons.push('필수 지표 부재 (MACD 히스토그램)');
+        return { signals, skipReasons };
+      }
 
       // BB 하단 터치
-      if (curPrice > bollingerLower) return signals;
+      if (curPrice > bollingerLower) {
+        skipReasons.push(`현재가(${curPrice.toFixed(0)}) > BB하단(${bollingerLower.toFixed(0)}), 과매도 구간 미진입`);
+        return { signals, skipReasons };
+      }
 
       // RSI < 30
-      if (rsi14 >= 30) return signals;
+      if (rsi14 >= 30) {
+        skipReasons.push(`RSI=${rsi14.toFixed(1)} ≥ 30 (과매도 아님)`);
+        return { signals, skipReasons };
+      }
 
       // MACD 히스토그램 상승 전환 (이전 < 0, 현재 > 이전)
-      if (macdHistogram <= macdPrevHistogram) return signals;
+      if (macdHistogram <= macdPrevHistogram) {
+        skipReasons.push(`MACD 히스토그램 상승 전환 없음: ${macdHistogram.toFixed(4)} ≤ ${macdPrevHistogram.toFixed(4)}`);
+        return { signals, skipReasons };
+      }
 
       // 모든 조건 충족 → 그리드 1단계 매수
       const quota = watchStock.quota || 0;
@@ -246,6 +275,6 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
       }
     }
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

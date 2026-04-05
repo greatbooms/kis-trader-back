@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
@@ -86,13 +87,17 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(MomentumBreakoutStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, stockIndicators, riskState } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
 
     const curPrice = price.currentPrice;
-    if (curPrice <= 0) return signals;
+    if (curPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
+    }
 
     const market = watchStock.market;
     const exchangeCode = watchStock.exchangeCode;
@@ -124,7 +129,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
         price: roundPrice(curPrice),
         reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     if (hasPosition) {
@@ -147,7 +152,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(effectiveStopLossRate * 100).toFixed(1)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 트레일링 스탑: 고점 대비 -2% (당일 고가 기준)
@@ -164,7 +169,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `트레일링스탑: 고점 ${price.highPrice} 대비 -${(effectiveTrailingStopRate * 100).toFixed(1)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절(전): +8% 전량 매도
@@ -178,7 +183,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `익절(전량): +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitFull * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절(반): +5% 50% 매도
@@ -193,7 +198,7 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `익절(반): +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitHalf * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 시간손절: 3거래일 초과 (alreadyExecutedToday 기준으로 간접 판단)
@@ -204,47 +209,73 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
 
       // 리스크 체크: 매수 차단
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
-        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`);
-        return signals;
+        const reason = riskState?.reasons?.join(', ') ?? 'MDD';
+        this.logger.debug(`[${watchStock.stockCode}] Buy blocked by risk: ${reason}`);
+        skipReasons.push(`리스크 매수 차단: ${reason}`);
+        return { signals, skipReasons };
       }
 
       // 단일 종목 비중 체크
       if (position && ctx.totalPortfolioValue > 0) {
         if (position.totalInvested / ctx.totalPortfolioValue > 0.15) {
-          return signals;
+          skipReasons.push(`단일 종목 비중 초과: ${(position.totalInvested / ctx.totalPortfolioValue * 100).toFixed(1)}% > 15%`);
+          return { signals, skipReasons };
         }
       }
 
       const { ma20, rsi14, volumeRatio, prevHigh, prevLow, todayOpen } = stockIndicators;
 
       // 투자유의/시장경고/단기과열 종목 진입 차단
-      if (stockIndicators.investCautionYn || stockIndicators.shortOverheatYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (stockIndicators.investCautionYn || stockIndicators.shortOverheatYn) {
+        skipReasons.push(stockIndicators.investCautionYn ? '투자유의 종목' : '단기과열 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
 
       // 진입 조건 체크
       if (ma20 === undefined || rsi14 === undefined || volumeRatio === undefined) {
-        return signals;
+        skipReasons.push('필수 지표 부재 (MA20, RSI14, 거래량비율)');
+        return { signals, skipReasons };
       }
       if (prevHigh === undefined || prevLow === undefined || todayOpen === undefined) {
-        return signals;
+        skipReasons.push('필수 지표 부재 (전일고가, 전일저가, 시가)');
+        return { signals, skipReasons };
       }
 
       // 가격 > MA20
-      if (curPrice <= ma20) return signals;
+      if (curPrice <= ma20) {
+        skipReasons.push(`현재가(${curPrice.toFixed(0)}) ≤ MA20(${ma20.toFixed(0)}), 상승추세 미확인`);
+        return { signals, skipReasons };
+      }
 
       // RSI 50-70
-      if (rsi14 < 50 || rsi14 > 70) return signals;
+      if (rsi14 < 50 || rsi14 > 70) {
+        skipReasons.push(`RSI=${rsi14.toFixed(1)} (범위 50~70 벗어남)`);
+        return { signals, skipReasons };
+      }
 
       // 거래량 >= 1.5배
-      if (volumeRatio < params.volumeThreshold) return signals;
+      if (volumeRatio < params.volumeThreshold) {
+        skipReasons.push(`거래량비율=${volumeRatio.toFixed(1)} < 최소 ${params.volumeThreshold}배`);
+        return { signals, skipReasons };
+      }
 
       // 수급 데이터가 있다면 최소한 하나의 매수 우위 확인
-      if (!hasFlowConfirmation(stockIndicators)) return signals;
+      if (!hasFlowConfirmation(stockIndicators)) {
+        skipReasons.push('수급 데이터 확인: 외인/기관/프로그램 매수 우위 없음');
+        return { signals, skipReasons };
+      }
 
       // 시가 + 전일레인지 × K 돌파
       const prevRange = prevHigh - prevLow;
       const breakoutPrice = todayOpen + prevRange * params.kValue;
-      if (curPrice < breakoutPrice) return signals;
+      if (curPrice < breakoutPrice) {
+        skipReasons.push(`K값 돌파 미달성: 현재가(${curPrice.toFixed(0)}) < 돌파가(${breakoutPrice.toFixed(0)})`);
+        return { signals, skipReasons };
+      }
 
       // 모든 조건 충족 → 매수
       const quota = watchStock.quota || 0;
@@ -274,6 +305,6 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       }
     }
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

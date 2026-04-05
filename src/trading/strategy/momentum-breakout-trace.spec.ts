@@ -80,7 +80,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     // volumeRatio=2.0 >= 1.5 ✓
     // breakout = 70000 + (71000-69000)*0.5 = 71000, curPrice(72000) >= 71000 ✓
     const ctx = createContext();
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
 
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
@@ -93,7 +93,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
   it('가격 <= MA20 → 매수 안함', async () => {
     const ctx = createContext();
     ctx.price.currentPrice = 68000; // <= ma20(69000)
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -109,7 +109,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
         todayOpen: 70000,
       },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -125,7 +125,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
         todayOpen: 70000,
       },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -141,7 +141,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
         todayOpen: 70000,
       },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -150,7 +150,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     // curPrice = 70500 < 71000 → 돌파 안됨
     const ctx = createContext();
     ctx.price.currentPrice = 70500;
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -161,7 +161,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 71000;
     // 하지만 curPrice(71000) <= ma20(69000)? NO → ma20 통과
     // 조건: 진입됨! curPrice >= breakoutPrice → curPrice NOT < breakoutPrice
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -184,7 +184,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 69000;
     // profitRate = (69000-72000)/72000 = -4.2%
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(27);
@@ -204,7 +204,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 70200;
     ctx.price.highPrice = 72000; // 고점과 같으니 트레일링 안걸림
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
   });
@@ -227,7 +227,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.highPrice = 78000;
     // 78000 * 0.98 = 76440, 74500 < 76440 → 트레일링 발동
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(27);
@@ -248,7 +248,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.highPrice = 78000;
     // 78000 * 0.98 = 76440, 76500 >= 76440 → 트레일링 미발동
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const trailing = signals.find(s => s.reason?.includes('트레일링스탑'));
     expect(trailing).toBeUndefined();
   });
@@ -266,7 +266,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 73000;
     ctx.price.highPrice = 0;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const trailing = signals.find(s => s.reason?.includes('트레일링스탑'));
     expect(trailing).toBeUndefined();
   });
@@ -290,7 +290,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 69000;
     ctx.price.highPrice = 78000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('손절'); // 트레일링이 아닌 손절
   });
@@ -313,7 +313,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 75600;
     ctx.price.highPrice = 75600; // 고점과 같으므로 트레일링 안걸림
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(Math.floor(27 / 2)); // 13
@@ -334,7 +334,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 77760;
     ctx.price.highPrice = 77760;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(14); // 전량
@@ -360,7 +360,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 80000;
     ctx.price.highPrice = 80000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].quantity).toBe(27); // 전량 (8% 익절)
     expect(signals[0].reason).toContain('익절(전량)');
@@ -388,7 +388,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     // breakout = 152 + (155-150)*0.5 = 154.5
     ctx.price.currentPrice = 155.678; // > breakout(154.5)
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].price).toBe(155.68); // 반올림
     expect(signals[0].exchangeCode).toBe('NASD');
@@ -400,7 +400,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
 
   it('buyableAmount < quota → buyableAmount 기준 매수', async () => {
     const ctx = createContext({ buyableAmount: 500000 });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     // buyAmount = min(2000000, 500000) = 500000, qty = floor(500000/72000) = 6
     expect(signals[0].quantity).toBe(Math.floor(500000 / 72000));
@@ -413,7 +413,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
   it('quota=0 → 매수 0주', async () => {
     const ctx = createContext();
     ctx.watchStock.quota = 0;
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -426,7 +426,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.watchStock.strategyParams = { kValue: 0.7 };
     // breakout = 70000 + (71000-69000)*0.7 = 71400
     // curPrice=72000 >= 71400 → 돌파
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -435,7 +435,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     const ctx = createContext();
     ctx.watchStock.strategyParams = { kValue: 0.7 };
     ctx.price.currentPrice = 71300; // < breakout(71400)
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -454,7 +454,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 69000;
     ctx.price.highPrice = 72000; // 트레일링 안걸리게
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // -4.2% > -5% → 손절 안됨
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
@@ -478,7 +478,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     });
     // breakout = 70000 + 0*0.5 = 70000
     // curPrice(72000) >= 70000 → 돌파
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -499,7 +499,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
         reasons: ['MDD 5%'],
       },
     });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -524,7 +524,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 71000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(27);
@@ -548,7 +548,7 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 72000;
     ctx.price.highPrice = 72500; // 72500*0.98=71050, 72000 > 71050 → 트레일링 안걸림
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 });

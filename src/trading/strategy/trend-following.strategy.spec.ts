@@ -89,39 +89,45 @@ describe('TrendFollowingStrategy', () => {
     it('should return empty when price is 0', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 0;
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsP0 } = await strategy.evaluateStock(ctx);
+      expect(signalsP0).toHaveLength(0);
     });
 
     it('should return empty when price is negative', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = -100;
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsNeg } = await strategy.evaluateStock(ctx);
+      expect(signalsNeg).toHaveLength(0);
     });
 
     it('should return empty when already executed today', async () => {
       const ctx = createContext({ alreadyExecutedToday: true });
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsAlready } = await strategy.evaluateStock(ctx);
+      expect(signalsAlready).toHaveLength(0);
     });
 
     it('should return empty when ma20 is undefined', async () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: true, ma20: undefined, ma60: 68000, adx14: 30 },
       });
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsMa20 } = await strategy.evaluateStock(ctx);
+      expect(signalsMa20).toHaveLength(0);
     });
 
     it('should return empty when ma60 is undefined', async () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: true, ma20: 70000, ma60: undefined, adx14: 30 },
       });
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsMa60 } = await strategy.evaluateStock(ctx);
+      expect(signalsMa60).toHaveLength(0);
     });
 
     it('should return empty when adx14 is undefined', async () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: true, ma20: 70000, ma60: 68000, adx14: undefined },
       });
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsAdx } = await strategy.evaluateStock(ctx);
+      expect(signalsAdx).toHaveLength(0);
     });
   });
 
@@ -146,7 +152,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -166,7 +172,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -176,7 +182,7 @@ describe('TrendFollowingStrategy', () => {
       const ctx = createContext();
       // ma20(70000) > ma60(68000), adx14(30) > 25, curPrice(72000) > ma20(70000)
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       expect(signals[0].quantity).toBe(13); // floor(1000000/72000)
@@ -193,7 +199,8 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsDeadCross } = await strategy.evaluateStock(ctx);
+      expect(signalsDeadCross).toHaveLength(0);
     });
 
     it('should not buy when weak trend (adx < 25)', async () => {
@@ -206,14 +213,16 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsWeakTrend } = await strategy.evaluateStock(ctx);
+      expect(signalsWeakTrend).toHaveLength(0);
     });
 
     it('should not buy when price <= MA20', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 69000; // below ma20(70000)
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsBelowMa20 } = await strategy.evaluateStock(ctx);
+      expect(signalsBelowMa20).toHaveLength(0);
     });
 
     it('should not buy when buyBlocked by risk', async () => {
@@ -229,13 +238,14 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsBuyBlocked } = await strategy.evaluateStock(ctx);
+      expect(signalsBuyBlocked).toHaveLength(0);
     });
 
     it('should cap buy amount to buyableAmount', async () => {
       const ctx = createContext({ buyableAmount: 200000 });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(2); // floor(200000/72000)
     });
@@ -244,7 +254,8 @@ describe('TrendFollowingStrategy', () => {
       const ctx = createContext();
       ctx.watchStock.quota = 0;
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsQuota0 } = await strategy.evaluateStock(ctx);
+      expect(signalsQuota0).toHaveLength(0);
     });
   });
 
@@ -261,7 +272,7 @@ describe('TrendFollowingStrategy', () => {
       });
       ctx.price.currentPrice = 64900;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -280,7 +291,7 @@ describe('TrendFollowingStrategy', () => {
       });
       ctx.price.currentPrice = 66000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
     });
@@ -298,7 +309,7 @@ describe('TrendFollowingStrategy', () => {
       ctx.price.currentPrice = 64900;
       ctx.watchStock.strategyParams = { stopLossRate: 0.10 }; // 10%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // -7.3% within custom 10% threshold → no stop loss, check trend exit instead
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
@@ -323,7 +334,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -347,7 +358,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -373,7 +384,7 @@ describe('TrendFollowingStrategy', () => {
       ctx.watchStock.strategyParams = { adxExitThreshold: 15 };
 
       // adx14(18) >= custom threshold(15) → no exit
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -396,7 +407,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       // pyramidAmount = min(1000000 * 0.5, 1000000) = 500000
@@ -422,7 +433,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -445,7 +456,7 @@ describe('TrendFollowingStrategy', () => {
 
       // adx14(22) < adxThreshold(25) → no pyramiding
       // adx14(22) >= adxExitThreshold(20) → no exit either
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -475,7 +486,7 @@ describe('TrendFollowingStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -497,7 +508,7 @@ describe('TrendFollowingStrategy', () => {
         buyableAmount: 100000,
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       // pyramidAmount = min(500000, 100000) = 100000
       // pyramidQty = floor(100000 / 72000) = 1
@@ -524,7 +535,7 @@ describe('TrendFollowingStrategy', () => {
       });
       ctx.price.currentPrice = 64000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('손절');
     });
@@ -541,7 +552,7 @@ describe('TrendFollowingStrategy', () => {
       ctx.stockIndicators.ma60 = 175;
       ctx.stockIndicators.adx14 = 30;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].exchangeCode).toBe('NASD');
       if (signals[0].price) {
@@ -564,7 +575,8 @@ describe('TrendFollowingStrategy', () => {
       ctx.watchStock.strategyParams = { adxThreshold: 35 };
       // adx14(30) < custom threshold(35) → no buy
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsAdxThreshold } = await strategy.evaluateStock(ctx);
+      expect(signalsAdxThreshold).toHaveLength(0);
     });
 
     it('should use custom pyramidingProfitRate', async () => {
@@ -586,7 +598,8 @@ describe('TrendFollowingStrategy', () => {
       ctx.watchStock.strategyParams = { pyramidingProfitRate: 0.10 };
       // +5.9% < 10% → no pyramiding
 
-      expect(await strategy.evaluateStock(ctx)).toHaveLength(0);
+      const { signals: signalsPyramid } = await strategy.evaluateStock(ctx);
+      expect(signalsPyramid).toHaveLength(0);
     });
 
     it('should use custom pyramidingRatio', async () => {
@@ -607,7 +620,7 @@ describe('TrendFollowingStrategy', () => {
       });
       ctx.watchStock.strategyParams = { pyramidingRatio: 0.3 };
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       // pyramidAmount = min(1000000 * 0.3, 1000000) = 300000
       // pyramidQty = floor(300000 / 72000) = 4

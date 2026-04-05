@@ -391,11 +391,12 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                   <TableHead className="text-right">가격</TableHead>
                   <TableHead>상태</TableHead>
                   <TableHead>전략</TableHead>
+                  <TableHead>사유</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {trades.map((trade) => (
-                  <TableRow key={trade.id}>
+                  <TableRow key={trade.id} className={trade.status === 'FAILED' ? 'bg-red-50/60' : undefined}>
                     <TableCell className="py-2 text-xs">{formatDate(trade.createdAt)}</TableCell>
                     <TableCell className="py-2">
                       <div className="font-medium">{trade.stockName}</div>
@@ -410,10 +411,11 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                     <TableCell className="py-2 text-right">{formatCurrency(trade.executedPrice ?? trade.price, trade.market)}</TableCell>
                     <TableCell className="py-2">
                       <Badge variant={trade.status === 'FILLED' ? 'success' : trade.status === 'FAILED' ? 'danger' : 'warning'}>
-                        {trade.status}
+                        {trade.status === 'FILLED' ? '체결' : trade.status === 'FAILED' ? '실패' : '대기'}
                       </Badge>
                     </TableCell>
                     <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
+                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[200px] truncate">{trade.reason ?? '-'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

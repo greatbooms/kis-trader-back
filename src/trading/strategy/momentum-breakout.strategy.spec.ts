@@ -81,14 +81,14 @@ describe('MomentumBreakoutStrategy', () => {
     it('should return empty when price is 0', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 0;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should return empty when price is negative', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = -100;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -114,7 +114,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -134,7 +134,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -152,7 +152,7 @@ describe('MomentumBreakoutStrategy', () => {
       });
       ctx.price.currentPrice = 67500;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -172,7 +172,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 69000;
       ctx.price.highPrice = 69000; // Prevent trailing stop
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
     });
@@ -193,7 +193,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.highPrice = 73000; // 71000 < 73000 * 0.98 (71540) → triggers
       // Wait, 71000 < 71540 → true, trailing stop triggered
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -213,7 +213,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 72500;
       ctx.price.highPrice = 73000; // 72500 < 73000 * 0.98 (71540)? No, 72500 > 71540
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const trailing = signals.find((s) => s.reason?.includes('트레일링스탑'));
       expect(trailing).toBeUndefined();
     });
@@ -231,7 +231,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 71000;
       ctx.price.highPrice = 0;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const trailing = signals.find((s) => s.reason?.includes('트레일링스탑'));
       expect(trailing).toBeUndefined();
     });
@@ -251,7 +251,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 76000;
       ctx.price.highPrice = 76000; // No trailing stop
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -273,7 +273,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 73800;
       ctx.price.highPrice = 73800; // No trailing stop
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(10); // floor(20/2)
@@ -293,7 +293,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 73800;
       ctx.price.highPrice = 73800;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(1); // max(1, floor(1/2)) = 1
     });
@@ -304,7 +304,7 @@ describe('MomentumBreakoutStrategy', () => {
       const ctx = createContext();
       // All default indicators satisfy buy conditions
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       // quota=1000000, buyAmount=min(1000000, 1000000)=1000000
@@ -326,7 +326,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -343,7 +343,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -360,7 +360,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -377,7 +377,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -395,7 +395,7 @@ describe('MomentumBreakoutStrategy', () => {
       });
       // curPrice(72000) < breakout(73000)
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -412,7 +412,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -429,7 +429,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -446,7 +446,7 @@ describe('MomentumBreakoutStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -455,7 +455,7 @@ describe('MomentumBreakoutStrategy', () => {
         buyableAmount: 200000,
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       // buyAmount = min(1000000, 200000) = 200000
       // buyQty = floor(200000 / 72000) = 2
@@ -466,7 +466,7 @@ describe('MomentumBreakoutStrategy', () => {
       const ctx = createContext();
       ctx.watchStock.quota = 0;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -491,7 +491,7 @@ describe('MomentumBreakoutStrategy', () => {
       // curPrice(72000) < 72600 → should NOT buy
       ctx.watchStock.strategyParams = { kValue: 0.9 };
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -510,7 +510,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.watchStock.strategyParams = { volumeThreshold: 3.0 };
       // volumeRatio(2.0) < 3.0 → should NOT buy
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -528,7 +528,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.highPrice = 67500; // No trailing stop
       ctx.watchStock.strategyParams = { stopLossRate: 0.05 }; // 5%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // -3.6% within custom 5% threshold
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
@@ -551,7 +551,7 @@ describe('MomentumBreakoutStrategy', () => {
         takeProfitFull: 0.15, // 15%
       };
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // +5.4% is below custom 10% half threshold
       const takeProfit = signals.find((s) => s.reason?.includes('익절'));
       expect(takeProfit).toBeUndefined();
@@ -573,7 +573,7 @@ describe('MomentumBreakoutStrategy', () => {
       // custom trailingStopRate=0.05: 71000 < 73000*0.95(69350)? No → no trigger
       ctx.watchStock.strategyParams = { trailingStopRate: 0.05 };
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const trailing = signals.find((s) => s.reason?.includes('트레일링스탑'));
       expect(trailing).toBeUndefined();
     });
@@ -593,7 +593,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 67500;
       ctx.price.highPrice = 75000; // trailing stop would also trigger
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('손절');
     });
@@ -611,7 +611,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 71000;
       ctx.price.highPrice = 80000; // 71000 < 80000*0.98(78400) → trailing stop
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('트레일링스탑');
     });
@@ -629,7 +629,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.price.currentPrice = 76000;
       ctx.price.highPrice = 76000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('익절(전량)');
       expect(signals[0].quantity).toBe(20);
@@ -653,7 +653,7 @@ describe('MomentumBreakoutStrategy', () => {
       // breakout = 148 + 4*0.5 = 150
       // curPrice(150.567) >= 150 → buy
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       if (signals.length > 0 && signals[0].price) {
         const decimal = signals[0].price.toString().split('.')[1] || '';
         expect(decimal.length).toBeLessThanOrEqual(2);
@@ -675,7 +675,7 @@ describe('MomentumBreakoutStrategy', () => {
       ctx.watchStock.stockCode = 'AAPL';
       ctx.price.currentPrice = 145;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].exchangeCode).toBe('NASD');
     });
@@ -694,7 +694,7 @@ describe('MomentumBreakoutStrategy', () => {
         totalPortfolioValue: 10000000,
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // hasPosition is false (quantity=0), but single stock limit checked
       // Actually, quantity=0 means hasPosition=false, and the limit check
       // is inside the no-position branch with `if (position && ...)`,

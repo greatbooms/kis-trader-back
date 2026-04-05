@@ -1,5 +1,5 @@
 import { StockPriceResult } from '../../kis/types/kis-api.types';
-import { TradingSignal } from './trading-signal.type';
+import { StrategyEvaluationResult } from './strategy-evaluation-result.type';
 import { WatchStockConfig } from './watch-stock-config.type';
 import { MarketCondition } from './market-condition.type';
 import { StockIndicators } from './stock-indicators.type';
@@ -63,5 +63,5 @@ export interface PerStockTradingStrategy {
   description: string;
   executionMode: ExecutionMode;
   meta: StrategyMeta;
-  evaluateStock(context: StockStrategyContext): Promise<TradingSignal[]>;
+  evaluateStock(context: StockStrategyContext): Promise<StrategyEvaluationResult>;
 }

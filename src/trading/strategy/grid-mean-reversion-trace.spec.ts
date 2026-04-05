@@ -77,7 +77,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
   it('Day 1: 가격 횡보 중 (BB 하단 미도달) → 매수 없음', async () => {
     const ctx = createContext();
     // curPrice=70000 > BB하단=65000 → 진입 조건 불충족
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -94,7 +94,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
       },
     });
     ctx.price.currentPrice = 64500; // BB하단 65000 이하
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -111,7 +111,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
       },
     });
     ctx.price.currentPrice = 64000;
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -129,7 +129,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 64500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     // quota=3000000, gridRatio[0]=0.3 → 900000 / 64500 = 13주
@@ -162,7 +162,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 63000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
 
     // curPrice(63000) <= gridPrice(64500*0.98=63210) → 그리드1 매수
@@ -193,7 +193,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 61000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
 
     // 중요: 여러 그리드 레벨이 충족되어도 첫 번째 것만 매수 (break 문)
@@ -222,7 +222,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 62000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
     expect(buys).toHaveLength(1);
     expect(buys[0].reason).toContain('그리드매수 1단계');
@@ -245,7 +245,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 63000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
 
     if (buys.length > 0) {
@@ -275,7 +275,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 63000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
     expect(buys).toHaveLength(0);
   });
@@ -305,7 +305,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 59000;
     // profitRate = (59000-64500)/64500 = -8.53% <= -8%
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(40);
@@ -333,7 +333,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 59500;
     // profitRate = (59500-64500)/64500 = -7.75% > -8%
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
   });
@@ -362,7 +362,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 70000;
     // profitRate = (70000-64500)/64500 = +8.5% > 0
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(20); // floor(40/2) = 20
@@ -389,7 +389,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.price.currentPrice = 70000;
     // profitRate = (70000-72000)/72000 = -2.8% < 0
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const bbMiddleSell = signals.find(s => s.reason?.includes('BB중심선'));
     expect(bbMiddleSell).toBeUndefined();
   });
@@ -413,7 +413,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 76000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(20); // 전량
@@ -444,7 +444,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 71000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(40); // BB상단 → 전량 매도
@@ -473,7 +473,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.watchStock.stockName = 'Apple';
     ctx.price.currentPrice = 159.567; // BB하단 160 이하
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].price).toBe(159.57); // 소수점 2자리 반올림
     expect(signals[0].exchangeCode).toBe('NASD');
@@ -504,7 +504,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 62000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(40);
@@ -530,7 +530,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     ctx.watchStock.quota = 0;
     ctx.price.currentPrice = 64500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -559,7 +559,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 58000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // 손절이 먼저 체크되고 return → 그리드 매수 없음
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
@@ -587,7 +587,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 63000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // BB upper/middle 없으므로 익절 조건 스킵 → 그리드 매수만
     const buys = signals.filter(s => s.side === 'BUY');
     const sells = signals.filter(s => s.side === 'SELL');
@@ -617,7 +617,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     };
     ctx.price.currentPrice = 63800;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
     expect(buys).toHaveLength(1);
     expect(buys[0].reason).toContain('그리드매수 1단계');
@@ -643,7 +643,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = gridPrice;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
     // curPrice(63210) <= gridPrice(63210) → 매수
     expect(buys).toHaveLength(1);
@@ -663,7 +663,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = gridPrice + 1;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter(s => s.side === 'BUY');
     expect(buys).toHaveLength(0);
   });

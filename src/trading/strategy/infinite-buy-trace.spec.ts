@@ -112,7 +112,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       // 첫 매수: adjustedQuota = perCycleQuota = $250
       // buyQty = floor(250 / 50) = 5주
@@ -147,7 +147,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       // T=1.0 (<10) → dipRate=1%
       // adjustedQuota=$250, halfQuota=$125
@@ -217,7 +217,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
 
       // Buy1 = $45.00
       // Buy2 = round(45 * 0.99) = $44.55
@@ -260,7 +260,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buy1 = signals.find(s => s.reason.includes('Buy1'));
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
 
@@ -286,7 +286,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
       // Buy2 = 55.00 * 0.99 = $54.45
       expect(buy2!.price).toBe(54.45);
@@ -316,7 +316,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       const buy2_1 = signals1.find(s => s.reason.includes('Buy2'));
       expect(buy2_1!.reason).toContain('dip=1%');
       // Buy2 = 46 * 0.99 = $45.54
@@ -340,7 +340,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const buy2_2 = signals2.find(s => s.reason.includes('Buy2'));
       expect(buy2_2!.reason).toContain('dip=2%');
       // Buy2 = 46 * 0.98 = $45.08
@@ -373,7 +373,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       const buys1 = signals1.filter(s => s.side === 'BUY');
       expect(buys1.some(s => s.reason.includes('Buy1'))).toBe(true);
       expect(buys1.some(s => s.reason.includes('Buy2'))).toBe(true);
@@ -393,7 +393,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const buys2 = signals2.filter(s => s.side === 'BUY');
       expect(buys2.every(s => s.reason.includes('Buy2'))).toBe(true);
       expect(buys2.some(s => s.reason.includes('Buy1'))).toBe(false);
@@ -424,7 +424,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
       // Buy2 = 38 * 0.97 = $36.86
       expect(buy2!.price).toBe(36.86);
@@ -461,7 +461,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -484,7 +484,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const stopLoss = signals.find(s => s.reason.includes('Stop loss'));
       expect(stopLoss).toBeUndefined();
       expect(signals.length).toBeGreaterThan(0);
@@ -514,7 +514,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       // perCycleQuota=$250 × 0.5 × 1.5 = $187.50
       // buyQty = floor(187.50 / 50) = 3
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       expect(signals[0].quantity).toBe(3);
@@ -558,7 +558,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy2 = round(72500 * 0.99) = round(71775) = 71775, qty = floor(50000/71775) = 0
       // 분할 불가 → 전액 Buy1: qty = floor(100000/72500) = 1
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buy1 = signals.find(s => s.reason.includes('Buy1'));
       expect(buy1).toBeDefined();
       expect(buy1!.quantity).toBe(1);
@@ -594,7 +594,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter(s => s.side === 'BUY');
       expect(buys).toHaveLength(0);
       const sells = signals.filter(s => s.side === 'SELL');
@@ -622,7 +622,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(250);
@@ -645,7 +645,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter(s => s.side === 'BUY');
       expect(buys).toHaveLength(0);
       const sells = signals.filter(s => s.side === 'SELL');
@@ -671,7 +671,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
       ctx1.price.currentPrice = 45;
-      const signals1 = await strategy.evaluateStock(ctx1);
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(0);
 
       // 손절 충족 → 손절 동작
@@ -686,7 +686,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
       ctx2.price.currentPrice = 20;
-      const signals2 = await strategy.evaluateStock(ctx2);
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       expect(signals2).toHaveLength(1);
       expect(signals2[0].side).toBe('SELL');
       expect(signals2[0].reason).toContain('Stop loss');

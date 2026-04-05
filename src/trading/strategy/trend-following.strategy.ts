@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
@@ -94,13 +95,17 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(TrendFollowingStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, stockIndicators, riskState } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
 
     const curPrice = price.currentPrice;
-    if (curPrice <= 0) return signals;
+    if (curPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
+    }
 
     const market = watchStock.market;
     const exchangeCode = watchStock.exchangeCode;
@@ -128,14 +133,15 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
         price: roundPrice(curPrice),
         reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     const { ma20, ma60, adx14 } = stockIndicators;
 
     // 지표 부족 시 skip
     if (ma20 === undefined || ma60 === undefined || adx14 === undefined) {
-      return signals;
+      skipReasons.push('필수 지표 부재 (MA20, MA60, ADX14)');
+      return { signals, skipReasons };
     }
 
     const goldenCross = ma20 > ma60;
@@ -162,7 +168,7 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(effectiveStopLossRate * 100).toFixed(1)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 추세 소멸 매도: 데드크로스 또는 ADX < 20
@@ -180,11 +186,14 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 오늘 이미 실행 → 피라미딩 skip (손절/추세소멸은 위에서 이미 체크)
-      if (ctx.alreadyExecutedToday) return signals;
+      if (ctx.alreadyExecutedToday) {
+        skipReasons.push('오늘 이미 실행됨 (피라미딩 스킵)');
+        return { signals, skipReasons };
+      }
 
       // 피라미딩: 수익 > 5% + 추세 유지
       if (
@@ -226,25 +235,51 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       // --- 포지션 없음: 진입 조건 ---
 
       // 오늘 이미 실행 → 신규 진입 skip
-      if (ctx.alreadyExecutedToday) return signals;
+      if (ctx.alreadyExecutedToday) {
+        skipReasons.push('오늘 이미 실행됨');
+        return { signals, skipReasons };
+      }
 
       // 리스크 체크
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+        const reason = riskState?.reasons?.join(', ') ?? 'MDD';
         this.logger.debug(
-          `[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`,
+          `[${watchStock.stockCode}] Buy blocked by risk: ${reason}`,
         );
-        return signals;
+        skipReasons.push(`리스크 매수 차단: ${reason}`);
+        return { signals, skipReasons };
       }
 
       // 투자유의/시장경고 종목 진입 차단
-      if (stockIndicators.investCautionYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
-      if (!hasFlowConfirmation(stockIndicators)) return signals;
-      if (hasNegativeConsensus(stockIndicators)) return signals;
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
+      if (!hasFlowConfirmation(stockIndicators)) {
+        skipReasons.push('수급 데이터 확인: 외인/기관/프로그램 매수 우위 없음');
+        return { signals, skipReasons };
+      }
+      if (hasNegativeConsensus(stockIndicators)) {
+        skipReasons.push(`부정적 컨센서스: ${stockIndicators.consensusRating ?? '목표가 하락'}`);
+        return { signals, skipReasons };
+      }
 
       // 진입: 골든크로스 + 강한 추세 + 현재가 > MA20
-      if (!goldenCross || !strongTrend || curPrice <= ma20) {
-        return signals;
+      if (!goldenCross) {
+        skipReasons.push(`골든크로스 없음: MA20(${ma20.toFixed(0)}) < MA60(${ma60.toFixed(0)})`);
+        return { signals, skipReasons };
+      }
+      if (!strongTrend) {
+        skipReasons.push(`추세 부족: ADX=${adx14.toFixed(1)} < ${params.adxThreshold}`);
+        return { signals, skipReasons };
+      }
+      if (curPrice <= ma20) {
+        skipReasons.push(`현재가(${curPrice.toFixed(0)}) ≤ MA20(${ma20.toFixed(0)})`);
+        return { signals, skipReasons };
       }
 
       const quota = watchStock.quota || 0;
@@ -270,6 +305,6 @@ export class TrendFollowingStrategy implements PerStockTradingStrategy {
       }
     }
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

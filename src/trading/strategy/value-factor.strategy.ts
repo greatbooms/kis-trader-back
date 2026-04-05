@@ -3,6 +3,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   TradingSignal,
+  StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
@@ -80,13 +81,17 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
   };
   private readonly logger = new Logger(ValueFactorStrategy.name);
 
-  async evaluateStock(ctx: StockStrategyContext): Promise<TradingSignal[]> {
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
     const { watchStock, price, position, stockIndicators, fundamentals, riskState } = ctx;
     const signals: TradingSignal[] = [];
+    const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
 
     const curPrice = price.currentPrice;
-    if (curPrice <= 0) return signals;
+    if (curPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
+    }
 
     const market = watchStock.market;
     const exchangeCode = watchStock.exchangeCode;
@@ -109,7 +114,7 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         price: roundPrice(curPrice),
         reason: `리스크 전량청산: MDD ${(riskState!.drawdown * 100).toFixed(1)}% (임계값 ${(this.meta.mddLiquidate * 100).toFixed(0)}%)`,
       });
-      return signals;
+      return { signals, skipReasons };
     }
 
     if (hasPosition) {
@@ -131,7 +136,7 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `손절: ${(profitRate * 100).toFixed(1)}% <= -${(params.stopLossRate * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // 익절: +15%
@@ -148,7 +153,7 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `익절: +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitRate * 100).toFixed(0)}%`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
 
       // RSI > 70 과열 청산
@@ -166,35 +171,48 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
           price: roundPrice(curPrice),
           reason: `과열청산: RSI=${rsi14.toFixed(0)} > 70`,
         });
-        return signals;
+        return { signals, skipReasons };
       }
     } else {
       // --- 포지션 없음: 진입 조건 ---
 
       // 오늘 이미 실행 → 신규 진입 skip
-      if (ctx.alreadyExecutedToday) return signals;
+      if (ctx.alreadyExecutedToday) {
+        skipReasons.push('오늘 이미 실행됨');
+        return { signals, skipReasons };
+      }
 
       // 리스크 체크
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+        const reason = riskState?.reasons?.join(', ') ?? 'MDD';
         this.logger.debug(
-          `[${watchStock.stockCode}] Buy blocked by risk: ${riskState?.reasons?.join(', ') ?? 'MDD'}`,
+          `[${watchStock.stockCode}] Buy blocked by risk: ${reason}`,
         );
-        return signals;
+        skipReasons.push(`리스크 매수 차단: ${reason}`);
+        return { signals, skipReasons };
       }
 
       // 투자유의/시장경고 종목 진입 차단
-      if (stockIndicators.investCautionYn) return signals;
-      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return signals;
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
 
       // 재무 데이터 필수 (없으면 skip)
       if (!fundamentals) {
         this.logger.debug(`[${watchStock.stockCode}] No fundamentals data, skip`);
-        return signals;
+        skipReasons.push('재무 데이터 없음');
+        return { signals, skipReasons };
       }
 
       if (fundamentals.dividendPayoutRate !== undefined && fundamentals.dividendPayoutRate > 120) {
         this.logger.debug(`[${watchStock.stockCode}] Payout filter failed: ${fundamentals.dividendPayoutRate}% > 120%`);
-        return signals;
+        skipReasons.push(`배당성향 초과: ${fundamentals.dividendPayoutRate.toFixed(0)}% > 120%`);
+        return { signals, skipReasons };
       }
 
       // PER 체크 (국내/해외 공통)
@@ -202,42 +220,50 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
         this.logger.debug(
           `[${watchStock.stockCode}] PER filter failed: ${fundamentals.per} (max: ${params.maxPer})`,
         );
-        return signals;
+        skipReasons.push(`PER 조건 미충족: ${fundamentals.per ?? 'N/A'} (최대 ${params.maxPer})`);
+        return { signals, skipReasons };
       }
 
       // PBR 체크 (국내/해외 공통 — 해외도 현재가상세 API에서 제공)
       if (fundamentals.pbr !== undefined && fundamentals.pbr >= params.maxPbr) {
         this.logger.debug(`[${watchStock.stockCode}] PBR filter failed: ${fundamentals.pbr}`);
-        return signals;
+        skipReasons.push(`PBR 조건 미충족: ${fundamentals.pbr.toFixed(2)} ≥ ${params.maxPbr}`);
+        return { signals, skipReasons };
       }
 
       // EPS 양수 체크 (국내/해외 공통 — 해외도 현재가상세 API에서 EPS 제공)
       if (params.requirePositiveEps && fundamentals.eps !== undefined && fundamentals.eps <= 0) {
         this.logger.debug(`[${watchStock.stockCode}] EPS filter failed: ${fundamentals.eps} (적자기업)`);
-        return signals;
+        skipReasons.push(`적자기업: EPS=${fundamentals.eps.toFixed(0)} ≤ 0`);
+        return { signals, skipReasons };
       }
 
       // 국내 전용 필터: ROE, 부채비율, 매출액증가율, 영업이익증가율, EV/EBITDA
       if (!isOverseas) {
         if (fundamentals.roe !== undefined && fundamentals.roe < params.minRoe) {
           this.logger.debug(`[${watchStock.stockCode}] ROE filter failed: ${fundamentals.roe}`);
-          return signals;
+          skipReasons.push(`ROE 미달: ${fundamentals.roe.toFixed(1)}% < ${params.minRoe}%`);
+          return { signals, skipReasons };
         }
         if (fundamentals.debtRatio !== undefined && fundamentals.debtRatio >= params.maxDebtRatio) {
           this.logger.debug(`[${watchStock.stockCode}] DebtRatio filter failed: ${fundamentals.debtRatio}`);
-          return signals;
+          skipReasons.push(`부채비율 초과: ${fundamentals.debtRatio.toFixed(0)}% ≥ ${params.maxDebtRatio}%`);
+          return { signals, skipReasons };
         }
         if (fundamentals.salesGrowthRate !== undefined && fundamentals.salesGrowthRate < params.minSalesGrowthRate) {
           this.logger.debug(`[${watchStock.stockCode}] SalesGrowth filter failed: ${fundamentals.salesGrowthRate}% < ${params.minSalesGrowthRate}%`);
-          return signals;
+          skipReasons.push(`매출액증가율 미달: ${fundamentals.salesGrowthRate.toFixed(1)}% < ${params.minSalesGrowthRate}%`);
+          return { signals, skipReasons };
         }
         if (fundamentals.operatingProfitGrowthRate !== undefined && fundamentals.operatingProfitGrowthRate < params.minOperatingProfitGrowthRate) {
           this.logger.debug(`[${watchStock.stockCode}] OpProfitGrowth filter failed: ${fundamentals.operatingProfitGrowthRate}% < ${params.minOperatingProfitGrowthRate}%`);
-          return signals;
+          skipReasons.push(`영업이익증가율 미달: ${fundamentals.operatingProfitGrowthRate.toFixed(1)}% < ${params.minOperatingProfitGrowthRate}%`);
+          return { signals, skipReasons };
         }
         if (fundamentals.evEbitda !== undefined && fundamentals.evEbitda > params.maxEvEbitda) {
           this.logger.debug(`[${watchStock.stockCode}] EV/EBITDA filter failed: ${fundamentals.evEbitda} > ${params.maxEvEbitda}`);
-          return signals;
+          skipReasons.push(`EV/EBITDA 초과: ${fundamentals.evEbitda.toFixed(1)} > ${params.maxEvEbitda}`);
+          return { signals, skipReasons };
         }
       }
 
@@ -245,22 +271,26 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
       const { rsi14 } = stockIndicators;
       if (rsi14 !== undefined && rsi14 >= params.rsiThreshold) {
         this.logger.debug(`[${watchStock.stockCode}] RSI filter failed: ${rsi14} >= ${params.rsiThreshold}`);
-        return signals;
+        skipReasons.push(`RSI=${rsi14.toFixed(1)} ≥ ${params.rsiThreshold} (과열)`);
+        return { signals, skipReasons };
       }
 
       if (stockIndicators.earningsSurprise !== undefined && stockIndicators.earningsSurprise < -20) {
         this.logger.debug(`[${watchStock.stockCode}] Earnings surprise filter failed: ${stockIndicators.earningsSurprise}%`);
-        return signals;
+        skipReasons.push(`어닝 쇼크: ${stockIndicators.earningsSurprise.toFixed(1)}% < -20%`);
+        return { signals, skipReasons };
       }
 
       if (stockIndicators.targetPriceUpside !== undefined && stockIndicators.targetPriceUpside < -10) {
         this.logger.debug(`[${watchStock.stockCode}] Target upside filter failed: ${stockIndicators.targetPriceUpside}%`);
-        return signals;
+        skipReasons.push(`목표가 괴리 과대: ${stockIndicators.targetPriceUpside.toFixed(1)}% < -10%`);
+        return { signals, skipReasons };
       }
 
       if (stockIndicators.consensusRating && /(SELL|REDUCE|비중축소|매도)/i.test(stockIndicators.consensusRating)) {
         this.logger.debug(`[${watchStock.stockCode}] Consensus filter failed: ${stockIndicators.consensusRating}`);
-        return signals;
+        skipReasons.push(`부정적 컨센서스: ${stockIndicators.consensusRating}`);
+        return { signals, skipReasons };
       }
 
       // 모든 조건 충족 → 매수
@@ -296,6 +326,6 @@ export class ValueFactorStrategy implements PerStockTradingStrategy {
       }
     }
 
-    return signals;
+    return { signals, skipReasons };
   }
 }

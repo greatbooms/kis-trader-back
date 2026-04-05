@@ -183,7 +183,7 @@ export async function suggestStrategies(
       .map(async (strategy) => {
         if (!passesRecommendationGate(strategy.name, context)) return undefined;
         const recommendationContext = buildRecommendationExecutionContext(strategy.name, context);
-        const signals = await strategy.evaluateStock({
+        const { signals } = await strategy.evaluateStock({
           ...recommendationContext,
           watchStock: {
             ...recommendationContext.watchStock,

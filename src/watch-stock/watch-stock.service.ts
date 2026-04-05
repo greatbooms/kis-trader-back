@@ -1,4 +1,5 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 
@@ -7,7 +8,23 @@ const DUPLICATE_WATCH_STOCK_MESSAGE = '이미 등록된 관심종목입니다.';
 
 @Injectable()
 export class WatchStockService {
+  private readonly logger = new Logger(WatchStockService.name);
+
   constructor(private prisma: PrismaService) {}
+
+  @Cron('0 3 * * *', { timeZone: 'Asia/Seoul' })
+  async cleanupOldSkippedLogs(): Promise<void> {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const { count } = await this.prisma.watchStockExecutionLog.deleteMany({
+      where: {
+        eventType: WatchStockExecutionEventType.SKIPPED,
+        createdAt: { lt: cutoff },
+      },
+    });
+    if (count > 0) {
+      this.logger.log(`Cleaned up ${count} SKIPPED logs older than 7 days`);
+    }
+  }
 
   async getTotalActiveCount(): Promise<number> {
     return this.prisma.watchStock.count({ where: { isActive: true } });

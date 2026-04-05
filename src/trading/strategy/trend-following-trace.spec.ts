@@ -70,7 +70,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
   it('Day 1: 골든크로스 + ADX>25 + 가격>MA20 → 진입', async () => {
     const ctx = createContext();
     // ma20(70000) > ma60(68000) ✓, adx14(30) > 25 ✓, curPrice(72000) > ma20(70000) ✓
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     expect(signals[0].quantity).toBe(Math.floor(5000000 / 72000)); // 69
@@ -99,7 +99,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 76500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
     expect(signals[0].reason).toContain('피라미딩');
@@ -125,7 +125,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 76500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // ADX(23) < adxThreshold(25) → 피라미딩 불가
     // ADX(23) >= adxExitThreshold(20) → 추세소멸 아님
     expect(signals).toHaveLength(0);
@@ -149,7 +149,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 75240;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -175,7 +175,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66600;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(69);
@@ -200,7 +200,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 67320;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const stopLoss = signals.find(s => s.reason?.includes('손절'));
     expect(stopLoss).toBeUndefined();
   });
@@ -227,7 +227,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 74000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].quantity).toBe(101);
@@ -252,7 +252,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 75000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].reason).toContain('추세소멸');
@@ -281,7 +281,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].reason).toContain('손절');
@@ -306,7 +306,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 74000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].reason).toContain('데드크로스');
@@ -331,13 +331,13 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 76500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0); // 피라미딩은 하루 1회 제한
   });
 
   it('alreadyExecutedToday=true + 신규 진입 → 진입 차단', async () => {
     const ctx = createContext({ alreadyExecutedToday: true });
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -363,7 +363,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 65000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].reason).toContain('리스크 전량청산');
@@ -387,7 +387,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     ctx.watchStock.stockCode = 'AAPL';
     ctx.price.currentPrice = 185.567;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].price).toBe(185.57);
     expect(signals[0].exchangeCode).toBe('NASD');
@@ -415,7 +415,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     });
     ctx.price.currentPrice = 66000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].reason).toContain('손절'); // 데드크로스가 아닌 손절
   });
@@ -443,7 +443,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
     ctx.watchStock.quota = 0;
     ctx.price.currentPrice = 76500;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 });

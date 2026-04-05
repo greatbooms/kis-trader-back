@@ -1,4 +1,5 @@
 export { TradingSignal } from './trading-signal.type';
+export { StrategyEvaluationResult } from './strategy-evaluation-result.type';
 export { TradingStrategyContext, TradingStrategy } from './trading-strategy.type';
 export { WatchStockConfig } from './watch-stock-config.type';
 export { MarketCondition } from './market-condition.type';

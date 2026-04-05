@@ -87,7 +87,7 @@ describe('Edge Cases - Common across all strategies', () => {
   describe.each(strategies)('$name: buyableAmount edge cases', ({ instance }) => {
     it('should return no buy signals when buyableAmount is 0', async () => {
       const ctx = createBaseContext({ buyableAmount: 0 });
-      const signals = await instance.evaluateStock(ctx);
+      const { signals } = await instance.evaluateStock(ctx);
       const buys = signals.filter((s) => s.side === 'BUY');
       expect(buys).toHaveLength(0);
     });
@@ -96,7 +96,7 @@ describe('Edge Cases - Common across all strategies', () => {
       const ctx = createBaseContext();
       ctx.watchStock.quota = 100; // way less than price 70000
       ctx.buyableAmount = 100;
-      const signals = await instance.evaluateStock(ctx);
+      const { signals } = await instance.evaluateStock(ctx);
       const buys = signals.filter((s) => s.side === 'BUY');
       expect(buys).toHaveLength(0);
     });
@@ -106,14 +106,14 @@ describe('Edge Cases - Common across all strategies', () => {
     it('should handle currentPrice = 0 gracefully', async () => {
       const ctx = createBaseContext();
       ctx.price.currentPrice = 0;
-      const signals = await instance.evaluateStock(ctx);
+      const { signals } = await instance.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should handle negative currentPrice gracefully', async () => {
       const ctx = createBaseContext();
       ctx.price.currentPrice = -1;
-      const signals = await instance.evaluateStock(ctx);
+      const { signals } = await instance.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -125,7 +125,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
   it('T=0: first buy (no position)', async () => {
     const ctx = createBaseContext();
     ctx.watchStock.quota = 4000000; // perCycleQuota = 100000, enough for 1 share
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals.some((s) => s.side === 'BUY')).toBe(true);
   });
 
@@ -142,7 +142,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     });
     ctx.price.currentPrice = 70000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const sell2 = signals.find((s) => s.reason.includes('Sell2'));
     // T=10 → max(15 - 10/3, 8)% = 11.7%
     if (sell2) {
@@ -163,7 +163,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     });
     ctx.price.currentPrice = 66000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const sell2 = signals.find((s) => s.reason.includes('Sell2'));
     if (sell2) {
       expect(sell2.price).toBe(Math.round(66000 * (1 + (15 - 20 / 3) / 100)));
@@ -183,7 +183,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     });
     ctx.price.currentPrice = 65000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter((s) => s.side === 'BUY');
     expect(buys).toHaveLength(0);
     const sells = signals.filter((s) => s.side === 'SELL');
@@ -205,7 +205,7 @@ describe('Edge Cases - InfiniteBuyStrategy', () => {
     // perCycleQuota = 1000000/40 = 25000
     // halved for interest: 12500
     // 1.5x for RSI: 18750
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // Just verify it doesn't crash and produces valid signals
     expect(Array.isArray(signals)).toBe(true);
   });
@@ -239,7 +239,7 @@ describe('Edge Cases - GridMeanReversionStrategy', () => {
     });
     ctx.price.currentPrice = 65000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const buys = signals.filter((s) => s.side === 'BUY');
     // Should buy at grid level, but stop loss at -8% hasn't triggered yet
     expect(buys.length).toBeLessThanOrEqual(1); // at most one grid buy
@@ -275,7 +275,7 @@ describe('Edge Cases - GridMeanReversionStrategy', () => {
     });
     ctx.price.currentPrice = 70000;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     // profitRate = (70000-72000)/72000 = -2.8% < 0 → BB middle sell should NOT trigger
     const bbMiddleSell = signals.find((s) => s.reason?.includes('BB중심선'));
     expect(bbMiddleSell).toBeUndefined();
@@ -301,7 +301,7 @@ describe('Edge Cases - MomentumBreakoutStrategy', () => {
     // breakout = 69000 + 0 * 0.5 = 69000
     // curPrice(70000) >= 69000 → buy
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -319,7 +319,7 @@ describe('Edge Cases - MomentumBreakoutStrategy', () => {
     ctx.price.currentPrice = 71000;
     ctx.price.highPrice = 0;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     const trailing = signals.find((s) => s.reason?.includes('트레일링스탑'));
     expect(trailing).toBeUndefined();
   });
@@ -339,7 +339,7 @@ describe('Edge Cases - ConservativeStrategy', () => {
     ctx.watchStock.strategyParams = { cashRate: 1.0 };
     // availableRate = 1 - 1.0 = 0 → buyAmount = 0
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -354,7 +354,7 @@ describe('Edge Cases - ConservativeStrategy', () => {
     ctx.watchStock.strategyParams = { rsiThreshold: 15 };
     // rsi14(20) >= custom threshold(15) → no buy
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 });
@@ -372,7 +372,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
       },
     });
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -386,7 +386,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
       },
     });
     // adx14(25) > 25? No, 25 is NOT > 25. So no entry.
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -400,7 +400,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
       },
     });
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
   });
@@ -422,7 +422,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
       },
     });
     // adx14(20) < 20? No → no exit
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
@@ -443,7 +443,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
       },
     });
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
     expect(signals[0].reason).toContain('추세소멸');
@@ -467,7 +467,7 @@ describe('Edge Cases - TrendFollowingStrategy', () => {
     });
     ctx.watchStock.quota = 0;
 
-    const signals = await strategy.evaluateStock(ctx);
+    const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 });

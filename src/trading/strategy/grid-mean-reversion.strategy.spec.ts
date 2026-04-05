@@ -76,14 +76,14 @@ describe('GridMeanReversionStrategy', () => {
     it('should return empty when price is 0', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = 0;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
     it('should return empty when price is negative', async () => {
       const ctx = createContext();
       ctx.price.currentPrice = -100;
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -109,7 +109,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(50);
@@ -129,7 +129,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -152,7 +152,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 64000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -176,7 +176,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 66000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
     });
@@ -200,7 +200,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 76000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(100);
@@ -226,7 +226,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 73500;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(10); // floor(20 / 2)
@@ -250,7 +250,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 73500;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(1); // max(1, floor(1/2)) = 1
     });
@@ -272,7 +272,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 73500;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const bbMiddleSell = signals.find((s) => s.reason?.includes('BB중심선'));
       expect(bbMiddleSell).toBeUndefined();
     });
@@ -298,7 +298,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 68000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(1);
       expect(buySignals[0].reason).toContain('그리드매수 1단계');
@@ -327,7 +327,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 67000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(1);
       // First level that matches (level 1 at -2%) is triggered first due to break
@@ -360,7 +360,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 68000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(0);
     });
@@ -382,7 +382,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 70000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(0);
     });
@@ -402,7 +402,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
       // quota=1000000, gridRatios[0]=0.3 → 300000
@@ -422,7 +422,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -437,7 +437,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -452,7 +452,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -467,7 +467,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -482,7 +482,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -497,7 +497,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
 
@@ -521,7 +521,7 @@ describe('GridMeanReversionStrategy', () => {
         },
       });
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
   });
@@ -550,7 +550,7 @@ describe('GridMeanReversionStrategy', () => {
 
       // avgPrice=70000, level 1 = -5% → 66500
       // curPrice=67000 > 66500 → level 1 not triggered
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(0);
     });
@@ -573,7 +573,7 @@ describe('GridMeanReversionStrategy', () => {
       ctx.price.currentPrice = 64000;
       ctx.watchStock.strategyParams = { stopLossRate: 0.15 }; // 15%
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       // -8.6% is within custom 15% threshold
       const stopLoss = signals.find((s) => s.reason?.includes('손절'));
       expect(stopLoss).toBeUndefined();
@@ -595,7 +595,7 @@ describe('GridMeanReversionStrategy', () => {
       ctx.watchStock.exchangeCode = 'NASD';
       ctx.price.currentPrice = 150.567;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       if (signals.length > 0 && signals[0].price) {
         const decimal = signals[0].price.toString().split('.')[1] || '';
         expect(decimal.length).toBeLessThanOrEqual(2);
@@ -622,7 +622,7 @@ describe('GridMeanReversionStrategy', () => {
       ctx.watchStock.stockCode = 'AAPL';
       ctx.price.currentPrice = 137;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].exchangeCode).toBe('NASD');
     });
@@ -644,7 +644,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 64000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].exchangeCode).toBeUndefined();
     });
@@ -669,7 +669,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 64000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('손절');
     });
@@ -691,7 +691,7 @@ describe('GridMeanReversionStrategy', () => {
       });
       ctx.price.currentPrice = 76000;
 
-      const signals = await strategy.evaluateStock(ctx);
+      const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].reason).toContain('BB상단');
       expect(signals[0].quantity).toBe(20); // full quantity
