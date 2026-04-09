@@ -161,7 +161,8 @@ export class ScreeningScheduler implements OnModuleInit {
 
     this.isDeepRunning = true;
     try {
-      const date = kstTodayStr();
+      const date = await this.screeningService.getLatestRecommendationDate('DOMESTIC', ['KRX']);
+      if (!date) return;
       const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'DOMESTIC', ['KRX']);
       this.logger.log(`Domestic deep analysis saved: ${completed} stocks`);
       await this.sendTopDeepAnalysisReports(date, 'DOMESTIC', ['KRX']);
@@ -184,7 +185,8 @@ export class ScreeningScheduler implements OnModuleInit {
 
     this.isDeepRunning = true;
     try {
-      const date = kstTodayStr();
+      const date = await this.screeningService.getLatestRecommendationDate('OVERSEAS', filteredExchanges);
+      if (!date) return;
       const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'OVERSEAS', filteredExchanges);
       this.logger.log(`Overseas deep analysis saved: ${completed} stocks`);
       await this.sendTopDeepAnalysisReports(date, 'OVERSEAS', filteredExchanges);

@@ -138,6 +138,28 @@ export class ScreeningService {
 
     const market = scores[0].market;
     const exchangeCodes = [...new Set(scores.map((item) => item.exchangeCode))];
+    const existingRows = await this.prisma.stockRecommendation.findMany({
+      where: {
+        screeningDate: date,
+        market: market as any,
+        exchangeCode: { in: exchangeCodes },
+      },
+      select: {
+        exchangeCode: true,
+        stockCode: true,
+        deepAnalysisId: true,
+        deepAnalysisStatus: true,
+        deepAnalysisMessage: true,
+        deepAnalysisUpdatedAt: true,
+      },
+    });
+    const existingDeepAnalysisMap = new Map(
+      existingRows.map((row) => [
+        `${row.exchangeCode}:${row.stockCode}`,
+        row,
+      ]),
+    );
+
     await this.prisma.stockRecommendation.deleteMany({
       where: {
         screeningDate: date,
@@ -149,6 +171,9 @@ export class ScreeningService {
     const selected = pickRecommendationsForStorage(scores);
     for (let index = 0; index < selected.length; index++) {
       const item = selected[index];
+      const existingAnalysis = existingDeepAnalysisMap.get(`${item.exchangeCode}:${item.stockCode}`);
+      const hasCompletedDeepAnalysis = existingAnalysis?.deepAnalysisId && existingAnalysis.deepAnalysisStatus === 'SUCCESS';
+
       await this.prisma.stockRecommendation.create({
         data: {
           screeningDate: date,
@@ -170,13 +195,35 @@ export class ScreeningService {
           marketCap: item.marketCap,
           isEtf: item.isEtf,
           factorScores: (item.factorScores ?? null) as any,
-          deepAnalysisId: item.deepAnalysisId,
-          deepAnalysisStatus: 'PENDING',
-          deepAnalysisMessage: '딥 분석 대기 중입니다.',
-          deepAnalysisUpdatedAt: new Date(),
+          deepAnalysisId: hasCompletedDeepAnalysis ? existingAnalysis.deepAnalysisId : item.deepAnalysisId,
+          deepAnalysisStatus: hasCompletedDeepAnalysis ? 'SUCCESS' : 'PENDING',
+          deepAnalysisMessage: hasCompletedDeepAnalysis
+            ? existingAnalysis.deepAnalysisMessage
+            : '딥 분석 대기 중입니다.',
+          deepAnalysisUpdatedAt: hasCompletedDeepAnalysis
+            ? existingAnalysis.deepAnalysisUpdatedAt
+            : new Date(),
         },
       });
     }
+  }
+
+  async getLatestRecommendationDate(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCodes?: string[],
+  ): Promise<string | null> {
+    const latest = await this.prisma.stockRecommendation.findFirst({
+      where: {
+        market: market as any,
+        ...(exchangeCodes?.length ? { exchangeCode: { in: exchangeCodes } } : {}),
+      },
+      orderBy: [
+        { screeningDate: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      select: { screeningDate: true },
+    });
+    return latest?.screeningDate ?? null;
   }
 
   async getRecommendations(date: string, market?: string, country?: string, limit = 20) {
@@ -1245,6 +1292,13 @@ export class ScreeningService {
 
 
   private buildDeepAnalysisUpsert(date: string, recommendation: any, analysis: any) {
+    const targetUpside =
+      analysis.dcfValuation?.currentPrice && analysis.consensusData?.targetPrice
+        ? ((analysis.consensusData.targetPrice - analysis.dcfValuation.currentPrice) /
+            analysis.dcfValuation.currentPrice) *
+          100
+        : null;
+
     return {
       screeningDate: date,
       stockCode: recommendation.stockCode,
@@ -1252,7 +1306,7 @@ export class ScreeningService {
       exchangeCode: recommendation.exchangeCode,
       market: recommendation.market,
       intrinsicValue: analysis.dcfValuation?.intrinsicValue ?? null,
-      marginOfSafety: analysis.dcfValuation?.marginOfSafety ?? null,
+      marginOfSafety: this.clampDbPercent(analysis.dcfValuation?.marginOfSafety),
       dcfDetail: analysis.dcfValuation ?? null,
       riskGrade: analysis.riskProfile?.riskGrade ?? null,
       volatility30d: analysis.riskProfile?.volatility30d ?? null,
@@ -1264,13 +1318,19 @@ export class ScreeningService {
       consecutiveDividendYears: analysis.dividendAnalysis?.consecutiveDividendYears ?? null,
       dividendDetail: analysis.dividendAnalysis ?? null,
       targetPrice: analysis.consensusData?.targetPrice ?? null,
-      targetUpside: analysis.dcfValuation?.currentPrice && analysis.consensusData?.targetPrice
-        ? ((analysis.consensusData.targetPrice - analysis.dcfValuation.currentPrice) / analysis.dcfValuation.currentPrice) * 100
-        : null,
+      targetUpside: this.clampDbPercent(targetUpside),
       consensusRating: analysis.consensusData?.rating ?? null,
       consensusDetail: analysis.consensusData ?? null,
       reportSummary: analysis.reportSummary ?? null,
     };
+  }
+
+  private clampDbPercent(value: number | null | undefined): number | null {
+    if (!Number.isFinite(value)) return null;
+
+    const numericValue = value as number;
+    const maxAbs = 9999.9999;
+    return Math.max(-maxAbs, Math.min(maxAbs, numericValue));
   }
 
   private formatDeepAnalysisErrorMessage(error: unknown): string {
