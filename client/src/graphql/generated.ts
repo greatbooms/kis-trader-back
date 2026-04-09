@@ -1020,13 +1020,6 @@ export type GetMarketRegimeQueryVariables = Exact<{
 
 export type GetMarketRegimeQuery = { __typename?: 'Query', marketRegime: { __typename?: 'MarketRegimeType', regime: string, market: string, exchangeCode: string } };
 
-export type GetRiskStateQueryVariables = Exact<{
-  input: RiskStateFilterInput;
-}>;
-
-
-export type GetRiskStateQuery = { __typename?: 'Query', riskState: { __typename?: 'RiskStateType', buyBlocked: boolean, liquidateAll: boolean, positionCount: number, investedRate: number, dailyPnlRate: number, drawdown: number, reasons: Array<string> } };
-
 export type GetWatchStocksQueryVariables = Exact<{
   input?: InputMaybe<WatchStocksFilterInput>;
 }>;
@@ -2478,54 +2471,6 @@ export function useGetMarketRegimeSuspenseQuery(baseOptions?: ApolloReactHooks.S
 export type GetMarketRegimeQueryHookResult = ReturnType<typeof useGetMarketRegimeQuery>;
 export type GetMarketRegimeLazyQueryHookResult = ReturnType<typeof useGetMarketRegimeLazyQuery>;
 export type GetMarketRegimeSuspenseQueryHookResult = ReturnType<typeof useGetMarketRegimeSuspenseQuery>;
-export const GetRiskStateDocument = gql`
-    query GetRiskState($input: RiskStateFilterInput!) {
-  riskState(input: $input) {
-    buyBlocked
-    liquidateAll
-    positionCount
-    investedRate
-    dailyPnlRate
-    drawdown
-    reasons
-  }
-}
-    `;
-
-/**
- * __useGetRiskStateQuery__
- *
- * To run a query within a React component, call `useGetRiskStateQuery` and pass it any options that fit your needs.
- * When your component renders, `useGetRiskStateQuery` returns an object from Apollo Client that contains loading, error, and data properties
- * you can use to render your UI.
- *
- * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
- *
- * @example
- * const { data, loading, error } = useGetRiskStateQuery({
- *   variables: {
- *      input: // value for 'input'
- *   },
- * });
- */
-export function useGetRiskStateQuery(baseOptions: ApolloReactHooks.QueryHookOptions<GetRiskStateQuery, GetRiskStateQueryVariables> & ({ variables: GetRiskStateQueryVariables; skip?: boolean; } | { skip: boolean; }) ) {
-        const options = {...defaultOptions, ...baseOptions}
-        return ApolloReactHooks.useQuery<GetRiskStateQuery, GetRiskStateQueryVariables>(GetRiskStateDocument, options);
-      }
-export function useGetRiskStateLazyQuery(baseOptions?: ApolloReactHooks.LazyQueryHookOptions<GetRiskStateQuery, GetRiskStateQueryVariables>) {
-          const options = {...defaultOptions, ...baseOptions}
-          return ApolloReactHooks.useLazyQuery<GetRiskStateQuery, GetRiskStateQueryVariables>(GetRiskStateDocument, options);
-        }
-// @ts-ignore
-export function useGetRiskStateSuspenseQuery(baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<GetRiskStateQuery, GetRiskStateQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetRiskStateQuery, GetRiskStateQueryVariables>;
-export function useGetRiskStateSuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetRiskStateQuery, GetRiskStateQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetRiskStateQuery | undefined, GetRiskStateQueryVariables>;
-export function useGetRiskStateSuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetRiskStateQuery, GetRiskStateQueryVariables>) {
-          const options = baseOptions === ApolloReactHooks.skipToken ? baseOptions : {...defaultOptions, ...baseOptions}
-          return ApolloReactHooks.useSuspenseQuery<GetRiskStateQuery, GetRiskStateQueryVariables>(GetRiskStateDocument, options);
-        }
-export type GetRiskStateQueryHookResult = ReturnType<typeof useGetRiskStateQuery>;
-export type GetRiskStateLazyQueryHookResult = ReturnType<typeof useGetRiskStateLazyQuery>;
-export type GetRiskStateSuspenseQueryHookResult = ReturnType<typeof useGetRiskStateSuspenseQuery>;
 export const GetWatchStocksDocument = gql`
     query GetWatchStocks($input: WatchStocksFilterInput) {
   watchStocks(input: $input) {

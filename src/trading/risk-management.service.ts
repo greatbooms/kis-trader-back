@@ -28,19 +28,14 @@ export class RiskManagementService {
       0,
     );
 
-    // 포트폴리오 가치 (현재가 기준)
-    const portfolioValue = totalCurrentValue;
-
-    // 투자 비중 계산 (현재 투자금 / 총 포트폴리오 가치 추정)
-    // 최근 RiskSnapshot에서 전체 가치 참조, 없으면 투자금으로 추정
+    // 최근 RiskSnapshot을 이용해 시장별 상태 지표만 계산
     const latestSnapshot = await this.prisma.riskSnapshot.findFirst({
       where: { market: market as Market },
       orderBy: { createdAt: 'desc' },
     });
 
-    const totalValue = latestSnapshot
-      ? Number(latestSnapshot.portfolioValue) + Number(latestSnapshot.cashBalance)
-      : totalCurrentValue * 1.25; // 추정: 현금 20% 가정
+    const cashBalance = latestSnapshot ? Number(latestSnapshot.cashBalance) : 0;
+    const totalValue = totalCurrentValue + cashBalance;
 
     const investedRate = totalValue > 0 ? totalCurrentValue / totalValue : 0;
 
@@ -54,34 +49,9 @@ export class RiskManagementService {
       : totalCurrentValue;
     const drawdown = peakValue > 0 ? (totalCurrentValue - peakValue) / peakValue : 0;
 
-    let buyBlocked = false;
-    let liquidateAll = false;
-
-    // 규칙: 보유 종목 >= 6개 → 신규 매수 차단
-    if (positionCount >= 6) {
-      buyBlocked = true;
-      reasons.push(`보유 종목 ${positionCount}개 >= 6개`);
-    }
-
-    // 규칙: 투자비중 >= 80% → 신규 매수 차단
-    if (investedRate >= 0.8) {
-      buyBlocked = true;
-      reasons.push(`투자비중 ${(investedRate * 100).toFixed(1)}% >= 80%`);
-    }
-
-    // 규칙: 일일 손실 <= -2% → 당일 신규 매수 차단
-    if (dailyPnlRate <= -0.02) {
-      buyBlocked = true;
-      reasons.push(`일일 손실 ${(dailyPnlRate * 100).toFixed(1)}% <= -2%`);
-    }
-
-    // MDD 관련 규칙은 전략별 riskLevel에 따라 다르게 적용됨
-    // → evaluateStrategyMdd() 참조 (risk-state.type.ts)
-    // 여기서는 drawdown 값만 전달하고, 전략 evaluateStock()에서 판단
-
     const riskState: RiskState = {
-      buyBlocked,
-      liquidateAll,
+      buyBlocked: false,
+      liquidateAll: false,
       positionCount,
       investedRate,
       dailyPnlRate,

@@ -24,16 +24,3 @@ query GetMarketRegime($input: MarketRegimeFilterInput!) {
     exchangeCode
   }
 }
-
-query GetRiskState($input: RiskStateFilterInput!) {
-  riskState(input: $input) {
-    buyBlocked
-    liquidateAll
-    positionCount
-    investedRate
-    dailyPnlRate
-    drawdown
-    reasons
-  }
-}
-

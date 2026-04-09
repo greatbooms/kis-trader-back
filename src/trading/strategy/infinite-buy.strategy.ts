@@ -210,6 +210,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const mddCheck = riskState
       ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate)
       : undefined;
+    const riskReason = riskState?.reasons?.join(', ')
+      || `MDD ${((riskState?.drawdown ?? 0) * 100).toFixed(1)}%`;
 
     details.T = T;
     details.avgPrice = avgPrice;
@@ -228,7 +230,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         side: 'SELL',
         quantity: holdQty,
         price: roundPrice(curPrice),
-        reason: `리스크 전량청산: ${(riskState?.reasons || ['MDD']).join(', ')}`,
+        reason: `리스크 전량청산: ${riskReason}`,
         orderDivision: '00',
       });
       return { signals, skipReasons };
@@ -304,7 +306,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     if (!hasPosition) {
       if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
-        skipReasons.push(`리스크 매수 차단: ${(riskState?.reasons || ['MDD']).join(', ')}`);
+        skipReasons.push(`리스크 매수 차단: ${riskReason}`);
         return { signals, skipReasons };
       }
       if (stockIndicators.investCautionYn) {

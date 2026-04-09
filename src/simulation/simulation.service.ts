@@ -1356,38 +1356,9 @@ export class SimulationService {
       : totalValue;
     const drawdown = peakValue > 0 ? (totalValue - peakValue) / peakValue : 0;
 
-    let buyBlocked = false;
-    let liquidateAll = false;
-
-    // 규칙: 보유 종목 >= 6개 → 신규 매수 차단
-    if (positionCount >= 6) {
-      buyBlocked = true;
-      reasons.push(`보유 종목 ${positionCount}개 >= 6개`);
-    }
-
-    // 규칙: 투자비중 >= 80% → 신규 매수 차단
-    if (investedRate >= 0.8) {
-      buyBlocked = true;
-      reasons.push(`투자비중 ${(investedRate * 100).toFixed(1)}% >= 80%`);
-    }
-
-    // 규칙: 일일 손실 <= -2% → 당일 신규 매수 차단
-    if (dailyPnlRate <= -0.02) {
-      buyBlocked = true;
-      reasons.push(`일일 손실 ${(dailyPnlRate * 100).toFixed(1)}% <= -2%`);
-    }
-
-    // MDD 관련 규칙은 전략별 riskLevel에 따라 다르게 적용됨
-    // → evaluateStrategyMdd() 참조 (각 전략의 meta.mddBuyBlock/mddLiquidate)
-    // 여기서는 drawdown 값만 전달하고, 전략 evaluateStock()에서 판단
-
-    if (reasons.length > 0) {
-      this.logger.warn(`[SIM] Risk state: ${reasons.join(', ')}`);
-    }
-
     return {
-      buyBlocked,
-      liquidateAll,
+      buyBlocked: false,
+      liquidateAll: false,
       positionCount,
       investedRate,
       dailyPnlRate,

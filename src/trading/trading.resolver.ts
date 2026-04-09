@@ -8,16 +8,13 @@ import { UseGuards } from '@nestjs/common';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import { StrategyRegistryService } from './strategy/strategy-registry.service';
 import { MarketRegimeService } from './market-regime.service';
-import { RiskManagementService } from './risk-management.service';
 import {
   StrategyInfo,
   StrategyAllocationType,
   MarketRegimeType,
-  RiskStateType,
   SetStrategyAllocationInput,
   StrategyAllocationsFilterInput,
   MarketRegimeFilterInput,
-  RiskStateFilterInput,
 } from './dto';
 
 @Resolver()
@@ -26,7 +23,6 @@ export class TradingResolver {
   constructor(
     private strategyRegistry: StrategyRegistryService,
     private marketRegimeService: MarketRegimeService,
-    private riskManagement: RiskManagementService,
   ) {}
 
   @Query(() => [StrategyInfo], { name: 'availableStrategies' })
@@ -64,13 +60,6 @@ export class TradingResolver {
       input.exchangeCode,
     );
     return { regime, market: input.market, exchangeCode: input.exchangeCode };
-  }
-
-  @Query(() => RiskStateType, { name: 'riskState' })
-  async getRiskState(
-    @Args('input') input: RiskStateFilterInput,
-  ): Promise<RiskStateType> {
-    return this.riskManagement.evaluateRisk(input.market as 'DOMESTIC' | 'OVERSEAS');
   }
 
   @Mutation(() => StrategyAllocationType)

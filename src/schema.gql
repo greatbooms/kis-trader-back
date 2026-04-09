@@ -44,16 +44,6 @@ type MarketRegimeType {
   exchangeCode: String!
 }
 
-type RiskStateType {
-  buyBlocked: Boolean!
-  liquidateAll: Boolean!
-  positionCount: Float!
-  investedRate: Float!
-  dailyPnlRate: Float!
-  drawdown: Float!
-  reasons: [String!]!
-}
-
 type TradeRecordType {
   id: ID!
   market: Market!
@@ -417,7 +407,6 @@ type Query {
   availableStrategies: [StrategyInfo!]!
   strategyAllocations(input: StrategyAllocationsFilterInput!): [StrategyAllocationType!]!
   marketRegime(input: MarketRegimeFilterInput!): MarketRegimeType!
-  riskState(input: RiskStateFilterInput!): RiskStateType!
   trades(input: TradeFilterInput): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
   positions(input: PositionsFilterInput): [PositionType!]!
@@ -449,10 +438,6 @@ input StrategyAllocationsFilterInput {
 input MarketRegimeFilterInput {
   market: Market!
   exchangeCode: String!
-}
-
-input RiskStateFilterInput {
-  market: Market!
 }
 
 input TradeFilterInput {
@@ -500,6 +485,7 @@ input SearchStocksInput {
 input StockRecommendationsFilterInput {
   date: String
   market: String
+  country: String
   limit: Float
 }
 
