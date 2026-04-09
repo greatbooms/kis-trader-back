@@ -102,3 +102,10 @@ mutation UpdateWatchStock($id: ID!, $input: UpdateWatchStockInput!) {
 mutation DeleteWatchStock($id: ID!) {
   deleteWatchStock(id: $id)
 }
+
+mutation TriggerWatchStockNow($id: ID!) {
+  triggerWatchStockNow(id: $id) {
+    success
+    message
+  }
+}

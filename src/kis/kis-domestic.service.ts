@@ -765,6 +765,23 @@ export class KisDomesticService {
     return date.toISOString().slice(0, 10).replace(/-/g, '');
   }
 
+  private hasContinuationToken(token?: string): boolean {
+    return (token?.trim().length ?? 0) > 0;
+  }
+
+  private hasRepeatedContinuationToken(
+    previousFk: string,
+    previousNk: string,
+    nextFk: string,
+    nextNk: string,
+  ): boolean {
+    return (
+      this.hasContinuationToken(nextFk) &&
+      previousFk === nextFk &&
+      previousNk === nextNk
+    );
+  }
+
   /** 국내 잔고 조회 */
   async getBalance(): Promise<BalanceItem[]> {
     const trId = this.isPaper ? 'VTTC8494R' : 'TTTC8494R';
@@ -791,7 +808,7 @@ export class KisDomesticService {
       };
 
       const additionalHeaders: Record<string, string> = {};
-      if (ctxAreaFk100) {
+      if (this.hasContinuationToken(ctxAreaFk100)) {
         additionalHeaders['tr_cont'] = 'N';
       }
 
@@ -803,6 +820,7 @@ export class KisDomesticService {
       );
 
       const output1 = res.output1 as DomesticBalanceItem[];
+      const receivedCount = output1?.length ?? 0;
       if (output1) {
         for (const item of output1) {
           const qty = parseInt(item.hldg_qty, 10) || 0;
@@ -820,9 +838,37 @@ export class KisDomesticService {
       }
 
       // 페이지네이션 체크
-      ctxAreaFk100 = (res as any).ctx_area_fk100 || '';
-      ctxAreaNk100 = (res as any).ctx_area_nk100 || '';
-      hasMore = !!ctxAreaFk100;
+      const nextCtxAreaFk100 = ((res as any).ctx_area_fk100 || '').trim();
+      const nextCtxAreaNk100 = ((res as any).ctx_area_nk100 || '').trim();
+
+      this.logger.debug(
+        `Domestic balance page ${depth + 1}: received=${receivedCount}, accumulated=${items.length}, nextFk100Length=${nextCtxAreaFk100.length}, nextNk100Length=${nextCtxAreaNk100.length}`,
+      );
+
+      if (receivedCount === 0) {
+        this.logger.debug(
+          `Domestic balance page ${depth + 1} returned no rows; stopping pagination`,
+        );
+        break;
+      }
+
+      if (
+        this.hasRepeatedContinuationToken(
+          ctxAreaFk100,
+          ctxAreaNk100,
+          nextCtxAreaFk100,
+          nextCtxAreaNk100,
+        )
+      ) {
+        this.logger.warn(
+          `Domestic balance pagination stalled at page ${depth + 1}; stopping repeated continuation token loop`,
+        );
+        break;
+      }
+
+      ctxAreaFk100 = nextCtxAreaFk100;
+      ctxAreaNk100 = nextCtxAreaNk100;
+      hasMore = this.hasContinuationToken(ctxAreaFk100);
       depth++;
     }
 

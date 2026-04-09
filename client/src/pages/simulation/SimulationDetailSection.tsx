@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   useGetSimulationSessionQuery,
   useGetAvailableStrategiesQuery,
+  useTriggerSimulationNowMutation,
   useUpdateSimulationSettingsMutation,
 } from '@/graphql/generated'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,6 +28,7 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
   })
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
   const [updateSettings, { loading: saving }] = useUpdateSimulationSettingsMutation()
+  const [triggerSimulationNow, { loading: triggering }] = useTriggerSimulationNowMutation()
 
   const session = data?.simulationSession
   const strategies = strategiesData?.availableStrategies ?? []
@@ -107,6 +109,18 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
       setIsEditing(false)
     } catch (e: unknown) {
       setError(getMutationErrorMessage(e, '설정 저장 중 오류가 발생했습니다'))
+    }
+  }
+
+  const handleManualTrigger = async () => {
+    try {
+      const result = await triggerSimulationNow({
+        variables: { id: sessionId },
+      })
+      alert(result.data?.triggerSimulationNow.message || '시뮬레이션 수동 실행을 완료했습니다.')
+      await refetch()
+    } catch (e: unknown) {
+      alert(getMutationErrorMessage(e, '시뮬레이션 수동 실행 중 오류가 발생했습니다'))
     }
   }
 
@@ -208,6 +222,9 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
               현재 현금 {formatCurrency(session.currentCash, session.market, primaryExchangeCode)}
             </div>
             <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
+                {triggering ? '실행중...' : '지금 1회 실행'}
+              </Button>
               {isEditing ? (
                 <>
                   <Button

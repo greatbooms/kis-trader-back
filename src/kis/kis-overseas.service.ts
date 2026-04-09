@@ -5,6 +5,8 @@ import {
   OverseasPriceOutput,
   OverseasOrderOutput,
   OverseasBalanceItem,
+  OverseasPresentBalanceCurrencyItem,
+  OverseasStandardBalanceItem,
   StockPriceResult,
   OrderResult,
   BalanceItem,
@@ -15,6 +17,7 @@ import {
 } from './types/kis-api.types';
 import {
   EXCHANGE_CODE_MAP,
+  EXCHANGE_CURRENCY,
   OVERSEAS_ORDER_TR_IDS,
 } from './types/kis-config.types';
 
@@ -24,6 +27,7 @@ export class KisOverseasService {
   private readonly accountNo: string;
   private readonly prodCode: string;
   private readonly isPaper: boolean;
+  private useStandardBalanceOnly = false;
 
   constructor(
     private kisBase: KisBaseService,
@@ -32,6 +36,23 @@ export class KisOverseasService {
     this.accountNo = this.configService.get<string>('kis.accountNo')!;
     this.prodCode = this.configService.get<string>('kis.prodCode')!;
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
+  }
+
+  private hasContinuationToken(token?: string): boolean {
+    return (token?.trim().length ?? 0) > 0;
+  }
+
+  private hasRepeatedContinuationToken(
+    previousFk: string,
+    previousNk: string,
+    nextFk: string,
+    nextNk: string,
+  ): boolean {
+    return (
+      this.hasContinuationToken(nextFk) &&
+      previousFk === nextFk &&
+      previousNk === nextNk
+    );
   }
 
   /** 해외 현재가상세 조회 (PER/PBR/EPS/BPS 포함) */
@@ -258,6 +279,50 @@ export class KisOverseasService {
       foreignCurrencyAvailable: parseFloat(output?.ovrs_ord_psbl_amt) || 0,
       maxQuantity: parseInt(output?.max_ord_psbl_qty, 10) || 0,
     };
+  }
+
+  async getCashBalances(): Promise<Array<{
+    currencyCode: string;
+    currencyName?: string;
+    amount: number;
+    withdrawableAmount?: number;
+  }>> {
+    const snapshot = await this.getAccountSnapshot();
+    return snapshot.cashBalances;
+  }
+
+  async getAccountSnapshot(nationCode = '000'): Promise<{
+    balance: BalanceItem[];
+    cashBalances: Array<{
+      currencyCode: string;
+      currencyName?: string;
+      amount: number;
+      withdrawableAmount?: number;
+    }>;
+  }> {
+    if (this.isPaper || this.useStandardBalanceOnly) {
+      return {
+        balance: await this.getStandardBalance(),
+        cashBalances: [],
+      };
+    }
+
+    try {
+      return await this.getPresentBalanceSnapshot(nationCode);
+    } catch (error) {
+      if (!this.shouldFallbackToStandardBalance(error)) {
+        throw error;
+      }
+
+      this.useStandardBalanceOnly = true;
+      this.logger.warn(
+        `Falling back to overseas standard balance API after present balance failure: ${error.message}`,
+      );
+      return {
+        balance: await this.getStandardBalance(),
+        cashBalances: [],
+      };
+    }
   }
 
   /** 해외 미체결 주문 조회 */
@@ -558,8 +623,42 @@ export class KisOverseasService {
 
   /** 해외 잔고 조회 */
   async getBalance(nationCode = '000'): Promise<BalanceItem[]> {
+    if (this.isPaper || this.useStandardBalanceOnly) {
+      return this.getStandardBalance();
+    }
+
+    try {
+      return (await this.getPresentBalanceSnapshot(nationCode)).balance;
+    } catch (error) {
+      if (!this.shouldFallbackToStandardBalance(error)) {
+        throw error;
+      }
+
+      this.useStandardBalanceOnly = true;
+      this.logger.warn(
+        `Falling back to overseas standard balance API after present balance failure: ${error.message}`,
+      );
+      return this.getStandardBalance();
+    }
+  }
+
+  private async getPresentBalanceSnapshot(nationCode = '000'): Promise<{
+    balance: BalanceItem[];
+    cashBalances: Array<{
+      currencyCode: string;
+      currencyName?: string;
+      amount: number;
+      withdrawableAmount?: number;
+    }>;
+  }> {
     const trId = this.isPaper ? 'VTRP6504R' : 'CTRP6504R';
     const items: BalanceItem[] = [];
+    const cashBalances = new Map<string, {
+      currencyCode: string;
+      currencyName?: string;
+      amount: number;
+      withdrawableAmount?: number;
+    }>();
     let ctxAreaFk200 = '';
     let ctxAreaNk200 = '';
     let hasMore = true;
@@ -569,13 +668,13 @@ export class KisOverseasService {
       const params: Record<string, string> = {
         CANO: this.accountNo.substring(0, 8),
         ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        WCRC_FRCR_DVSN_CD: '02',
+        WCRC_FRCR_DVSN_CD: '01',
         NATN_CD: nationCode,
         TR_MKET_CD: '00',
         INQR_DVSN_CD: '00',
       };
 
-      if (ctxAreaFk200) {
+      if (this.hasContinuationToken(ctxAreaFk200)) {
         params['CTX_AREA_FK200'] = ctxAreaFk200;
         params['CTX_AREA_NK200'] = ctxAreaNk200;
       }
@@ -604,12 +703,155 @@ export class KisOverseasService {
         }
       }
 
-      ctxAreaFk200 = (res as any).ctx_area_fk200 || '';
-      ctxAreaNk200 = (res as any).ctx_area_nk200 || '';
-      hasMore = !!ctxAreaFk200;
+      const output2 = (res.output2 as OverseasPresentBalanceCurrencyItem[]) || [];
+      for (const item of output2) {
+        if (!item.crcy_cd) continue;
+        cashBalances.set(item.crcy_cd, {
+          currencyCode: item.crcy_cd,
+          currencyName: item.crcy_cd_name || undefined,
+          amount: parseFloat(item.frcr_dncl_amt_2) || 0,
+          withdrawableAmount: parseFloat(item.frcr_drwg_psbl_amt_1) || 0,
+        });
+      }
+
+      const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();
+      const nextCtxAreaNk200 = ((res as any).ctx_area_nk200 || '').trim();
+
+      this.logger.debug(
+        `Overseas present balance page ${depth + 1}: received=${output1?.length ?? 0}, accumulated=${items.length}, currencies=${cashBalances.size}, nextFk200Length=${nextCtxAreaFk200.length}, nextNk200Length=${nextCtxAreaNk200.length}`,
+      );
+
+      if (
+        this.hasRepeatedContinuationToken(
+          ctxAreaFk200,
+          ctxAreaNk200,
+          nextCtxAreaFk200,
+          nextCtxAreaNk200,
+        )
+      ) {
+        this.logger.warn(
+          `Overseas present balance pagination stalled at page ${depth + 1}; stopping repeated continuation token loop`,
+        );
+        break;
+      }
+
+      ctxAreaFk200 = nextCtxAreaFk200;
+      ctxAreaNk200 = nextCtxAreaNk200;
+      hasMore = this.hasContinuationToken(ctxAreaFk200);
       depth++;
     }
 
+    return {
+      balance: items,
+      cashBalances: Array.from(cashBalances.values()),
+    };
+  }
+
+  private async getStandardBalance(): Promise<BalanceItem[]> {
+    const items: BalanceItem[] = [];
+    const exchanges = this.getStandardBalanceExchanges();
+
+    for (const exchangeCode of exchanges) {
+      const currencyCode = EXCHANGE_CURRENCY[exchangeCode];
+      if (!currencyCode) continue;
+
+      let ctxAreaFk200 = '';
+      let ctxAreaNk200 = '';
+      let hasMore = true;
+      let depth = 0;
+
+      while (hasMore && depth < 10) {
+        const params: Record<string, string> = {
+          CANO: this.accountNo.substring(0, 8),
+          ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
+          OVRS_EXCG_CD: exchangeCode,
+          TR_CRCY_CD: currencyCode,
+          CTX_AREA_FK200: ctxAreaFk200,
+          CTX_AREA_NK200: ctxAreaNk200,
+        };
+
+        const additionalHeaders: Record<string, string> = {};
+        if (this.hasContinuationToken(ctxAreaFk200)) {
+          additionalHeaders['tr_cont'] = 'N';
+        }
+
+        const res = await this.kisBase.get(
+          '/uapi/overseas-stock/v1/trading/inquire-balance',
+          this.isPaper ? 'VTTS3012R' : 'TTTS3012R',
+          params,
+          additionalHeaders,
+        );
+
+        const output1 = res.output1 as OverseasStandardBalanceItem[];
+        if (output1) {
+          for (const item of output1) {
+            const qty = Math.trunc(parseFloat(item.ccld_qty_smtl1) || 0);
+            if (qty <= 0) continue;
+
+            const exchangeRate = parseFloat(item.bass_exrt) || 0;
+            const unitAmount = parseFloat(item.unit_amt) || 1;
+
+            items.push({
+              stockCode: item.pdno,
+              stockName: item.prdt_name,
+              quantity: qty,
+              avgPrice: this.toLocalCurrencyPrice(item.avg_unpr3, exchangeRate, unitAmount),
+              currentPrice: this.toLocalCurrencyPrice(item.ovrs_now_pric1, exchangeRate, unitAmount),
+              profitLoss: parseFloat(item.evlu_pfls_amt2) || 0,
+              profitRate: parseFloat(item.evlu_pfls_rt1) || 0,
+              exchangeCode: item.ovrs_excg_cd || exchangeCode,
+            });
+          }
+        }
+
+        const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();
+        const nextCtxAreaNk200 = ((res as any).ctx_area_nk200 || '').trim();
+
+        this.logger.debug(
+          `Overseas standard balance ${exchangeCode} page ${depth + 1}: received=${output1?.length ?? 0}, accumulated=${items.length}, nextFk200Length=${nextCtxAreaFk200.length}, nextNk200Length=${nextCtxAreaNk200.length}`,
+        );
+
+        if (
+          this.hasRepeatedContinuationToken(
+            ctxAreaFk200,
+            ctxAreaNk200,
+            nextCtxAreaFk200,
+            nextCtxAreaNk200,
+          )
+        ) {
+          this.logger.warn(
+            `Overseas standard balance pagination stalled for ${exchangeCode} at page ${depth + 1}; stopping repeated continuation token loop`,
+          );
+          break;
+        }
+
+        ctxAreaFk200 = nextCtxAreaFk200;
+        ctxAreaNk200 = nextCtxAreaNk200;
+        hasMore = this.hasContinuationToken(ctxAreaFk200);
+        depth++;
+      }
+    }
+
     return items;
+  }
+
+  private getStandardBalanceExchanges(): string[] {
+    if (this.isPaper) {
+      return ['NASD', 'NYSE', 'AMEX', 'SEHK', 'SHAA', 'SZAA', 'TKSE', 'HASE', 'VNSE'];
+    }
+
+    return ['NASD', 'SEHK', 'SHAA', 'SZAA', 'TKSE', 'HASE', 'VNSE'];
+  }
+
+  private toLocalCurrencyPrice(rawPrice: string, exchangeRate: number, unitAmount: number): number {
+    const parsedPrice = parseFloat(rawPrice) || 0;
+    if (parsedPrice <= 0 || exchangeRate <= 0) return parsedPrice;
+    const currencyUnit = unitAmount > 0 ? unitAmount : 1;
+    return (parsedPrice / exchangeRate) * currencyUnit;
+  }
+
+  private shouldFallbackToStandardBalance(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('INVALID_CHECK_ACNO');
   }
 }

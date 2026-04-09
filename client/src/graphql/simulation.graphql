@@ -166,3 +166,10 @@ mutation ResetSimulation($id: String!) {
 mutation DeleteSimulation($id: String!) {
   deleteSimulation(id: $id)
 }
+
+mutation TriggerSimulationNow($id: String!) {
+  triggerSimulationNow(id: $id) {
+    success
+    message
+  }
+}

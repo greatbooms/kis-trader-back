@@ -35,11 +35,18 @@ describe('SimulationService', () => {
     getPrice: jest.fn(),
   };
 
+  const mockMarketDataCache = {
+    getOpenDartDomesticSignals: jest.fn(),
+    getSecFundamentals: jest.fn(),
+  };
+
   beforeEach(() => {
     mockMarketRegimeService.getRegime.mockResolvedValue(undefined);
     mockMarketAnalysis.getStockIndicators.mockResolvedValue({});
     mockMarketAnalysis.getMarketCondition.mockResolvedValue({});
     mockPrisma.simulationTrade.findFirst.mockResolvedValue(null);
+    mockMarketDataCache.getOpenDartDomesticSignals.mockResolvedValue(undefined);
+    mockMarketDataCache.getSecFundamentals.mockResolvedValue(undefined);
 
     service = new SimulationService(
       mockPrisma as any,
@@ -48,7 +55,7 @@ describe('SimulationService', () => {
       mockMarketRegimeService as any,
       mockKisDomestic as any,
       {} as any,
-      {} as any,
+      mockMarketDataCache as any,
     );
   });
 
@@ -126,7 +133,7 @@ describe('SimulationService', () => {
       expect(cycle).toBe(1.5);
     });
 
-    it('should explain infinite-buy no-signal when index is below MA200', () => {
+    it('should not special-case infinite-buy no-signal reason for index below MA200', () => {
       const reason = (service as any).describeNoSignalReason('infinite-buy', {
         alreadyExecutedToday: false,
         watchStock: {
@@ -144,7 +151,7 @@ describe('SimulationService', () => {
         buyableAmount: 100000,
       });
 
-      expect(reason).toContain('S&P500 below MA200');
+      expect(reason).toBe('strategy conditions not met');
     });
 
     it('should prioritize already executed reason before strategy-specific diagnosis', () => {
@@ -153,6 +160,19 @@ describe('SimulationService', () => {
       });
 
       expect(reason).toBe('already executed today');
+    });
+
+    it('should use KST date for overnight overseas sessions', () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-04-09T16:30:00Z'));
+
+      expect((service as any).getTodayDate()).toBe('2026-04-10');
+
+      const range = (service as any).getDayRange('2026-04-10');
+      expect(range.gte.toISOString()).toBe('2026-04-09T15:00:00.000Z');
+      expect(range.lt.toISOString()).toBe('2026-04-10T14:59:59.999Z');
+
+      jest.useRealTimers();
     });
   });
 
@@ -214,6 +234,130 @@ describe('SimulationService', () => {
         where: { sessionId: 'session-1' },
       });
       expect(mockKisDomestic.getPrice).toHaveBeenCalledWith('005930');
+    });
+
+    it('should accumulate quota only when no buy signal is caused by insufficient quantity', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        strategyName: 'infinite-buy',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quota: 100000,
+        maxCycles: 40,
+        currentCash: 100000,
+        strategyParams: {},
+      });
+      mockPrisma.simulationPosition.findMany.mockResolvedValue([]);
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 10,
+            overseas: { basis: 'beforeClose', offsetHours: 1 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['매수 수량 부족: 조정 할당금 2500 < 현재가 70000'],
+        }),
+      });
+      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
+
+      await service.executeSimulationTick('session-1');
+
+      expect(mockPrisma.simulationSession.update).toHaveBeenCalledWith({
+        where: { id: 'session-1' },
+        data: {
+          strategyParams: {
+            accumulatedQuota: 2500,
+            lastAccumulatedDate: expect.any(String),
+          },
+        },
+      });
+    });
+
+    it('should not accumulate quota when no buy signal comes from other skip reasons', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-2',
+        status: 'RUNNING',
+        strategyName: 'infinite-buy',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quota: 100000,
+        maxCycles: 40,
+        currentCash: 100000,
+        strategyParams: {},
+      });
+      mockPrisma.simulationPosition.findMany.mockResolvedValue([]);
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 10,
+            overseas: { basis: 'beforeClose', offsetHours: 1 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['투자유의 종목'],
+        }),
+      });
+      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
+
+      await service.executeSimulationTick('session-2');
+
+      expect(mockPrisma.simulationSession.update).not.toHaveBeenCalledWith({
+        where: { id: 'session-2' },
+        data: {
+          strategyParams: {
+            accumulatedQuota: expect.any(Number),
+            lastAccumulatedDate: expect.any(String),
+          },
+        },
+      });
+    });
+  });
+
+  describe('manual trigger', () => {
+    it('should block manual trigger when a pending order already exists', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        stockCode: 'TQQQ',
+      });
+      jest.spyOn(service, 'checkPendingOrders').mockResolvedValue();
+      jest.spyOn(service, 'getPendingOrderCount').mockReturnValue(1);
+
+      const result = await service.triggerSessionNow('session-1');
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('pending 주문');
+    });
+
+    it('should force one simulation tick when manual trigger is allowed', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        stockCode: 'TQQQ',
+      });
+      jest.spyOn(service, 'checkPendingOrders').mockResolvedValue();
+      jest.spyOn(service, 'getPendingOrderCount').mockReturnValue(0);
+      mockPrisma.simulationTrade.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      const executeSpy = jest.spyOn(service, 'executeSimulationTick').mockResolvedValue();
+
+      const result = await service.triggerSessionNow('session-1');
+
+      expect(executeSpy).toHaveBeenCalledWith('session-1', { forceExecution: true });
+      expect(result.success).toBe(true);
     });
   });
 });

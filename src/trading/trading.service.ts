@@ -57,12 +57,17 @@ export class TradingService {
     contexts: StockStrategyContext[],
   ): Promise<void> {
     const skipQuotaAccumulationIds = new Set<string>();
+    const quotaCarryEligibleIds = new Set<string>();
 
     for (const ctx of contexts) {
       try {
         const { signals, skipReasons } = await strategy.evaluateStock(ctx);
 
         if (signals.length === 0) {
+          if (this.isQuotaCarryEligible(skipReasons)) {
+            quotaCarryEligibleIds.add(ctx.watchStock.id);
+          }
+
           const reason = skipReasons.length > 0 ? skipReasons.join('; ') : '시그널 없음';
 
           await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SKIPPED, reason, {
@@ -143,7 +148,12 @@ export class TradingService {
 
     // 분할매수 전략: 매수 시그널 없었던 종목에 대해 quota 누적
     if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
-      await this.accumulateUnusedQuotas(strategy.name, contexts, skipQuotaAccumulationIds);
+      await this.accumulateUnusedQuotas(
+        strategy.name,
+        contexts,
+        quotaCarryEligibleIds,
+        skipQuotaAccumulationIds,
+      );
     }
   }
 
@@ -636,7 +646,7 @@ export class TradingService {
       const ws = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
       if (!ws) return;
       const params = (ws.strategyParams as Record<string, any>) || {};
-      const today = new Date().toISOString().slice(0, 10);
+      const today = this.getTodayDate();
       await this.prisma.watchStock.update({
         where: { id: watchStockId },
         data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
@@ -653,11 +663,13 @@ export class TradingService {
   private async accumulateUnusedQuotas(
     strategyName: string,
     contexts: StockStrategyContext[],
+    eligibleWatchStockIds: Set<string>,
     skipWatchStockIds: Set<string> = new Set(),
   ): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getTodayDate();
 
     for (const ctx of contexts) {
+      if (!eligibleWatchStockIds.has(ctx.watchStock.id)) continue;
       if (ctx.alreadyExecutedToday) continue;
       if (skipWatchStockIds.has(ctx.watchStock.id)) continue;
       if (strategyName === 'infinite-buy' && this.hasActiveInfiniteBuySecondTarget(ctx.watchStock.strategyParams)) continue;
@@ -688,13 +700,17 @@ export class TradingService {
         },
       });
       this.logger.log(
-        `[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (no buy signal today)`,
+        `[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (insufficient quantity only)`,
       );
     }
   }
 
+  private isQuotaCarryEligible(skipReasons: string[]): boolean {
+    return skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
+  }
+
   private getTodayDate(): string {
-    return new Date().toISOString().slice(0, 10);
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   private getPositionKey(

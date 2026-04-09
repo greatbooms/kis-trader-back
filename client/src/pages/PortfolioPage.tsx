@@ -1,21 +1,22 @@
 import { useState } from 'react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
-import { Wallet, TrendingUp, TrendingDown, PiggyBank, BarChart3, Info } from 'lucide-react'
+import { Wallet, TrendingUp, TrendingDown, PiggyBank, BarChart3, Info, RefreshCw } from 'lucide-react'
 import {
   useGetPositionsQuery,
   useGetTradesQuery,
   useGetAccountSummaryQuery,
+  useRefreshAccountStateMutation,
   useManualSellMutation,
   type Market,
   type Side,
 } from '@/graphql/generated'
 import { getTradeRecordDisplayInfo } from '@/lib/trade-record'
-import { formatCurrency, formatPercent, formatNumber, formatDate } from '@/lib/utils'
+import { formatCurrency, formatCurrencyByCode, formatPercent, formatNumber, formatDate } from '@/lib/utils'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 
 export function PortfolioPage() {
@@ -60,8 +61,19 @@ export function PortfolioPage() {
 // ── 계좌 요약 ──
 
 function AccountSummaryCard() {
-  const { data, loading } = useGetAccountSummaryQuery()
+  const { data, loading, refetch } = useGetAccountSummaryQuery()
+  const [refreshAccountState, { loading: refreshLoading }] = useRefreshAccountStateMutation()
   const summary = data?.accountSummary
+
+  const handleRefresh = async () => {
+    try {
+      const result = await refreshAccountState()
+      await refetch()
+      alert(result.data?.refreshAccountState.message || '계좌 상태를 새로고침했습니다.')
+    } catch (e: any) {
+      alert(`계좌 상태 새로고침 실패: ${e.message}`)
+    }
+  }
 
   if (loading) {
     return (
@@ -80,80 +92,133 @@ function AccountSummaryCard() {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-      <Card>
-        <CardContent className="pt-5 pb-4">
-          <div className="flex items-center gap-2 mb-2">
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle>계좌 요약</CardTitle>
+          <CardDescription>
+            국내 KRW와 해외 통화별 예수금을 포함한 계좌 상태입니다.
+            {summary.lastSyncedAt ? ` 마지막 갱신 ${formatDate(summary.lastSyncedAt)}` : ' 아직 새로고침 이력이 없습니다.'}
+          </CardDescription>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshLoading}>
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshLoading ? 'animate-spin' : ''}`} />
+          계좌 상태 새로고침
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">예수금</span>
+                <Tooltip text="합산 값 대신, 아래에서 국내 원화와 해외 통화별 예수금을 개별로 확인할 수 있습니다.">
+                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </Tooltip>
+              </div>
+              <p className="text-xl font-bold">{summary.cashBalances.length}개 통화</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <PiggyBank className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">총 투자금</span>
+                <Tooltip text="현재 보유 중인 종목에 투입된 총 매수 금액입니다.">
+                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </Tooltip>
+              </div>
+              <p className="text-xl font-bold">{formatCurrency(summary.totalInvested)}</p>
+              <p className="text-xs text-muted-foreground mt-1">{summary.positionCount}개 종목 보유</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">총 자산</span>
+                <Tooltip text="현재 저장된 원화 기준 자산 요약입니다. 해외 예수금은 아래 통화별 항목에서 별도로 확인하세요.">
+                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </Tooltip>
+              </div>
+              <p className="text-xl font-bold">{formatCurrency(summary.totalAssets)}</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">미실현 손익</span>
+                <Tooltip text="보유 종목의 매입가 대비 현재가 차이로 계산한 평가 손익입니다.">
+                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </Tooltip>
+              </div>
+              <p className={`text-xl font-bold ${summary.totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+                {formatCurrency(summary.totalProfitLoss)}
+              </p>
+              <p className={`text-xs mt-1 ${summary.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
+                {summary.profitRate >= 0 ? '+' : ''}{summary.profitRate.toFixed(2)}%
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingDown className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">실현 손익</span>
+                <Tooltip text="매도 완료된 거래에서 발생한 확정 손익입니다.">
+                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </Tooltip>
+              </div>
+              <p className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-success' : 'text-danger'}`}>
+                {formatCurrency(summary.realizedPnL)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
             <Wallet className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">예수금</span>
-            <Tooltip text="현재 매수 가능한 현금 잔고입니다. 국내/해외 계좌의 합산 금액입니다.">
-              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-            </Tooltip>
+            <p className="text-sm font-medium">통화별 예수금</p>
           </div>
-          <p className="text-xl font-bold">{formatCurrency(summary.cashBalance)}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-5 pb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <PiggyBank className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">총 투자금</span>
-            <Tooltip text="현재 보유 중인 종목에 투입된 총 매수 금액입니다.">
-              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-            </Tooltip>
-          </div>
-          <p className="text-xl font-bold">{formatCurrency(summary.totalInvested)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{summary.positionCount}개 종목 보유</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-5 pb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">총 자산</span>
-            <Tooltip text="예수금 + 보유 종목 평가금액을 합산한 총 자산입니다.">
-              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-            </Tooltip>
-          </div>
-          <p className="text-xl font-bold">{formatCurrency(summary.totalAssets)}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-5 pb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">미실현 손익</span>
-            <Tooltip text="보유 종목의 매입가 대비 현재가 차이로 계산한 평가 손익입니다. 아직 매도하지 않은 보유 포지션의 손익입니다.">
-              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-            </Tooltip>
-          </div>
-          <p className={`text-xl font-bold ${summary.totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
-            {formatCurrency(summary.totalProfitLoss)}
-          </p>
-          <p className={`text-xs mt-1 ${summary.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
-            {summary.profitRate >= 0 ? '+' : ''}{summary.profitRate.toFixed(2)}%
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-5 pb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">실현 손익</span>
-            <Tooltip text="매도 완료된 거래에서 발생한 확정 손익입니다. (매도가 - 평균매수가) × 수량의 합계입니다.">
-              <Info className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-            </Tooltip>
-          </div>
-          <p className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-success' : 'text-danger'}`}>
-            {formatCurrency(summary.realizedPnL)}
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+          {summary.cashBalances.length === 0 ? (
+            <p className="text-sm text-muted-foreground">아직 계좌 새로고침 데이터가 없습니다.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.cashBalances.map((cash) => (
+                <div key={`${cash.market}-${cash.currencyCode}`} className="rounded-lg border border-border p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {cash.market === 'DOMESTIC' ? '국내' : '해외'} {cash.currencyCode}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {cash.currencyName || cash.currencyCode}
+                      </p>
+                    </div>
+                    <Badge variant={cash.market === 'DOMESTIC' ? 'default' : 'info'}>
+                      {cash.market === 'DOMESTIC' ? '원화' : '외화'}
+                    </Badge>
+                  </div>
+                  <p className="mt-3 text-lg font-bold">{formatCurrencyByCode(cash.amount, cash.currencyCode)}</p>
+                  {cash.withdrawableAmount != null && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      출금가능 {formatCurrencyByCode(cash.withdrawableAmount, cash.currencyCode)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

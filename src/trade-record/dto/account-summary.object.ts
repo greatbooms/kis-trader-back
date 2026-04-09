@@ -1,4 +1,5 @@
 import { ObjectType, Field, Float, Int } from '@nestjs/graphql';
+import { CashBalanceType } from './cash-balance.object';
 
 @ObjectType()
 export class AccountSummaryType {
@@ -22,4 +23,10 @@ export class AccountSummaryType {
 
   @Field(() => Int)
   positionCount: number;
+
+  @Field(() => [CashBalanceType])
+  cashBalances: CashBalanceType[];
+
+  @Field({ nullable: true })
+  lastSyncedAt?: string;
 }

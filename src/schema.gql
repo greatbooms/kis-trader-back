@@ -119,6 +119,14 @@ type DashboardSummaryType {
   winRate: Float!
 }
 
+type CashBalanceType {
+  market: Market!
+  currencyCode: String!
+  currencyName: String
+  amount: Float!
+  withdrawableAmount: Float
+}
+
 type AccountSummaryType {
   cashBalance: Float!
   totalInvested: Float!
@@ -131,12 +139,20 @@ type AccountSummaryType {
   realizedPnL: Float!
   profitRate: Float!
   positionCount: Int!
+  cashBalances: [CashBalanceType!]!
+  lastSyncedAt: String
 }
 
 type ManualSellResult {
   success: Boolean!
   message: String
   orderNo: String
+}
+
+type RefreshAccountStateResult {
+  success: Boolean!
+  message: String!
+  accountSummary: AccountSummaryType!
 }
 
 type WatchStockExecutionLogType {
@@ -163,6 +179,11 @@ enum WatchStockExecutionEventType {
   ORDER_AWAITING_APPROVAL
   ORDER_CANCELLED
   ERROR
+}
+
+type ManualTriggerResult {
+  success: Boolean!
+  message: String!
 }
 
 type WatchStockType {
@@ -495,10 +516,12 @@ input ScreeningListFilterInput {
 
 type Mutation {
   setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
+  refreshAccountState: RefreshAccountStateResult!
   manualSell(input: ManualSellInput!): ManualSellResult!
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
+  triggerWatchStockNow(id: ID!): ManualTriggerResult!
   login(input: LoginInput!): AuthPayload!
   logout: AuthPayload!
   createSimulation(input: CreateSimulationInput!): SimulationSessionType!
@@ -506,6 +529,7 @@ type Mutation {
   updateSimulationSettings(input: UpdateSimulationSettingsInput!): SimulationSessionType!
   resetSimulation(id: String!): SimulationSessionType!
   deleteSimulation(id: String!): Boolean!
+  triggerSimulationNow(id: String!): ManualTriggerResult!
   runScreeningNow(input: RunScreeningInput!): Boolean!
   runDeepAnalysisNow(input: RunScreeningInput!): Boolean!
   updateScreeningSettings(input: UpdateScreeningSettingsInput!): ScreeningSettingsType!

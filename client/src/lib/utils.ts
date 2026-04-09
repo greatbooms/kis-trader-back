@@ -21,20 +21,23 @@ const CURRENCY_LOCALE: Record<string, string> = {
   CNY: 'zh-CN', JPY: 'ja-JP', VND: 'vi-VN',
 }
 
+export function formatCurrencyByCode(value: number, currencyCode: string): string {
+  const locale = CURRENCY_LOCALE[currencyCode] || 'en-US'
+  const fractionDigits = currencyCode === 'KRW' || currencyCode === 'VND' || currencyCode === 'JPY' ? 0 : 2
+
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: currencyCode,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value)
+}
+
 export function formatCurrency(value: number, market?: string, exchangeCode?: string): string {
   const currency = exchangeCode
     ? (EXCHANGE_CURRENCY[exchangeCode] || 'USD')
     : (market === 'OVERSEAS' ? 'USD' : 'KRW')
-
-  const locale = CURRENCY_LOCALE[currency] || 'en-US'
-  const fractionDigits = currency === 'KRW' || currency === 'VND' || currency === 'JPY' ? 0 : 2
-
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(value)
+  return formatCurrencyByCode(value, currency)
 }
 
 export function formatNumber(value: number): string {

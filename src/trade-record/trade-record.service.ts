@@ -4,10 +4,13 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
 import { ManualSellInput } from './dto';
+import { BalanceItem } from '../kis/types/kis-api.types';
+import { AccountCashBalance, AccountStatusCache } from './types';
 
 @Injectable()
 export class TradeRecordService {
   private readonly logger = new Logger(TradeRecordService.name);
+  private readonly accountStatusCacheKey = 'account_status_cache';
 
   constructor(
     private prisma: PrismaService,
@@ -99,7 +102,11 @@ export class TradeRecordService {
       take: 2, // DOMESTIC + OVERSEAS 각 1개
       distinct: ['market'],
     });
-    const cashBalance = latestSnapshots.reduce((sum, s) => sum + Number(s.cashBalance), 0);
+    const statusCache = await this.getAccountStatusCache();
+    const cachedKrwCash = statusCache?.cashBalances
+      ?.filter((item) => item.currencyCode === 'KRW')
+      .reduce((sum, item) => sum + item.amount, 0);
+    const cashBalance = cachedKrwCash ?? latestSnapshots.reduce((sum, s) => sum + Number(s.cashBalance), 0);
     const totalAssets = cashBalance + totalInvested + totalProfitLoss;
 
     // 실현 손익: 매도 거래의 (매도가 - 평균매수가) × 수량
@@ -113,6 +120,86 @@ export class TradeRecordService {
       realizedPnL,
       profitRate: totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0,
       positionCount: positions.length,
+      cashBalances: statusCache?.cashBalances ?? [],
+      lastSyncedAt: statusCache?.lastSyncedAt,
+    };
+  }
+
+  async refreshAccountState() {
+    const messages: string[] = [];
+    const cashBalances: AccountCashBalance[] = [];
+    let hasSuccess = false;
+
+    this.logger.debug('Refreshing account state');
+
+    try {
+      const domesticBalance = await this.kisDomestic.getBalance();
+      await this.syncPositions('DOMESTIC', domesticBalance);
+      const domesticCash = await this.kisDomestic.getBuyableAmount();
+      cashBalances.push({
+        market: Market.DOMESTIC,
+        currencyCode: 'KRW',
+        currencyName: '원화',
+        amount: domesticCash.cashAvailable,
+        withdrawableAmount: domesticCash.cashAvailable,
+      });
+      hasSuccess = true;
+    } catch (e) {
+      messages.push(`국내 계좌 조회 실패: ${e.message}`);
+      this.logger.warn(`Failed to refresh domestic account state: ${e.message}`);
+    }
+
+    try {
+      const overseasSnapshot = await this.kisOverseas.getAccountSnapshot();
+      await this.syncPositions('OVERSEAS', overseasSnapshot.balance);
+      const overseasCashBalances = overseasSnapshot.cashBalances;
+      cashBalances.push(
+        ...overseasCashBalances.map((item) => ({
+          market: Market.OVERSEAS,
+          currencyCode: item.currencyCode,
+          currencyName: item.currencyName,
+          amount: item.amount,
+          withdrawableAmount: item.withdrawableAmount,
+        })),
+      );
+      hasSuccess = true;
+    } catch (e) {
+      messages.push(`해외 계좌 조회 실패: ${e.message}`);
+      this.logger.warn(`Failed to refresh overseas account state: ${e.message}`);
+    }
+
+    if (cashBalances.length > 0) {
+      const cacheValue = {
+        cashBalances: cashBalances.map((item) => ({
+          market: item.market,
+          currencyCode: item.currencyCode,
+          currencyName: item.currencyName ?? null,
+          amount: item.amount,
+          withdrawableAmount: item.withdrawableAmount ?? null,
+        })),
+        lastSyncedAt: new Date().toISOString(),
+      } as Prisma.InputJsonValue;
+
+      await this.prisma.appSetting.upsert({
+        where: { key: this.accountStatusCacheKey },
+        create: {
+          key: this.accountStatusCacheKey,
+          value: cacheValue,
+        },
+        update: {
+          value: cacheValue,
+        },
+      });
+    }
+
+    this.logger.debug(
+      `Finished refreshing account state: success=${hasSuccess}, cashBalances=${cashBalances.length}, messages=${messages.length}`,
+    );
+
+    return {
+      success: hasSuccess,
+      message: messages.length > 0 ? messages.join(' | ') : '계좌 상태를 새로고침했습니다.',
+      accountSummary: await this.getAccountSummary(),
     };
   }
 
@@ -156,6 +243,66 @@ export class TradeRecordService {
     }
 
     return realizedPnL;
+  }
+
+  private async getAccountStatusCache(): Promise<AccountStatusCache | null> {
+    const saved = await this.prisma.appSetting.findUnique({
+      where: { key: this.accountStatusCacheKey },
+    });
+    return (saved?.value as AccountStatusCache | null) ?? null;
+  }
+
+  private async syncPositions(market: 'DOMESTIC' | 'OVERSEAS', items: BalanceItem[]): Promise<void> {
+    for (const item of items) {
+      const totalInvested = item.quantity * item.avgPrice;
+
+      await this.prisma.position.upsert({
+        where: {
+          market_exchangeCode_stockCode: {
+            market: market as Market,
+            exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
+            stockCode: item.stockCode,
+          },
+        },
+        create: {
+          market: market as Market,
+          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
+          stockCode: item.stockCode,
+          stockName: item.stockName,
+          quantity: item.quantity,
+          avgPrice: new Prisma.Decimal(item.avgPrice),
+          currentPrice: new Prisma.Decimal(item.currentPrice),
+          profitLoss: new Prisma.Decimal(item.profitLoss),
+          profitRate: new Prisma.Decimal(item.profitRate),
+          totalInvested: new Prisma.Decimal(totalInvested),
+        },
+        update: {
+          quantity: item.quantity,
+          avgPrice: new Prisma.Decimal(item.avgPrice),
+          currentPrice: new Prisma.Decimal(item.currentPrice),
+          profitLoss: new Prisma.Decimal(item.profitLoss),
+          profitRate: new Prisma.Decimal(item.profitRate),
+          stockName: item.stockName,
+          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
+          totalInvested: new Prisma.Decimal(totalInvested),
+        },
+      });
+    }
+
+    const stockCodes = items.map((i) => i.stockCode);
+    if (stockCodes.length > 0) {
+      await this.prisma.position.deleteMany({
+        where: {
+          market: market as Market,
+          stockCode: { notIn: stockCodes },
+        },
+      });
+      return;
+    }
+
+    await this.prisma.position.deleteMany({
+      where: { market: market as Market },
+    });
   }
 
   /** 수동 매도 */

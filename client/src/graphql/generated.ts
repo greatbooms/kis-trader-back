@@ -24,6 +24,8 @@ export type Scalars = {
 export type AccountSummaryType = {
   __typename?: 'AccountSummaryType';
   cashBalance: Scalars['Float']['output'];
+  cashBalances: Array<CashBalanceType>;
+  lastSyncedAt?: Maybe<Scalars['String']['output']>;
   positionCount: Scalars['Int']['output'];
   profitRate: Scalars['Float']['output'];
   /** 실현 손익 (매도 완료된 거래의 손익 합계) */
@@ -37,6 +39,15 @@ export type AccountSummaryType = {
 export type AuthPayload = {
   __typename?: 'AuthPayload';
   success: Scalars['Boolean']['output'];
+};
+
+export type CashBalanceType = {
+  __typename?: 'CashBalanceType';
+  amount: Scalars['Float']['output'];
+  currencyCode: Scalars['String']['output'];
+  currencyName?: Maybe<Scalars['String']['output']>;
+  market: Market;
+  withdrawableAmount?: Maybe<Scalars['Float']['output']>;
 };
 
 export type CreateSimulationInput = {
@@ -110,6 +121,12 @@ export type ManualSellResult = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ManualTriggerResult = {
+  __typename?: 'ManualTriggerResult';
+  message: Scalars['String']['output'];
+  success: Scalars['Boolean']['output'];
+};
+
 export type Market =
   | 'DOMESTIC'
   | 'OVERSEAS';
@@ -135,10 +152,13 @@ export type Mutation = {
   login: AuthPayload;
   logout: AuthPayload;
   manualSell: ManualSellResult;
+  refreshAccountState: RefreshAccountStateResult;
   resetSimulation: SimulationSessionType;
   runDeepAnalysisNow: Scalars['Boolean']['output'];
   runScreeningNow: Scalars['Boolean']['output'];
   setStrategyAllocation: StrategyAllocationType;
+  triggerSimulationNow: ManualTriggerResult;
+  triggerWatchStockNow: ManualTriggerResult;
   updateScreeningSettings: ScreeningSettingsType;
   updateSimulationSettings: SimulationSessionType;
   updateSimulationStatus: SimulationSessionType;
@@ -193,6 +213,16 @@ export type MutationRunScreeningNowArgs = {
 
 export type MutationSetStrategyAllocationArgs = {
   input: SetStrategyAllocationInput;
+};
+
+
+export type MutationTriggerSimulationNowArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type MutationTriggerWatchStockNowArgs = {
+  id: Scalars['ID']['input'];
 };
 
 
@@ -388,6 +418,13 @@ export type QueryWatchStockExecutionLogsArgs = {
 
 export type QueryWatchStocksArgs = {
   input?: InputMaybe<WatchStocksFilterInput>;
+};
+
+export type RefreshAccountStateResult = {
+  __typename?: 'RefreshAccountStateResult';
+  accountSummary: AccountSummaryType;
+  message: Scalars['String']['output'];
+  success: Scalars['Boolean']['output'];
 };
 
 export type RunScreeningInput = {
@@ -931,6 +968,13 @@ export type DeleteSimulationMutationVariables = Exact<{
 
 export type DeleteSimulationMutation = { __typename?: 'Mutation', deleteSimulation: boolean };
 
+export type TriggerSimulationNowMutationVariables = Exact<{
+  id: Scalars['String']['input'];
+}>;
+
+
+export type TriggerSimulationNowMutation = { __typename?: 'Mutation', triggerSimulationNow: { __typename?: 'ManualTriggerResult', success: boolean, message: string } };
+
 export type SearchStocksQueryVariables = Exact<{
   input: SearchStocksInput;
 }>;
@@ -976,7 +1020,7 @@ export type GetOverseasQuoteQuery = { __typename?: 'Query', overseasQuote?: { __
 export type GetAccountSummaryQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetAccountSummaryQuery = { __typename?: 'Query', accountSummary: { __typename?: 'AccountSummaryType', cashBalance: number, totalInvested: number, totalAssets: number, totalProfitLoss: number, realizedPnL: number, profitRate: number, positionCount: number } };
+export type GetAccountSummaryQuery = { __typename?: 'Query', accountSummary: { __typename?: 'AccountSummaryType', cashBalance: number, totalInvested: number, totalAssets: number, totalProfitLoss: number, realizedPnL: number, profitRate: number, positionCount: number, lastSyncedAt?: string | null, cashBalances: Array<{ __typename?: 'CashBalanceType', market: Market, currencyCode: string, currencyName?: string | null, amount: number, withdrawableAmount?: number | null }> } };
 
 export type GetDashboardSummaryQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -989,6 +1033,11 @@ export type ManualSellMutationVariables = Exact<{
 
 
 export type ManualSellMutation = { __typename?: 'Mutation', manualSell: { __typename?: 'ManualSellResult', success: boolean, message?: string | null, orderNo?: string | null } };
+
+export type RefreshAccountStateMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type RefreshAccountStateMutation = { __typename?: 'Mutation', refreshAccountState: { __typename?: 'RefreshAccountStateResult', success: boolean, message: string, accountSummary: { __typename?: 'AccountSummaryType', cashBalance: number, totalInvested: number, totalAssets: number, totalProfitLoss: number, realizedPnL: number, profitRate: number, positionCount: number, lastSyncedAt?: string | null, cashBalances: Array<{ __typename?: 'CashBalanceType', market: Market, currencyCode: string, currencyName?: string | null, amount: number, withdrawableAmount?: number | null }> } } };
 
 export type GetAvailableStrategiesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1045,6 +1094,13 @@ export type DeleteWatchStockMutationVariables = Exact<{
 
 
 export type DeleteWatchStockMutation = { __typename?: 'Mutation', deleteWatchStock: boolean };
+
+export type TriggerWatchStockNowMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type TriggerWatchStockNowMutation = { __typename?: 'Mutation', triggerWatchStockNow: { __typename?: 'ManualTriggerResult', success: boolean, message: string } };
 
 
 export const LoginDocument = gql`
@@ -1929,6 +1985,37 @@ export function useDeleteSimulationMutation(baseOptions?: ApolloReactHooks.Mutat
         return ApolloReactHooks.useMutation<DeleteSimulationMutation, DeleteSimulationMutationVariables>(DeleteSimulationDocument, options);
       }
 export type DeleteSimulationMutationHookResult = ReturnType<typeof useDeleteSimulationMutation>;
+export const TriggerSimulationNowDocument = gql`
+    mutation TriggerSimulationNow($id: String!) {
+  triggerSimulationNow(id: $id) {
+    success
+    message
+  }
+}
+    `;
+
+/**
+ * __useTriggerSimulationNowMutation__
+ *
+ * To run a mutation, you first call `useTriggerSimulationNowMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useTriggerSimulationNowMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [triggerSimulationNowMutation, { data, loading, error }] = useTriggerSimulationNowMutation({
+ *   variables: {
+ *      id: // value for 'id'
+ *   },
+ * });
+ */
+export function useTriggerSimulationNowMutation(baseOptions?: ApolloReactHooks.MutationHookOptions<TriggerSimulationNowMutation, TriggerSimulationNowMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useMutation<TriggerSimulationNowMutation, TriggerSimulationNowMutationVariables>(TriggerSimulationNowDocument, options);
+      }
+export type TriggerSimulationNowMutationHookResult = ReturnType<typeof useTriggerSimulationNowMutation>;
 export const SearchStocksDocument = gql`
     query SearchStocks($input: SearchStocksInput!) {
   searchStocks(input: $input) {
@@ -2247,6 +2334,14 @@ export const GetAccountSummaryDocument = gql`
     realizedPnL
     profitRate
     positionCount
+    lastSyncedAt
+    cashBalances {
+      market
+      currencyCode
+      currencyName
+      amount
+      withdrawableAmount
+    }
   }
 }
     `;
@@ -2360,6 +2455,53 @@ export function useManualSellMutation(baseOptions?: ApolloReactHooks.MutationHoo
         return ApolloReactHooks.useMutation<ManualSellMutation, ManualSellMutationVariables>(ManualSellDocument, options);
       }
 export type ManualSellMutationHookResult = ReturnType<typeof useManualSellMutation>;
+export const RefreshAccountStateDocument = gql`
+    mutation RefreshAccountState {
+  refreshAccountState {
+    success
+    message
+    accountSummary {
+      cashBalance
+      totalInvested
+      totalAssets
+      totalProfitLoss
+      realizedPnL
+      profitRate
+      positionCount
+      lastSyncedAt
+      cashBalances {
+        market
+        currencyCode
+        currencyName
+        amount
+        withdrawableAmount
+      }
+    }
+  }
+}
+    `;
+
+/**
+ * __useRefreshAccountStateMutation__
+ *
+ * To run a mutation, you first call `useRefreshAccountStateMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useRefreshAccountStateMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [refreshAccountStateMutation, { data, loading, error }] = useRefreshAccountStateMutation({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useRefreshAccountStateMutation(baseOptions?: ApolloReactHooks.MutationHookOptions<RefreshAccountStateMutation, RefreshAccountStateMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useMutation<RefreshAccountStateMutation, RefreshAccountStateMutationVariables>(RefreshAccountStateDocument, options);
+      }
+export type RefreshAccountStateMutationHookResult = ReturnType<typeof useRefreshAccountStateMutation>;
 export const GetAvailableStrategiesDocument = gql`
     query GetAvailableStrategies {
   availableStrategies {
@@ -2745,3 +2887,34 @@ export function useDeleteWatchStockMutation(baseOptions?: ApolloReactHooks.Mutat
         return ApolloReactHooks.useMutation<DeleteWatchStockMutation, DeleteWatchStockMutationVariables>(DeleteWatchStockDocument, options);
       }
 export type DeleteWatchStockMutationHookResult = ReturnType<typeof useDeleteWatchStockMutation>;
+export const TriggerWatchStockNowDocument = gql`
+    mutation TriggerWatchStockNow($id: ID!) {
+  triggerWatchStockNow(id: $id) {
+    success
+    message
+  }
+}
+    `;
+
+/**
+ * __useTriggerWatchStockNowMutation__
+ *
+ * To run a mutation, you first call `useTriggerWatchStockNowMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useTriggerWatchStockNowMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [triggerWatchStockNowMutation, { data, loading, error }] = useTriggerWatchStockNowMutation({
+ *   variables: {
+ *      id: // value for 'id'
+ *   },
+ * });
+ */
+export function useTriggerWatchStockNowMutation(baseOptions?: ApolloReactHooks.MutationHookOptions<TriggerWatchStockNowMutation, TriggerWatchStockNowMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useMutation<TriggerWatchStockNowMutation, TriggerWatchStockNowMutationVariables>(TriggerWatchStockNowDocument, options);
+      }
+export type TriggerWatchStockNowMutationHookResult = ReturnType<typeof useTriggerWatchStockNowMutation>;

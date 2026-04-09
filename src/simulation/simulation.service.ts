@@ -60,7 +60,10 @@ export class SimulationService {
     });
   }
 
-  async executeSimulationTick(sessionId: string): Promise<void> {
+  async executeSimulationTick(
+    sessionId: string,
+    options?: { forceExecution?: boolean },
+  ): Promise<void> {
     const session = await this.prisma.simulationSession.findUnique({
       where: { id: sessionId },
     });
@@ -75,7 +78,10 @@ export class SimulationService {
 
     const exchangeCode = session.exchangeCode
       || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
-    if (!this.shouldExecuteNow(strategy.executionMode, session.market as 'DOMESTIC' | 'OVERSEAS', exchangeCode)) {
+    if (
+      !options?.forceExecution &&
+      !this.shouldExecuteNow(strategy.executionMode, session.market as 'DOMESTIC' | 'OVERSEAS', exchangeCode)
+    ) {
       return;
     }
 
@@ -88,7 +94,7 @@ export class SimulationService {
       0,
     );
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getTodayDate();
 
     // 공통 데이터: 세션 단위로 1회만 조회 (실거래 스케줄러와 동일)
     const primaryExchangeCode = exchangeCode;
@@ -153,10 +159,7 @@ export class SimulationService {
           sessionId,
           stockCode: session.stockCode,
           tradeStatus: SimulationTradeStatus.EXECUTED,
-          createdAt: {
-            gte: new Date(today + 'T00:00:00Z'),
-            lt: new Date(today + 'T23:59:59Z'),
-          },
+          createdAt: this.getDayRange(today),
         },
       });
 
@@ -264,6 +267,7 @@ export class SimulationService {
         const params = (session.strategyParams as Record<string, any>) || {};
         const hasBuySignal = signals.some((s) => s.side === 'BUY');
         const perCycleQuota = Number(session.quota) / session.maxCycles;
+        const shouldCarryQuota = skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
 
         if (hasBuySignal) {
           if (params.accumulatedQuota) {
@@ -273,7 +277,9 @@ export class SimulationService {
             });
           }
         } else if (
-          perCycleQuota > 0
+          shouldCarryQuota
+          && !hasBuySignal
+          && perCycleQuota > 0
           && params.lastAccumulatedDate !== today
           && !(session.strategyName === 'infinite-buy' && (hasSecondTargetSignal || this.hasActiveInfiniteBuySecondTarget(params as Record<string, any>)))
         ) {
@@ -284,13 +290,67 @@ export class SimulationService {
           });
           this.logger.log(
             `[${session.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} ` +
-            `(reason: ${skipReasons.join('; ') || 'no BUY signal'})`,
+            `(reason: ${skipReasons.join('; ') || 'insufficient quantity'})`,
           );
         }
       }
     } catch (e) {
       this.logger.error(`Simulation tick error for ${session.stockCode}: ${e.message}`);
     }
+  }
+
+  async triggerSessionNow(sessionId: string): Promise<{ success: boolean; message: string }> {
+    const session = await this.prisma.simulationSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      return { success: false, message: '시뮬레이션 세션을 찾을 수 없습니다.' };
+    }
+
+    if (session.status !== SimulationStatus.RUNNING) {
+      return { success: false, message: '실행 중인 시뮬레이션만 수동 실행할 수 있습니다.' };
+    }
+
+    await this.checkPendingOrders(sessionId);
+    if (this.getPendingOrderCount(sessionId) > 0) {
+      return { success: false, message: '열린 pending 주문이 있어 중복 실행을 막았습니다.' };
+    }
+
+    const todayRange = this.getDayRange(this.getTodayDate());
+    const todayTrade = await this.prisma.simulationTrade.findFirst({
+      where: {
+        sessionId,
+        stockCode: session.stockCode,
+        tradeStatus: SimulationTradeStatus.EXECUTED,
+        createdAt: todayRange,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (todayTrade) {
+      return { success: false, message: '오늘 이미 체결된 거래가 있어 중복 실행을 막았습니다.' };
+    }
+
+    await this.executeSimulationTick(sessionId, { forceExecution: true });
+
+    const latestTrade = await this.prisma.simulationTrade.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (latestTrade && latestTrade.createdAt >= todayRange.gte) {
+      return {
+        success: true,
+        message: `${latestTrade.side} ${latestTrade.quantity}주 ${latestTrade.reason || '주문 실행'}`
+      };
+    }
+
+    if (this.getPendingOrderCount(sessionId) > 0) {
+      return { success: true, message: '수동 실행으로 pending 주문을 생성했습니다.' };
+    }
+
+    return { success: true, message: '수동 실행을 완료했지만 새 주문은 생성되지 않았습니다.' };
   }
 
   calculateSessionCycle(
@@ -321,10 +381,6 @@ export class SimulationService {
   ): string {
     if (ctx.alreadyExecutedToday) return 'already executed today';
 
-    if (strategyName === 'infinite-buy' && !ctx.position && ctx.marketCondition?.referenceIndexAboveMA200 === false) {
-      return `${ctx.marketCondition.referenceIndexName} below MA200`;
-    }
-
     return 'strategy conditions not met';
   }
 
@@ -333,7 +389,14 @@ export class SimulationService {
   }
 
   private getTodayDate(): string {
-    return new Date().toISOString().slice(0, 10);
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  private getDayRange(date: string): { gte: Date; lt: Date } {
+    return {
+      gte: new Date(`${date}T00:00:00+09:00`),
+      lt: new Date(`${date}T23:59:59.999+09:00`),
+    };
   }
 
   private shouldExecuteNow(
@@ -613,10 +676,14 @@ export class SimulationService {
     const cycleProgress = perCycleQuota > 0 ? totalInvested / perCycleQuota : 0;
     let adjustedQuota = cycleProgress >= watchStock.maxCycles ? 0 : perCycleQuota + accumulatedQuota;
 
-    if (marketCondition.interestRateRising) adjustedQuota *= 0.5;
-    if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) adjustedQuota *= 1.5;
+    if (marketCondition.referenceIndexAboveMA200 === false) adjustedQuota *= 0.75;
+    if (marketCondition.interestRateRising) adjustedQuota *= 0.8;
+    if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) adjustedQuota *= 1.25;
+    if (this.hasNegativeConsensus(stockIndicators.consensusRating, stockIndicators.targetPriceUpside)) adjustedQuota *= 0.7;
+    if ((stockIndicators.recentMaterialDisclosureCount30d ?? 0) >= 2 || (stockIndicators.recentSecForm8KCount30d ?? 0) >= 3) adjustedQuota *= 0.6;
     if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 10) adjustedQuota *= 0.7;
     if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) adjustedQuota *= 1.15;
+    if ((stockIndicators.insiderOwnershipChangeRate ?? 0) > 0.05) adjustedQuota *= 1.1;
     if ((stockIndicators.volatility30d ?? 0) >= 45) adjustedQuota *= 0.7;
     if (this.hasStrongSellFlow(stockIndicators.foreignNetBuy, stockIndicators.institutionNetBuy, stockIndicators.programTradeDirection)) {
       adjustedQuota *= 0.7;
@@ -982,7 +1049,7 @@ export class SimulationService {
     if (!session) return;
 
     const positions = await this.prisma.simulationPosition.findMany({ where: { sessionId } });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getTodayDate();
 
     const portfolioValue = positions.reduce(
       (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
@@ -1013,10 +1080,7 @@ export class SimulationService {
       where: {
         sessionId,
         tradeStatus: SimulationTradeStatus.EXECUTED,
-        createdAt: {
-          gte: new Date(today + 'T00:00:00Z'),
-          lt: new Date(today + 'T23:59:59Z'),
-        },
+        createdAt: this.getDayRange(today),
       },
     });
 
@@ -1166,6 +1230,13 @@ export class SimulationService {
   async resetSession(sessionId: string) {
     const session = await this.prisma.simulationSession.findUnique({ where: { id: sessionId } });
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const strategyParams = ((session.strategyParams as Record<string, any> | undefined) ?? {});
+    const {
+      accumulatedQuota: _accumulatedQuota,
+      lastAccumulatedDate: _lastAccumulatedDate,
+      secondaryExitPlan: _secondaryExitPlan,
+      ...resettableStrategyParams
+    } = strategyParams;
 
     this.pendingOrders.delete(sessionId);
     await this.prisma.simulationTrade.deleteMany({ where: { sessionId } });
@@ -1179,6 +1250,7 @@ export class SimulationService {
         cycle: 0,
         status: SimulationStatus.RUNNING,
         stoppedAt: null,
+        strategyParams: Object.keys(resettableStrategyParams).length > 0 ? resettableStrategyParams : Prisma.JsonNull,
       },
     });
   }

@@ -13,7 +13,7 @@ import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
 import { HolidayItem, StockPriceResult, UnfilledOrder } from '../kis/types/kis-api.types';
 import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy, StockIndicators, PositionQuantitySnapshot } from './types';
-import { Market, OrderStatus } from '@prisma/client';
+import { Market, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from '../screening/utils/consensus.util';
@@ -191,6 +191,7 @@ export class TradingScheduler implements OnModuleInit {
 
     try {
       if (await this.isHoliday('DOMESTIC')) return;
+      if (!await this.hasTradingState('DOMESTIC')) return;
       await this.syncMarketOrdersOnly('DOMESTIC');
     } catch (e) {
       this.logger.error(`Domestic order sync error: ${e.message}`);
@@ -205,6 +206,7 @@ export class TradingScheduler implements OnModuleInit {
 
     try {
       if (await this.isHoliday('OVERSEAS')) return;
+      if (!await this.hasTradingState('OVERSEAS')) return;
       await this.syncMarketOrdersOnly('OVERSEAS');
     } catch (e) {
       this.logger.error(`Overseas order sync error: ${e.message}`);
@@ -558,6 +560,30 @@ export class TradingScheduler implements OnModuleInit {
     );
   }
 
+  private async hasTradingState(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
+    const [activeWatchStocks, positions, openOrders] = await Promise.all([
+      this.prisma.watchStock.count({
+        where: {
+          market: market as Market,
+          isActive: true,
+          NOT: { strategyName: null },
+        },
+      }),
+      this.prisma.position.count({
+        where: { market: market as Market },
+      }),
+      this.prisma.tradeRecord.count({
+        where: {
+          market: market as Market,
+          status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
+          orderNo: { not: null },
+        },
+      }),
+    ]);
+
+    return activeWatchStocks > 0 || positions > 0 || openOrders > 0;
+  }
+
   // ========== 타이밍 판단 ==========
 
   private shouldExecuteNow(strategy: PerStockTradingStrategy, market: 'DOMESTIC' | 'OVERSEAS', exchangeCode: string): boolean {
@@ -733,6 +759,119 @@ export class TradingScheduler implements OnModuleInit {
     return this.isDomesticRunning || this.isOverseasRunning;
   }
 
+  async triggerWatchStockNow(watchStockId: string): Promise<{ success: boolean; message: string }> {
+    const watchStock = await this.prisma.watchStock.findUnique({
+      where: { id: watchStockId },
+    });
+
+    if (!watchStock) {
+      return { success: false, message: '관심종목을 찾을 수 없습니다.' };
+    }
+
+    if (!watchStock.isActive) {
+      return { success: false, message: '비활성 관심종목은 수동 실행할 수 없습니다.' };
+    }
+
+    if (!watchStock.strategyName) {
+      return { success: false, message: '전략이 설정되지 않은 관심종목입니다.' };
+    }
+
+    const strategy = this.strategyRegistry.getStrategy(watchStock.strategyName);
+    if (!strategy) {
+      return { success: false, message: `알 수 없는 전략입니다: ${watchStock.strategyName}` };
+    }
+
+    if (!this.isMarketOpen(watchStock.exchangeCode)) {
+      return { success: false, message: '현재 시장이 열려 있지 않아 수동 실행할 수 없습니다.' };
+    }
+
+    const market = watchStock.market as 'DOMESTIC' | 'OVERSEAS';
+    if (await this.isHoliday(market)) {
+      return { success: false, message: '현재 휴장일이라 수동 실행할 수 없습니다.' };
+    }
+
+    const openOrder = await this.prisma.tradeRecord.findFirst({
+      where: {
+        market: watchStock.market,
+        exchangeCode: watchStock.exchangeCode,
+        stockCode: watchStock.stockCode,
+        strategyName: watchStock.strategyName,
+        status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (openOrder) {
+      await this.prisma.watchStockExecutionLog.create({
+        data: {
+          watchStockId: watchStock.id,
+          tradeRecordId: openOrder.id,
+          market: watchStock.market,
+          exchangeCode: watchStock.exchangeCode,
+          stockCode: watchStock.stockCode,
+          stockName: watchStock.stockName,
+          strategyName: watchStock.strategyName,
+          eventType: WatchStockExecutionEventType.SKIPPED,
+          message: '열린 주문이 있어 수동 실행을 건너뜀',
+          details: { orderNo: openOrder.orderNo, status: openOrder.status },
+        },
+      });
+      return { success: false, message: '이미 열린 주문이 있어 중복 주문을 막았습니다.' };
+    }
+
+    const todayRange = this.getKstDayRange();
+    const existingTrade = await this.prisma.tradeRecord.findFirst({
+      where: {
+        market: watchStock.market,
+        exchangeCode: watchStock.exchangeCode,
+        stockCode: watchStock.stockCode,
+        strategyName: watchStock.strategyName,
+        status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL] },
+        createdAt: todayRange,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingTrade) {
+      await this.prisma.watchStockExecutionLog.create({
+        data: {
+          watchStockId: watchStock.id,
+          tradeRecordId: existingTrade.id,
+          market: watchStock.market,
+          exchangeCode: watchStock.exchangeCode,
+          stockCode: watchStock.stockCode,
+          stockName: watchStock.stockName,
+          strategyName: watchStock.strategyName,
+          eventType: WatchStockExecutionEventType.SKIPPED,
+          message: '오늘 이미 체결된 주문이 있어 수동 실행을 건너뜀',
+          details: { tradeRecordId: existingTrade.id },
+        },
+      });
+      return { success: false, message: '오늘 이미 체결된 주문이 있어 중복 주문을 막았습니다.' };
+    }
+
+    const context = await this.buildManualExecutionContext(
+      watchStock,
+      strategy.name,
+    );
+
+    if (!context) {
+      return { success: false, message: '수동 실행용 종목 컨텍스트를 만들지 못했습니다.' };
+    }
+
+    await this.tradingService.executePerStockStrategy(strategy, [context]);
+
+    const latestLog = await this.prisma.watchStockExecutionLog.findFirst({
+      where: { watchStockId: watchStock.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      success: true,
+      message: latestLog?.message || '수동 전략 실행을 완료했습니다.',
+    };
+  }
+
   isMarketOpen(exchangeCode: string): boolean {
     const hours = MARKET_HOURS[exchangeCode];
     if (!hours) return false;
@@ -765,6 +904,189 @@ export class TradingScheduler implements OnModuleInit {
     }
 
     return currentMin >= openMin && currentMin < closeMin;
+  }
+
+  private getKstDate(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  private getKstDayRange(): { gte: Date; lte: Date } {
+    const today = this.getKstDate();
+    return {
+      gte: new Date(`${today}T00:00:00+09:00`),
+      lte: new Date(`${today}T23:59:59.999+09:00`),
+    };
+  }
+
+  private async buildManualExecutionContext(
+    ws: {
+      id: string;
+      market: Market;
+      exchangeCode: string;
+      stockCode: string;
+      stockName: string;
+      strategyName: string | null;
+      quota: Prisma.Decimal | null;
+      cycle: number;
+      maxCycles: number;
+      stopLossRate: Prisma.Decimal;
+      maxPortfolioRate: Prisma.Decimal;
+      strategyParams: Prisma.JsonValue | null;
+    },
+    strategyName: string,
+  ): Promise<StockStrategyContext | null> {
+    const market = ws.market as 'DOMESTIC' | 'OVERSEAS';
+
+    const marketCondition = await this.marketAnalysis.getMarketCondition(ws.exchangeCode);
+    const regime = await this.marketRegimeService.getRegime(market, ws.exchangeCode);
+    const riskState = await this.riskManagement.evaluateRisk(market);
+
+    const balance = market === 'DOMESTIC'
+      ? await this.kisDomestic.getBalance()
+      : await this.kisOverseas.getBalance();
+    await this.tradingService.syncPositions(market, balance);
+
+    const positions = await this.prisma.position.findMany({
+      where: { market: ws.market },
+    });
+
+    const totalPortfolioValue = positions.reduce(
+      (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
+      0,
+    );
+
+    const price = market === 'DOMESTIC'
+      ? await this.kisDomestic.getPrice(ws.stockCode)
+      : await this.kisOverseas.getPrice(ws.exchangeCode, ws.stockCode);
+
+    const pos = positions.find((p) => p.stockCode === ws.stockCode && p.exchangeCode === ws.exchangeCode);
+
+    const stockIndicators = await this.marketAnalysis.getStockIndicators(
+      market,
+      ws.exchangeCode,
+      ws.stockCode,
+      price.currentPrice,
+    );
+
+    stockIndicators.foreignHoldRate = price.foreignHoldRate;
+    stockIndicators.foreignNetBuyQty = price.foreignNetBuyQty;
+    stockIndicators.w52High = price.w52High;
+    stockIndicators.w52Low = price.w52Low;
+    stockIndicators.investCautionYn = price.investCautionYn;
+    stockIndicators.marketWarnCode = price.marketWarnCode;
+    stockIndicators.shortOverheatYn = price.shortOverheatYn;
+    stockIndicators.d250High = price.d250High;
+    stockIndicators.d250Low = price.d250Low;
+    stockIndicators.d250HighRate = price.d250HighRate;
+    stockIndicators.d250LowRate = price.d250LowRate;
+    stockIndicators.yearHigh = price.yearHigh;
+    stockIndicators.yearLow = price.yearLow;
+    stockIndicators.yearHighRate = price.yearHighRate;
+    stockIndicators.yearLowRate = price.yearLowRate;
+    stockIndicators.marketCap = price.marketCap;
+    stockIndicators.loanBalanceRate = price.loanBalanceRate;
+    stockIndicators.shortSellable = price.shortSellable;
+
+    let buyableAmount = 0;
+    if (market === 'DOMESTIC') {
+      const buyable = await this.kisDomestic.getBuyableAmount();
+      buyableAmount = buyable.cashAvailable;
+    } else {
+      const buyable = await this.kisOverseas.getBuyableAmount(
+        ws.exchangeCode,
+        ws.stockCode,
+        price.currentPrice,
+      );
+      buyableAmount = buyable.foreignCurrencyAvailable;
+    }
+
+    let fundamentals: StockFundamentals | undefined;
+    if (strategyName === 'value-factor') {
+      fundamentals = await this.fetchFundamentals(market, ws.exchangeCode, ws.stockCode, price);
+    }
+
+    if (market === 'DOMESTIC' && this.needsOpenDartSignals(strategyName)) {
+      const openDartSignals = await this.marketDataCache.getOpenDartDomesticSignals(ws.stockCode);
+      this.applyOpenDartSignals(stockIndicators, openDartSignals);
+    }
+
+    if (market === 'OVERSEAS' && this.needsSecSignals(strategyName)) {
+      const secFundamentals = await this.marketDataCache.getSecFundamentals(
+        ws.stockCode,
+        price.currentPrice,
+        ws.exchangeCode,
+      );
+      this.applySecSignals(stockIndicators, secFundamentals);
+      if (strategyName === 'value-factor') {
+        fundamentals = this.mergeSecFundamentals(fundamentals, secFundamentals);
+      }
+    }
+
+    if (market === 'DOMESTIC' && this.needsInvestorFlow(strategyName)) {
+      const investorTradeDaily = await this.marketDataCache.getKisDomesticInvestorTradeDaily(ws.stockCode);
+      this.applyInvestorTradeSignals(stockIndicators, investorTradeDaily);
+    }
+
+    if (market === 'DOMESTIC' && (this.needsDividendSignals(strategyName) || this.needsConsensusSignals(strategyName))) {
+      const [dividendSchedule, investOpinion, estimatePerform] = await Promise.all([
+        this.needsDividendSignals(strategyName)
+          ? this.marketDataCache.getKisDomesticDividendSchedule(ws.stockCode)
+          : Promise.resolve(undefined),
+        this.needsConsensusSignals(strategyName)
+          ? this.marketDataCache.getKisDomesticInvestOpinion(ws.stockCode)
+          : Promise.resolve(undefined),
+        this.needsConsensusSignals(strategyName)
+          ? this.marketDataCache.getKisDomesticEstimatePerform(ws.stockCode)
+          : Promise.resolve(undefined),
+      ]);
+
+      if (this.needsDividendSignals(strategyName)) {
+        this.applyDividendSignals(
+          stockIndicators,
+          dividendSchedule,
+          price.currentPrice,
+          fundamentals?.dividendPayoutRate,
+          fundamentals?.eps,
+        );
+      }
+
+      if (this.needsConsensusSignals(strategyName)) {
+        this.applyConsensusSignals(stockIndicators, investOpinion, estimatePerform, price.currentPrice);
+      }
+    }
+
+    return {
+      watchStock: {
+        id: ws.id,
+        market,
+        exchangeCode: ws.exchangeCode,
+        stockCode: ws.stockCode,
+        stockName: ws.stockName,
+        strategyName: ws.strategyName || undefined,
+        quota: ws.quota ? Number(ws.quota) : undefined,
+        cycle: ws.cycle,
+        maxCycles: ws.maxCycles,
+        stopLossRate: Number(ws.stopLossRate),
+        maxPortfolioRate: Number(ws.maxPortfolioRate),
+        strategyParams: ws.strategyParams as Record<string, any> | undefined,
+      },
+      price,
+      position: pos ? {
+        stockCode: pos.stockCode,
+        quantity: pos.quantity,
+        avgPrice: Number(pos.avgPrice),
+        currentPrice: Number(pos.currentPrice),
+        totalInvested: Number(pos.totalInvested),
+      } : undefined,
+      alreadyExecutedToday: false,
+      marketCondition,
+      stockIndicators,
+      fundamentals,
+      buyableAmount,
+      totalPortfolioValue,
+      marketRegime: regime,
+      riskState,
+    };
   }
 
   // ========== 재무 데이터 조회 ==========

@@ -120,6 +120,28 @@ export interface OverseasBalanceItem {
   ovrs_excg_cd: string;        // 거래소코드
 }
 
+/** 해외 일반 잔고 항목 */
+export interface OverseasStandardBalanceItem {
+  pdno: string;               // 종목코드
+  prdt_name: string;          // 종목명
+  ccld_qty_smtl1: string;     // 체결기준 보유수량
+  evlu_pfls_amt2: string;     // 평가손익금액(KRW)
+  evlu_pfls_rt1: string;      // 평가손익률
+  ovrs_now_pric1: string;     // 현재가(KRW 환산)
+  avg_unpr3: string;          // 평균단가(KRW 환산)
+  bass_exrt: string;          // 기준환율
+  unit_amt: string;           // 환율 단위 (예: JPY 100)
+  ovrs_excg_cd: string;       // 거래소코드
+}
+
+/** 해외 체결기준현재잔고 응답상세2 항목 (통화별 예수금) */
+export interface OverseasPresentBalanceCurrencyItem {
+  crcy_cd: string;
+  crcy_cd_name: string;
+  frcr_dncl_amt_2: string;
+  frcr_drwg_psbl_amt_1: string;
+}
+
 /** 통합 시세 결과 */
 export interface StockPriceResult {
   stockCode: string;

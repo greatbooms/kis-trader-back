@@ -89,6 +89,14 @@ query GetAccountSummary {
     realizedPnL
     profitRate
     positionCount
+    lastSyncedAt
+    cashBalances {
+      market
+      currencyCode
+      currencyName
+      amount
+      withdrawableAmount
+    }
   }
 }
 
@@ -106,5 +114,29 @@ mutation ManualSell($input: ManualSellInput!) {
     success
     message
     orderNo
+  }
+}
+
+mutation RefreshAccountState {
+  refreshAccountState {
+    success
+    message
+    accountSummary {
+      cashBalance
+      totalInvested
+      totalAssets
+      totalProfitLoss
+      realizedPnL
+      profitRate
+      positionCount
+      lastSyncedAt
+      cashBalances {
+        market
+        currencyCode
+        currencyName
+        amount
+        withdrawableAmount
+      }
+    }
   }
 }

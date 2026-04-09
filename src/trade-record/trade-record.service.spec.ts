@@ -11,13 +11,36 @@ describe('TradeRecordService', () => {
     tradeRecord: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
     position: {
       findMany: jest.fn(),
+      upsert: jest.fn(),
+      deleteMany: jest.fn(),
     },
     riskSnapshot: {
       findMany: jest.fn(),
     },
+    appSetting: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+    },
+  };
+
+  const mockKisDomestic = {
+    getBalance: jest.fn(),
+    getBuyableAmount: jest.fn(),
+    getPrice: jest.fn(),
+    orderSell: jest.fn(),
+  };
+
+  const mockKisOverseas = {
+    getBalance: jest.fn(),
+    getCashBalances: jest.fn(),
+    getAccountSnapshot: jest.fn(),
+    getPrice: jest.fn(),
+    orderSell: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -25,8 +48,8 @@ describe('TradeRecordService', () => {
       providers: [
         TradeRecordService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: KisDomesticService, useValue: {} },
-        { provide: KisOverseasService, useValue: {} },
+        { provide: KisDomesticService, useValue: mockKisDomestic },
+        { provide: KisOverseasService, useValue: mockKisOverseas },
       ],
     }).compile();
 
@@ -162,6 +185,71 @@ describe('TradeRecordService', () => {
       const result = await service.getDashboardSummary();
 
       expect(result.todayTradeCount).toBe(2);
+    });
+  });
+
+  describe('getAccountSummary', () => {
+    it('should include cached cash balances and last synced time', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        { totalInvested: '1000000', profitLoss: '50000' },
+      ]);
+      mockPrisma.riskSnapshot.findMany.mockResolvedValue([
+        { cashBalance: '700000' },
+      ]);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+      mockPrisma.appSetting.findUnique.mockResolvedValue({
+        value: {
+          cashBalances: [
+            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 700000, withdrawableAmount: 700000 },
+            { market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1200.5 },
+          ],
+          lastSyncedAt: '2026-04-09T14:30:00.000Z',
+        },
+      });
+
+      const result = await service.getAccountSummary();
+
+      expect(result.cashBalances).toHaveLength(2);
+      expect(result.lastSyncedAt).toBe('2026-04-09T14:30:00.000Z');
+      expect(result.totalAssets).toBe(1750000);
+    });
+  });
+
+  describe('refreshAccountState', () => {
+    it('should refresh balances and persist account cash cache', async () => {
+      mockKisDomestic.getBalance.mockResolvedValue([]);
+      mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 500000 });
+      mockKisOverseas.getAccountSnapshot.mockResolvedValue({
+        balance: [],
+        cashBalances: [
+          { currencyCode: 'USD', currencyName: '미국달러', amount: 1200.5, withdrawableAmount: 1000.25 },
+        ],
+      });
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+      mockPrisma.riskSnapshot.findMany.mockResolvedValue([]);
+      mockPrisma.appSetting.findUnique.mockResolvedValue({
+        value: {
+          cashBalances: [
+            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 500000, withdrawableAmount: 500000 },
+            { market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1000.25 },
+          ],
+          lastSyncedAt: '2026-04-09T15:00:00.000Z',
+        },
+      });
+
+      const result = await service.refreshAccountState();
+
+      expect(result.success).toBe(true);
+      expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { key: 'account_status_cache' },
+        }),
+      );
+      expect(result.accountSummary.cashBalances).toEqual([
+        expect.objectContaining({ currencyCode: 'KRW', amount: 500000 }),
+        expect.objectContaining({ currencyCode: 'USD', amount: 1200.5 }),
+      ]);
     });
   });
 

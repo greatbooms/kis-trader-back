@@ -11,6 +11,7 @@ import {
   useGetWatchStockQuery,
   useGetWatchStockExecutionLogsQuery,
   useGetTradesQuery,
+  useTriggerWatchStockNowMutation,
   useUpdateWatchStockMutation,
   useGetAvailableStrategiesQuery,
 } from '@/graphql/generated'
@@ -60,6 +61,7 @@ export function WatchStockDetailPage() {
   })
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
   const [updateWatchStock, { loading: saving }] = useUpdateWatchStockMutation()
+  const [triggerWatchStockNow, { loading: triggering }] = useTriggerWatchStockNowMutation()
 
   const stock = data?.watchStock
   const strategies = strategiesData?.availableStrategies ?? []
@@ -75,7 +77,7 @@ export function WatchStockDetailPage() {
   const [maxCycles, setMaxCycles] = useState('')
   const [error, setError] = useState('')
 
-  const { data: logsData, loading: logsLoading } = useGetWatchStockExecutionLogsQuery({
+  const { data: logsData, loading: logsLoading, refetch: logsRefetch } = useGetWatchStockExecutionLogsQuery({
     variables: { watchStockId: id ?? '', limit: 50 },
     skip: !id,
   })
@@ -167,6 +169,23 @@ export function WatchStockDetailPage() {
     }
   }
 
+  const handleManualTrigger = async () => {
+    if (!stock) return
+
+    try {
+      const result = await triggerWatchStockNow({
+        variables: { id: stock.id },
+      })
+      alert(result.data?.triggerWatchStockNow.message || '전략 수동 실행을 완료했습니다.')
+      await Promise.all([
+        refetch(),
+        id ? logsRefetch() : Promise.resolve(),
+      ])
+    } catch (e: unknown) {
+      alert(getMutationErrorMessage(e, '전략 수동 실행 중 오류가 발생했습니다'))
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -192,6 +211,11 @@ export function WatchStockDetailPage() {
             {stock.isActive ? '활성' : '비활성'}
           </Badge>
           {stock.strategyName && <Badge variant="info">{stock.strategyName}</Badge>}
+          {stock.isActive && stock.strategyName && (
+            <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
+              {triggering ? '실행중...' : '전략 수동 실행'}
+            </Button>
+          )}
         </div>
       </div>
 

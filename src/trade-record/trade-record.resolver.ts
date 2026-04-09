@@ -15,6 +15,7 @@ import {
   PositionsFilterInput,
   ManualSellInput,
   ManualSellResult,
+  RefreshAccountStateResult,
 } from './dto';
 
 @Resolver()
@@ -59,6 +60,11 @@ export class TradeRecordResolver {
   @Query(() => DashboardSummaryType, { name: 'dashboardSummary' })
   dashboardSummary() {
     return this.tradeRecordService.getDashboardSummary();
+  }
+
+  @Mutation(() => RefreshAccountStateResult, { name: 'refreshAccountState' })
+  refreshAccountState() {
+    return this.tradeRecordService.refreshAccountState();
   }
 
   @Mutation(() => ManualSellResult, { name: 'manualSell' })

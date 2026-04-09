@@ -14,6 +14,7 @@ import {
   UpdateSimulationStatusInput,
   UpdateSimulationSettingsInput,
 } from './dto';
+import { ManualTriggerResult } from '../watch-stock/dto';
 
 @Resolver()
 @UseGuards(GqlAuthGuard)
@@ -152,6 +153,13 @@ export class SimulationResolver {
     @Args('id') id: string,
   ): Promise<boolean> {
     return this.simulationService.deleteSession(id);
+  }
+
+  @Mutation(() => ManualTriggerResult)
+  async triggerSimulationNow(
+    @Args('id') id: string,
+  ): Promise<ManualTriggerResult> {
+    return this.simulationService.triggerSessionNow(id);
   }
 
   private mapSession(session: any): SimulationSessionType {

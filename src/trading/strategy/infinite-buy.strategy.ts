@@ -61,7 +61,7 @@ function getSecondaryTargetBonusRate(T: number): number {
 }
 
 function getTodayDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function getSecondaryExitPlan(strategyParams?: Record<string, any>): InfiniteBuySecondaryExitPlan | undefined {
@@ -109,9 +109,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '',
     '【매수 조건】',
     '- 하루 1회, 장중 실행 (국내 11시, 해외 장 시작 2시간 후)',
-    '- 지수(S&P500/KOSPI)가 200일 이동평균선 위일 때만 신규 진입',
-    '- RSI < 30 과매도 구간에서는 매수금액 1.5배 증가',
-    '- 금리 급등 시 매수금액 절반으로 축소',
+    '- 하락장에서도 분할매수를 이어가되, 시장/종목 리스크에 따라 매수금액만 조절',
+    '- RSI < 30 과매도 구간에서는 매수금액 1.25배 증가',
+    '- 금리 급등 시 매수금액 20% 축소',
     '',
     '【매수 방식】',
     '- T < 20: Buy1(현재가 지정가) + Buy2(현재가 아래 지정가) 두 건 분할',
@@ -155,10 +155,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '【안전장치】',
     '- 투자유의/시장경고 종목은 신규 진입 차단',
     '- 융자잔고 10% 초과 시 매수금액 30% 축소 (레버리지 청산 리스크 방어)',
-    '- 지수 MA200 하회 시 매수 중단, 매도만 허용',
-    '- 금리 급등 시 매수금액 50% 축소',
-    '- 부정적 컨센서스면 신규 진입 차단, 배당 안정성 높으면 매수금액 소폭 확대',
-    '- 최근 주요 공시/8-K가 과도하면 신규 진입 차단, 내부자 지분 증가는 매수금액 소폭 확대',
+    '- 지수 MA200 하회 시 매수금액 25% 축소',
+    '- 금리 급등 시 매수금액 20% 축소',
+    '- 부정적 컨센서스면 매수금액 30% 축소, 배당 안정성 높으면 매수금액 소폭 확대',
+    '- 최근 주요 공시/8-K가 과도하면 매수금액 40% 축소, 내부자 지분 증가는 매수금액 소폭 확대',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
@@ -291,16 +291,6 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.marketCondition = marketCondition;
     const indexBelowMA200 = !marketCondition.referenceIndexAboveMA200;
 
-    if (indexBelowMA200 && !hasPosition) {
-      // 지수가 200일선 아래 + 포지션 없음 → 신규 진입 차단
-      this.logger.log(
-        `[${watchStock.stockCode}] ${marketCondition.referenceIndexName} below MA200, no new entry`,
-      );
-      details.skippedReason = 'index_below_ma200_no_position';
-      skipReasons.push(`${marketCondition.referenceIndexName} 200일선 아래 — 신규 매수 중단`);
-      return { signals, skipReasons };
-    }
-
     // --- 개선 C: 종목 선별 필터 ---
     details.stockIndicators = stockIndicators;
 
@@ -317,15 +307,6 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
         return { signals, skipReasons };
       }
-      if (hasNegativeConsensus(stockIndicators)) {
-        this.logger.debug(`[${watchStock.stockCode}] Negative consensus, skip new entry`);
-        skipReasons.push(`부정적 컨센서스: ${stockIndicators.consensusRating ?? '목표가 하락'}`);
-        return { signals, skipReasons };
-      }
-      if (hasEventDrivenRisk(stockIndicators)) {
-        skipReasons.push('최근 공시/SEC 이벤트 과다');
-        return { signals, skipReasons };
-      }
     }
 
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
@@ -338,16 +319,31 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
     let adjustedQuota = maxCyclesReached ? 0 : perCycleQuota + accumulatedQuota;
 
-    // 개선 E: 금리 급등시 절반
+    if (indexBelowMA200) {
+      adjustedQuota *= 0.75;
+      details.quotaAdjust_indexTrend = true;
+    }
+
+    // 개선 E: 금리 급등시 20% 축소
     if (marketCondition.interestRateRising) {
-      adjustedQuota *= 0.5;
+      adjustedQuota *= 0.8;
       details.quotaAdjust_interestRate = true;
     }
 
-    // 개선 C: RSI < 30 과매도시 1.5배
+    // 개선 C: RSI < 30 과매도시 1.25배
     if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) {
-      adjustedQuota *= 1.5;
+      adjustedQuota *= 1.25;
       details.quotaAdjust_rsi = true;
+    }
+
+    if (hasNegativeConsensus(stockIndicators)) {
+      adjustedQuota *= 0.7;
+      details.quotaAdjust_consensus = true;
+    }
+
+    if (hasEventDrivenRisk(stockIndicators)) {
+      adjustedQuota *= 0.6;
+      details.quotaAdjust_eventRisk = true;
     }
 
     // 융자잔고 10% 초과 시 quota 30% 감소 (레버리지 청산 위험)
@@ -381,9 +377,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     details.adjustedQuota = adjustedQuota;
 
-    // 지수 200일선 아래면 매수 중단 (매도만 허용)
     const riskBuyBlocked = Boolean(riskState?.buyBlocked || mddCheck?.buyBlocked);
-    const buyAllowed = !indexBelowMA200 && adjustedQuota > 0 && !riskBuyBlocked;
+    const buyAllowed = adjustedQuota > 0 && !riskBuyBlocked;
+
+    let buySignalCount = 0;
 
     if (!hasPosition && buyAllowed) {
       // --- 첫 매수 (포지션 없음) ---
@@ -402,6 +399,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}${dividendNote}`,
           orderDivision: '00',
         });
+        buySignalCount++;
+      } else {
+        skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)}`);
       }
     } else if (hasPosition) {
       // --- 매수 시그널 ---
@@ -435,6 +435,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             reason: `Buy1: T=${T.toFixed(1)}, ${buy1Qty}주 @ ${buy1Price}`,
             orderDivision: '00',
           });
+          buySignalCount++;
         }
 
         if (buy2Qty > 0 && buy2Price > 0) {
@@ -448,6 +449,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             reason: `Buy2: T=${T.toFixed(1)}, dip=${(dipRate * 100).toFixed(0)}%, ${buy2Qty}주 @ ${buy2Price}`,
             orderDivision: '00', // buy2는 지정가
           });
+          buySignalCount++;
+        }
+
+        if (buySignalCount === 0) {
+          const referencePrice = Math.min(buy1Price, buy2Price);
+          skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)}`);
         }
       } else if (T >= 20 && buyAllowed) {
         // T>=20: Buy2만 (현재가 아래 지정가)
@@ -465,6 +472,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             reason: `Buy2(T≥20): T=${T.toFixed(1)}, dip=${(dipRate * 100).toFixed(0)}%, ${buy2Qty}주 @ ${buy2Price}`,
             orderDivision: '00',
           });
+          buySignalCount++;
+        } else {
+          skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(buy2Price)}`);
         }
       }
 
@@ -502,11 +512,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         }
       }
     } else if (!hasPosition && !buyAllowed) {
-      // 포지션 없고 매수 불가 (maxCycles 도달 또는 지수 MA200 아래)
+      // 포지션 없고 매수 불가
       if (maxCyclesReached) {
         skipReasons.push(`최대 사이클 도달: T=${T.toFixed(1)} ≥ ${watchStock.maxCycles}`);
-      } else if (indexBelowMA200) {
-        skipReasons.push(`${marketCondition.referenceIndexName} 200일선 아래 — 매수 중단`);
+      } else if (riskBuyBlocked) {
+        skipReasons.push(`리스크 매수 차단: ${riskReason}`);
       }
     }
 

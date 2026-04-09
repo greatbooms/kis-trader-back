@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { WatchStockService } from './watch-stock.service';
 import { WatchStockResolver } from './watch-stock.resolver';
 import { PrismaService } from '../prisma.service';
+import { TradingModule } from '../trading/trading.module';
 
 @Module({
+  imports: [TradingModule],
   providers: [WatchStockService, WatchStockResolver, PrismaService],
   exports: [WatchStockService],
 })
