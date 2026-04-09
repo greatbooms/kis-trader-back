@@ -231,6 +231,7 @@ describe('GridMeanReversionStrategy', () => {
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(10); // floor(20 / 2)
       expect(signals[0].reason).toContain('BB중심선');
+      expect(signals[0].metadata?.phase).toBe('take-profit-middle');
     });
 
     it('should sell at least 1 share for BB middle', async () => {
@@ -276,6 +277,29 @@ describe('GridMeanReversionStrategy', () => {
       const bbMiddleSell = signals.find((s) => s.reason?.includes('BB중심선'));
       expect(bbMiddleSell).toBeUndefined();
     });
+
+    it('should not repeat BB middle take profit after first partial exit is recorded', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 73500,
+          totalInvested: 700000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          bollingerMiddle: 73000,
+          bollingerUpper: 80000,
+        },
+      });
+      ctx.price.currentPrice = 73500;
+      ctx.watchStock.strategyParams = { middleTakeProfitDone: true };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(0);
+    });
   });
 
   describe('grid additional buy (position held)', () => {
@@ -302,6 +326,7 @@ describe('GridMeanReversionStrategy', () => {
       const buySignals = signals.filter((s) => s.side === 'BUY');
       expect(buySignals).toHaveLength(1);
       expect(buySignals[0].reason).toContain('그리드매수 1단계');
+      expect(buySignals[0].metadata?.gridLevel).toBe(1);
       // quota=1000000, gridRatio[0]=0.3 → 300000
       // buyQty = floor(300000 / 68000) = 4
       expect(buySignals[0].quantity).toBe(4);
@@ -332,6 +357,32 @@ describe('GridMeanReversionStrategy', () => {
       expect(buySignals).toHaveLength(1);
       // First level that matches (level 1 at -2%) is triggered first due to break
       expect(buySignals[0].reason).toContain('그리드매수');
+    });
+
+    it('should skip already-filled grid levels and move to the next available level', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 67000,
+          totalInvested: 700000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          bollingerMiddle: 73000,
+          bollingerUpper: 80000,
+        },
+      });
+      ctx.price.currentPrice = 67000;
+      ctx.watchStock.strategyParams = { completedGridLevels: [1] };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const buySignals = signals.filter((s) => s.side === 'BUY');
+
+      expect(buySignals).toHaveLength(1);
+      expect(buySignals[0].reason).toContain('그리드매수 2단계');
+      expect(buySignals[0].metadata?.gridLevel).toBe(2);
     });
 
     it('should not grid buy when buyBlocked', async () => {
@@ -627,7 +678,7 @@ describe('GridMeanReversionStrategy', () => {
       expect(signals[0].exchangeCode).toBe('NASD');
     });
 
-    it('should not include exchangeCode for domestic signals', async () => {
+    it('should include KRX exchangeCode for domestic signals', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -646,7 +697,7 @@ describe('GridMeanReversionStrategy', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
-      expect(signals[0].exchangeCode).toBeUndefined();
+      expect(signals[0].exchangeCode).toBe('KRX');
     });
   });
 

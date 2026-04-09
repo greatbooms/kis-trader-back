@@ -8,6 +8,7 @@ import {
   StrategyMeta,
   InfiniteBuyStrategyParams,
   InfiniteBuySecondaryExitPlan,
+  evaluateStrategyMdd,
 } from '../types';
 
 function hasNegativeConsensus(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
@@ -173,7 +174,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
   private readonly logger = new Logger(InfiniteBuyStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
-    const { watchStock, price, position, marketCondition, stockIndicators } = ctx;
+    const { watchStock, price, position, marketCondition, stockIndicators, riskState } = ctx;
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
     const details: Record<string, any> = {};
@@ -206,6 +207,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const T = totalInvested > 0 ? totalInvested / perCycleQuota : 0; // T = 완료 사이클 수
     const avgPrice = position?.avgPrice || curPrice;
     const holdQty = position?.quantity || 0;
+    const mddCheck = riskState
+      ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate)
+      : undefined;
 
     details.T = T;
     details.avgPrice = avgPrice;
@@ -215,6 +219,20 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
       : (p: number) => Math.round(p);              // 정수
+
+    if ((riskState?.liquidateAll || mddCheck?.liquidateAll) && hasPosition) {
+      signals.push({
+        market,
+        exchangeCode,
+        stockCode: watchStock.stockCode,
+        side: 'SELL',
+        quantity: holdQty,
+        price: roundPrice(curPrice),
+        reason: `리스크 전량청산: ${(riskState?.reasons || ['MDD']).join(', ')}`,
+        orderDivision: '00',
+      });
+      return { signals, skipReasons };
+    }
 
     // --- 손절: 포지션 보유 중이면 항상 체크 (alreadyExecutedToday, maxCycles 무관) ---
     if (hasPosition && curPrice < avgPrice * (1 - watchStock.stopLossRate)) {
@@ -285,6 +303,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.stockIndicators = stockIndicators;
 
     if (!hasPosition) {
+      if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+        skipReasons.push(`리스크 매수 차단: ${(riskState?.reasons || ['MDD']).join(', ')}`);
+        return { signals, skipReasons };
+      }
       if (stockIndicators.investCautionYn) {
         skipReasons.push('투자유의 종목');
         return { signals, skipReasons };
@@ -358,7 +380,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.adjustedQuota = adjustedQuota;
 
     // 지수 200일선 아래면 매수 중단 (매도만 허용)
-    const buyAllowed = !indexBelowMA200 && adjustedQuota > 0;
+    const riskBuyBlocked = Boolean(riskState?.buyBlocked || mddCheck?.buyBlocked);
+    const buyAllowed = !indexBelowMA200 && adjustedQuota > 0 && !riskBuyBlocked;
 
     if (!hasPosition && buyAllowed) {
       // --- 첫 매수 (포지션 없음) ---

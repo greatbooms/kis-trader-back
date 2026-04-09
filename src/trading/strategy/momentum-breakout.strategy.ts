@@ -7,6 +7,7 @@ import {
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
+  MomentumBreakoutStrategyParams,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -18,6 +19,29 @@ const DEFAULT_PARAMS = {
   timeStopDays: 3,
   volumeThreshold: 1.5,
 };
+
+function getTodayDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function countTradingDaysInclusive(fromDate: string, toDate: string): number {
+  const start = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return 0;
+  }
+
+  let count = 0;
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) {
+      count += 1;
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
 
 function resolveAtrRate(ctx: StockStrategyContext): number | undefined {
   if (ctx.stockIndicators.atrPercent !== undefined) return ctx.stockIndicators.atrPercent / 100;
@@ -92,6 +116,8 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
+    const strategyParams = (watchStock.strategyParams as MomentumBreakoutStrategyParams | undefined) || {};
+    const today = getTodayDate();
 
     const curPrice = price.currentPrice;
     if (curPrice <= 0) {
@@ -182,12 +208,13 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           quantity: holdQty,
           price: roundPrice(curPrice),
           reason: `익절(전량): +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitFull * 100).toFixed(0)}%`,
+          metadata: { phase: 'take-profit-full' },
         });
         return { signals, skipReasons };
       }
 
       // 익절(반): +5% 50% 매도
-      if (profitRate >= params.takeProfitHalf) {
+      if (!strategyParams.halfTakeProfitDone && profitRate >= params.takeProfitHalf) {
         const sellQty = Math.max(1, Math.floor(holdQty / 2));
         signals.push({
           market,
@@ -197,13 +224,27 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
           quantity: sellQty,
           price: roundPrice(curPrice),
           reason: `익절(반): +${(profitRate * 100).toFixed(1)}% >= +${(params.takeProfitHalf * 100).toFixed(0)}%`,
+          metadata: { phase: 'take-profit-half' },
         });
         return { signals, skipReasons };
       }
 
-      // 시간손절: 3거래일 초과 (alreadyExecutedToday 기준으로 간접 판단)
-      // strategyExecution에서 첫 매수일 조회하여 판단은 스케줄러에서 처리
-      // 여기서는 skip (스케줄러에서 ctx에 추가 정보 전달 필요 시 확장 가능)
+      const tradingDaysHeld = strategyParams.entryDate
+        ? countTradingDaysInclusive(strategyParams.entryDate, today)
+        : 0;
+      if (strategyParams.entryDate && tradingDaysHeld > params.timeStopDays) {
+        signals.push({
+          market,
+          exchangeCode,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: holdQty,
+          price: roundPrice(curPrice),
+          reason: `시간손절: ${tradingDaysHeld}거래일 보유 > ${params.timeStopDays}거래일`,
+          metadata: { phase: 'time-stop' },
+        });
+        return { signals, skipReasons };
+      }
     } else {
       // --- 포지션 없음: 진입 조건 ---
 

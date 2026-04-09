@@ -6,6 +6,7 @@ import {
   StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
+  evaluateStrategyMdd,
 } from '../types';
 
 
@@ -55,7 +56,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
   private readonly logger = new Logger(DailyDcaStrategy.name);
 
   async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
-    const { watchStock, price, position } = ctx;
+    const { watchStock, price, position, riskState, stockIndicators } = ctx;
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
 
@@ -83,11 +84,29 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
     const perCycleQuota = quota / watchStock.maxCycles;
     const avgPrice = position?.avgPrice || curPrice;
     const holdQty = position?.quantity || 0;
+    const mddCheck = riskState
+      ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate)
+      : undefined;
 
     // 가격 반올림 함수
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100
       : (p: number) => Math.round(p);
+
+    if ((riskState?.liquidateAll || mddCheck?.liquidateAll) && hasPosition) {
+      const reason = riskState?.reasons?.join(', ') || 'MDD 전량청산';
+      signals.push({
+        market,
+        exchangeCode,
+        stockCode: watchStock.stockCode,
+        side: 'SELL',
+        quantity: holdQty,
+        price: roundPrice(curPrice),
+        reason: `리스크 전량청산: ${reason}`,
+        orderDivision: '00',
+      });
+      return { signals, skipReasons };
+    }
 
     // --- 손절: 포지션 보유 중이면 항상 체크 ---
     if (hasPosition && curPrice < avgPrice * (1 - watchStock.stopLossRate)) {
@@ -133,6 +152,23 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
     }
 
     // --- 매수: quota 소진 전까지 매일 매수 ---
+    if (!hasPosition) {
+      if (stockIndicators.investCautionYn) {
+        skipReasons.push('투자유의 종목');
+        return { signals, skipReasons };
+      }
+      if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') {
+        skipReasons.push(`시장경고 종목 (코드: ${stockIndicators.marketWarnCode})`);
+        return { signals, skipReasons };
+      }
+    }
+
+    if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+      const reason = riskState?.reasons?.join(', ') || 'MDD 매수 차단';
+      skipReasons.push(`리스크 매수 차단: ${reason}`);
+      return { signals, skipReasons };
+    }
+
     const maxCyclesReached = totalInvested >= quota;
     if (maxCyclesReached) {
       this.logger.debug(`[${watchStock.stockCode}] Quota exhausted (${totalInvested.toFixed(0)} >= ${quota}), buy stopped`);

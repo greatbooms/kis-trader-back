@@ -12,6 +12,8 @@ import {
   RiskState,
   MarketRegimeLabel,
   InfiniteBuyStrategyParams,
+  MomentumBreakoutStrategyParams,
+  GridMeanReversionStrategyParams,
 } from '../trading/types';
 import { MarketRegimeService } from '../trading/market-regime.service';
 import { StockPriceResult } from '../kis/types/kis-api.types';
@@ -20,6 +22,7 @@ import { CreateSimulationInput } from './dto';
 import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
+import { MARKET_HOURS } from '../kis/types/kis-config.types';
 
 @Injectable()
 export class SimulationService {
@@ -70,6 +73,12 @@ export class SimulationService {
       return;
     }
 
+    const exchangeCode = session.exchangeCode
+      || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+    if (!this.shouldExecuteNow(strategy.executionMode, session.market as 'DOMESTIC' | 'OVERSEAS', exchangeCode)) {
+      return;
+    }
+
     const positions = await this.prisma.simulationPosition.findMany({
       where: { sessionId },
     });
@@ -82,15 +91,12 @@ export class SimulationService {
     const today = new Date().toISOString().slice(0, 10);
 
     // 공통 데이터: 세션 단위로 1회만 조회 (실거래 스케줄러와 동일)
-    const primaryExchangeCode = session.exchangeCode
-      || (session.market === Market.DOMESTIC ? 'KRX' : 'NASD');
+    const primaryExchangeCode = exchangeCode;
     const market = session.market as 'DOMESTIC' | 'OVERSEAS';
     const marketRegime = await this.marketRegimeService.getRegime(market, primaryExchangeCode);
     const riskState = await this.evaluateSimulationRisk(sessionId, positions, Number(session.currentCash));
 
     try {
-      const exchangeCode = session.exchangeCode;
-
       // Get price
       const price = session.market === Market.DOMESTIC
         ? await this.kisDomestic.getPrice(session.stockCode)
@@ -330,6 +336,47 @@ export class SimulationService {
     return new Date().toISOString().slice(0, 10);
   }
 
+  private shouldExecuteNow(
+    executionMode: { type: 'continuous' } | {
+      type: 'once-daily';
+      hours: {
+        domestic: number;
+        overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number };
+      };
+    },
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode: string,
+  ): boolean {
+    if (executionMode.type === 'continuous') return true;
+
+    const kstHour = this.getKSTHour();
+    if (market === 'DOMESTIC') return kstHour === executionMode.hours.domestic;
+    return kstHour === this.getOverseasExecutionHour(exchangeCode, executionMode.hours.overseas);
+  }
+
+  private getOverseasExecutionHour(
+    exchangeCode: string,
+    overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
+  ): number {
+    const hours = MARKET_HOURS[exchangeCode];
+    if (!hours) return (0 + overseas.offsetHours) % 24;
+
+    if (overseas.basis === 'afterOpen') {
+      return (hours.open.hour + overseas.offsetHours) % 24;
+    }
+
+    const closeHour = hours.overnight
+      ? hours.close.hour + 24
+      : hours.close.hour;
+    return (closeHour - overseas.offsetHours) % 24;
+  }
+
+  private getKSTHour(): number {
+    const now = new Date();
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    return kst.getUTCHours();
+  }
+
   private hasActiveInfiniteBuySecondTarget(strategyParams?: Record<string, any>): boolean {
     const plan = (strategyParams as InfiniteBuyStrategyParams | undefined)?.secondaryExitPlan;
     if (!plan || !plan.firstTargetDate || plan.secondTargetQuantity <= 0) return false;
@@ -343,13 +390,23 @@ export class SimulationService {
     sessionId: string,
     updater: (params: InfiniteBuyStrategyParams) => InfiniteBuyStrategyParams,
   ): Promise<void> {
+    await this.updateSessionStrategyParams(
+      sessionId,
+      (params) => updater(params as InfiniteBuyStrategyParams),
+    );
+  }
+
+  private async updateSessionStrategyParams(
+    sessionId: string,
+    updater: (params: Record<string, any>) => Record<string, any>,
+  ): Promise<void> {
     const session = await this.prisma.simulationSession.findUnique({
       where: { id: sessionId },
       select: { strategyParams: true },
     });
     if (!session) return;
 
-    const currentParams = ((session.strategyParams as Record<string, any>) || {}) as InfiniteBuyStrategyParams;
+    const currentParams = (session.strategyParams as Record<string, any>) || {};
     await this.prisma.simulationSession.update({
       where: { id: sessionId },
       data: { strategyParams: updater(currentParams) },
@@ -396,6 +453,124 @@ export class SimulationService {
         secondTargetQuantity,
       },
     }));
+  }
+
+  private async handleMomentumBreakoutSignalFill(
+    sessionId: string,
+    signal: { side: string; quantity: number; metadata?: Record<string, any> },
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (signal.side === 'BUY') {
+      await this.updateSessionStrategyParams(sessionId, (params) => {
+        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        nextParams.entryDate = this.getTodayDate();
+        delete nextParams.halfTakeProfitDone;
+        return nextParams;
+      });
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-half') {
+      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      if (remainingQty > 0) {
+        await this.updateSessionStrategyParams(sessionId, (params) => ({
+          ...(params as MomentumBreakoutStrategyParams),
+          halfTakeProfitDone: true,
+        }));
+      } else {
+        await this.updateSessionStrategyParams(sessionId, (params) => {
+          const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+          delete nextParams.halfTakeProfitDone;
+          delete nextParams.entryDate;
+          return nextParams;
+        });
+      }
+      return;
+    }
+
+    if (
+      signal.metadata?.phase === 'take-profit-full'
+      || signal.metadata?.phase === 'time-stop'
+      || signal.quantity >= currentPositionQty
+    ) {
+      await this.updateSessionStrategyParams(sessionId, (params) => {
+        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        delete nextParams.halfTakeProfitDone;
+        delete nextParams.entryDate;
+        return nextParams;
+      });
+    }
+  }
+
+  private async handleGridMeanReversionSignalFill(
+    sessionId: string,
+    signal: { side: string; quantity: number; metadata?: Record<string, any> },
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (signal.side === 'BUY') {
+      await this.updateSessionStrategyParams(sessionId, (params) => {
+        const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+        const gridLevel = Number(signal.metadata?.gridLevel);
+
+        nextParams.middleTakeProfitDone = false;
+
+        if (signal.metadata?.phase === 'grid-entry' || currentPositionQty <= 0) {
+          nextParams.completedGridLevels = [];
+          return nextParams;
+        }
+
+        const completedGridLevels = new Set(nextParams.completedGridLevels || []);
+        if (gridLevel > 0) {
+          completedGridLevels.add(gridLevel);
+        }
+        nextParams.completedGridLevels = Array.from(completedGridLevels).sort((a, b) => a - b);
+        return nextParams;
+      });
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-middle') {
+      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      if (remainingQty > 0) {
+        await this.updateSessionStrategyParams(sessionId, (params) => ({
+          ...(params as GridMeanReversionStrategyParams),
+          middleTakeProfitDone: true,
+        }));
+      } else {
+        await this.updateSessionStrategyParams(sessionId, (params) => {
+          const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+          delete nextParams.middleTakeProfitDone;
+          delete nextParams.completedGridLevels;
+          return nextParams;
+        });
+      }
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-full' || signal.quantity >= currentPositionQty) {
+      await this.updateSessionStrategyParams(sessionId, (params) => {
+        const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+        delete nextParams.middleTakeProfitDone;
+        delete nextParams.completedGridLevels;
+        return nextParams;
+      });
+    }
+  }
+
+  private async handleSimulationStrategySignalFill(
+    strategyName: string,
+    sessionId: string,
+    signal: { side: string; quantity: number; metadata?: Record<string, any> },
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (strategyName === 'momentum-breakout') {
+      await this.handleMomentumBreakoutSignalFill(sessionId, signal, currentPositionQty);
+      return;
+    }
+
+    if (strategyName === 'grid-mean-reversion') {
+      await this.handleGridMeanReversionSignalFill(sessionId, signal, currentPositionQty);
+    }
   }
 
   private async syncSessionCycle(sessionId: string, exchangeCode: string, stockCode: string): Promise<void> {
@@ -592,6 +767,13 @@ export class SimulationService {
         await this.clearInfiniteBuySecondaryExitPlan(sessionId);
       }
 
+      await this.handleSimulationStrategySignalFill(
+        session.strategyName,
+        sessionId,
+        signal,
+        existingPos?.quantity || 0,
+      );
+
       await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
 
       this.logger.log(`[SIM] BUY ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
@@ -698,6 +880,13 @@ export class SimulationService {
           await this.clearInfiniteBuySecondaryExitPlan(sessionId);
         }
       }
+
+      await this.handleSimulationStrategySignalFill(
+        session.strategyName,
+        sessionId,
+        signal,
+        existingPos.quantity,
+      );
 
       await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
 

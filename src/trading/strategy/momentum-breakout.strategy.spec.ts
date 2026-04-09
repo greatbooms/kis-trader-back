@@ -278,6 +278,7 @@ describe('MomentumBreakoutStrategy', () => {
       expect(signals[0].side).toBe('SELL');
       expect(signals[0].quantity).toBe(10); // floor(20/2)
       expect(signals[0].reason).toContain('익절(반)');
+      expect(signals[0].metadata?.phase).toBe('take-profit-half');
     });
 
     it('should sell at least 1 share for half take profit', async () => {
@@ -296,6 +297,52 @@ describe('MomentumBreakoutStrategy', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].quantity).toBe(1); // max(1, floor(1/2)) = 1
+    });
+
+    it('should not repeat half take profit once it is marked as done', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 73800,
+          totalInvested: 700000,
+        },
+      });
+      ctx.price.currentPrice = 73800;
+      ctx.price.highPrice = 73800;
+      ctx.watchStock.strategyParams = { halfTakeProfitDone: true };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(0);
+    });
+  });
+
+  describe('time stop (position held)', () => {
+    it('should sell all when holding period exceeds configured trading days', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 71000,
+          totalInvested: 700000,
+        },
+      });
+      ctx.price.currentPrice = 71000;
+      ctx.price.highPrice = 71000;
+      ctx.watchStock.strategyParams = {
+        entryDate: '2026-03-31',
+      };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0].side).toBe('SELL');
+      expect(signals[0].quantity).toBe(10);
+      expect(signals[0].reason).toContain('시간손절');
+      expect(signals[0].metadata?.phase).toBe('time-stop');
     });
   });
 

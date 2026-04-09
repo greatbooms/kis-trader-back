@@ -8,3 +8,5 @@ export { MarketRegimeLabel, RiskLevel, RiskState, evaluateStrategyMdd } from './
 export { StockFundamentals } from './stock-fundamentals.type';
 export { StockStrategyContext, PerStockTradingStrategy, ExecutionMode, StrategyMeta } from './stock-strategy-context.type';
 export { InfiniteBuyStrategyParams, InfiniteBuySecondaryExitPlan } from './infinite-buy-strategy-params.type';
+export { MomentumBreakoutStrategyParams } from './momentum-breakout-strategy-params.type';
+export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-params.type';

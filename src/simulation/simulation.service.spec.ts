@@ -6,20 +6,47 @@ describe('SimulationService', () => {
 
   const mockPrisma = {
     simulationSession: {
+      findUnique: jest.fn(),
       update: jest.fn(),
     },
+    simulationPosition: {
+      findMany: jest.fn(),
+    },
     simulationTrade: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
   };
 
+  const mockStrategyRegistry = {
+    getStrategy: jest.fn(),
+  };
+
+  const mockMarketAnalysis = {
+    getStockIndicators: jest.fn(),
+    getMarketCondition: jest.fn(),
+  };
+
+  const mockMarketRegimeService = {
+    getRegime: jest.fn(),
+  };
+
+  const mockKisDomestic = {
+    getPrice: jest.fn(),
+  };
+
   beforeEach(() => {
+    mockMarketRegimeService.getRegime.mockResolvedValue(undefined);
+    mockMarketAnalysis.getStockIndicators.mockResolvedValue({});
+    mockMarketAnalysis.getMarketCondition.mockResolvedValue({});
+    mockPrisma.simulationTrade.findFirst.mockResolvedValue(null);
+
     service = new SimulationService(
       mockPrisma as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
+      mockStrategyRegistry as any,
+      mockMarketAnalysis as any,
+      mockMarketRegimeService as any,
+      mockKisDomestic as any,
       {} as any,
       {} as any,
     );
@@ -126,6 +153,67 @@ describe('SimulationService', () => {
       });
 
       expect(reason).toBe('already executed today');
+    });
+  });
+
+  describe('execution timing', () => {
+    it('should skip once-daily strategy outside configured domestic hour', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        strategyName: 'daily-dca',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+      });
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 10,
+            overseas: { basis: 'beforeClose', offsetHours: 1 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
+      });
+      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(9);
+
+      await service.executeSimulationTick('session-1');
+
+      expect(mockPrisma.simulationPosition.findMany).not.toHaveBeenCalled();
+      expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
+    });
+
+    it('should execute once-daily strategy during configured domestic hour', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        strategyName: 'daily-dca',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        currentCash: 100000,
+      });
+      mockPrisma.simulationPosition.findMany.mockResolvedValue([]);
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 10,
+            overseas: { basis: 'beforeClose', offsetHours: 1 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
+      });
+      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
+
+      await service.executeSimulationTick('session-1');
+
+      expect(mockPrisma.simulationPosition.findMany).toHaveBeenCalledWith({
+        where: { sessionId: 'session-1' },
+      });
+      expect(mockKisDomestic.getPrice).toHaveBeenCalledWith('005930');
     });
   });
 });

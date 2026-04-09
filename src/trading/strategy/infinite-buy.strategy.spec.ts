@@ -89,6 +89,54 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('market condition filters', () => {
+    it('should liquidate held position when common risk requests full exit', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 65000,
+          totalInvested: 700000,
+        },
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: true,
+          positionCount: 1,
+          investedRate: 0.2,
+          dailyPnlRate: -0.03,
+          drawdown: -0.36,
+          reasons: ['MDD -36%'],
+        },
+      });
+      ctx.price.currentPrice = 65000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0].side).toBe('SELL');
+      expect(signals[0].quantity).toBe(10);
+      expect(signals[0].reason).toContain('리스크 전량청산');
+    });
+
+    it('should block new entry when common risk blocks buys', async () => {
+      const ctx = createContext({
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: false,
+          positionCount: 5,
+          investedRate: 0.8,
+          dailyPnlRate: -0.02,
+          drawdown: -0.26,
+          reasons: ['MDD -26%'],
+        },
+      });
+
+      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(0);
+      expect(skipReasons[0]).toContain('리스크 매수 차단');
+    });
+
     it('should block new entry when index below MA200 and no position', async () => {
       const ctx = createContext({
         marketCondition: {

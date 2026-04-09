@@ -7,6 +7,8 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   InfiniteBuyStrategyParams,
+  MomentumBreakoutStrategyParams,
+  GridMeanReversionStrategyParams,
 } from './types';
 import { BalanceItem } from '../kis/types/kis-api.types';
 import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
@@ -418,8 +420,13 @@ export class TradingService {
       if (result.success) {
         this.logger.log(`Order executed: ${signal.side} ${signal.stockCode} x ${signal.quantity}`);
 
-        if (strategyName === 'infinite-buy' && ctx?.watchStock?.id) {
-          await this.handleInfiniteBuySignalFill(ctx.watchStock.id, signal, ctx.position?.quantity || 0);
+        if (ctx?.watchStock?.id) {
+          await this.handleStrategySignalFill(
+            strategyName,
+            ctx.watchStock.id,
+            signal,
+            ctx.position?.quantity || 0,
+          );
         }
 
         // Send Slack trade alert
@@ -611,6 +618,20 @@ export class TradingService {
     return new Date().toISOString().slice(0, 10);
   }
 
+  private async updateWatchStockStrategyParams(
+    watchStockId: string,
+    updater: (params: Record<string, any>) => Record<string, any>,
+  ): Promise<void> {
+    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+    if (!watchStock) return;
+
+    const currentParams = (watchStock.strategyParams as Record<string, any>) || {};
+    await this.prisma.watchStock.update({
+      where: { id: watchStockId },
+      data: { strategyParams: updater(currentParams) },
+    });
+  }
+
   private hasActiveInfiniteBuySecondTarget(strategyParams?: Record<string, any>): boolean {
     const plan = (strategyParams as InfiniteBuyStrategyParams | undefined)?.secondaryExitPlan;
     if (!plan || !plan.firstTargetDate || plan.secondTargetQuantity <= 0) return false;
@@ -624,14 +645,10 @@ export class TradingService {
     watchStockId: string,
     updater: (params: InfiniteBuyStrategyParams) => InfiniteBuyStrategyParams,
   ): Promise<void> {
-    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
-    if (!watchStock) return;
-
-    const currentParams = ((watchStock.strategyParams as Record<string, any>) || {}) as InfiniteBuyStrategyParams;
-    await this.prisma.watchStock.update({
-      where: { id: watchStockId },
-      data: { strategyParams: updater(currentParams) },
-    });
+    await this.updateWatchStockStrategyParams(
+      watchStockId,
+      (params) => updater(params as InfiniteBuyStrategyParams),
+    );
   }
 
   private async markInfiniteBuySecondTargetAttempted(watchStockId: string): Promise<void> {
@@ -699,6 +716,134 @@ export class TradingService {
       || signal.quantity >= currentPositionQty
     ) {
       await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
+    }
+  }
+
+  private async handleMomentumBreakoutSignalFill(
+    watchStockId: string,
+    signal: TradingSignal,
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (signal.side === 'BUY') {
+      await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        nextParams.entryDate = this.getTodayDate();
+        delete nextParams.halfTakeProfitDone;
+        return nextParams;
+      });
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-half') {
+      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      if (remainingQty > 0) {
+        await this.updateWatchStockStrategyParams(watchStockId, (params) => ({
+          ...(params as MomentumBreakoutStrategyParams),
+          halfTakeProfitDone: true,
+        }));
+      } else {
+        await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+          const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+          delete nextParams.halfTakeProfitDone;
+          delete nextParams.entryDate;
+          return nextParams;
+        });
+      }
+      return;
+    }
+
+    if (
+      signal.metadata?.phase === 'take-profit-full'
+      || signal.metadata?.phase === 'time-stop'
+      || this.isStopLossSignal(signal)
+      || signal.quantity >= currentPositionQty
+    ) {
+      await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        delete nextParams.halfTakeProfitDone;
+        delete nextParams.entryDate;
+        return nextParams;
+      });
+    }
+  }
+
+  private async handleGridMeanReversionSignalFill(
+    watchStockId: string,
+    signal: TradingSignal,
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (signal.side === 'BUY') {
+      await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+        const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+        const gridLevel = Number(signal.metadata?.gridLevel);
+
+        nextParams.middleTakeProfitDone = false;
+
+        if (signal.metadata?.phase === 'grid-entry' || currentPositionQty <= 0) {
+          nextParams.completedGridLevels = [];
+          return nextParams;
+        }
+
+        const completedGridLevels = new Set(nextParams.completedGridLevels || []);
+        if (gridLevel > 0) {
+          completedGridLevels.add(gridLevel);
+        }
+        nextParams.completedGridLevels = Array.from(completedGridLevels).sort((a, b) => a - b);
+        return nextParams;
+      });
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-middle') {
+      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      if (remainingQty > 0) {
+        await this.updateWatchStockStrategyParams(watchStockId, (params) => ({
+          ...(params as GridMeanReversionStrategyParams),
+          middleTakeProfitDone: true,
+        }));
+      } else {
+        await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+          const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+          delete nextParams.middleTakeProfitDone;
+          delete nextParams.completedGridLevels;
+          return nextParams;
+        });
+      }
+      return;
+    }
+
+    if (
+      signal.metadata?.phase === 'take-profit-full'
+      || this.isStopLossSignal(signal)
+      || signal.quantity >= currentPositionQty
+    ) {
+      await this.updateWatchStockStrategyParams(watchStockId, (params) => {
+        const nextParams = { ...(params as GridMeanReversionStrategyParams) };
+        delete nextParams.middleTakeProfitDone;
+        delete nextParams.completedGridLevels;
+        return nextParams;
+      });
+    }
+  }
+
+  private async handleStrategySignalFill(
+    strategyName: string | undefined,
+    watchStockId: string,
+    signal: TradingSignal,
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (strategyName === 'infinite-buy') {
+      await this.handleInfiniteBuySignalFill(watchStockId, signal, currentPositionQty);
+      return;
+    }
+
+    if (strategyName === 'momentum-breakout') {
+      await this.handleMomentumBreakoutSignalFill(watchStockId, signal, currentPositionQty);
+      return;
+    }
+
+    if (strategyName === 'grid-mean-reversion') {
+      await this.handleGridMeanReversionSignalFill(watchStockId, signal, currentPositionQty);
     }
   }
 }

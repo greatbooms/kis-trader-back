@@ -7,6 +7,7 @@ import {
   ExecutionMode,
   StrategyMeta,
   evaluateStrategyMdd,
+  GridMeanReversionStrategyParams,
 } from '../types';
 
 const DEFAULT_PARAMS = {
@@ -68,6 +69,8 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
     const params = { ...DEFAULT_PARAMS, ...watchStock.strategyParams };
+    const strategyParams = (watchStock.strategyParams as GridMeanReversionStrategyParams | undefined) || {};
+    const completedGridLevels = new Set(strategyParams.completedGridLevels || []);
 
     const curPrice = price.currentPrice;
     if (curPrice <= 0) {
@@ -136,12 +139,13 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           quantity: holdQty,
           price: roundPrice(curPrice),
           reason: `BB상단 익절: ${curPrice} >= BB상단 ${bollingerUpper.toFixed(0)}`,
+          metadata: { phase: 'take-profit-full' },
         });
         return { signals, skipReasons };
       }
 
       // 익절(1차): BB 중심선 도달 → 50% 매도
-      if (bollingerMiddle && curPrice >= bollingerMiddle && profitRate > 0) {
+      if (!strategyParams.middleTakeProfitDone && bollingerMiddle && curPrice >= bollingerMiddle && profitRate > 0) {
         const sellQty = Math.max(1, Math.floor(holdQty / 2));
         this.logger.log(
           `[${watchStock.stockCode}] BB Middle reached: cur=${curPrice}, middle=${bollingerMiddle.toFixed(2)}`,
@@ -154,6 +158,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           quantity: sellQty,
           price: roundPrice(curPrice),
           reason: `BB중심선 익절: ${curPrice} >= BB중심 ${bollingerMiddle.toFixed(0)}, 50%매도`,
+          metadata: { phase: 'take-profit-middle' },
         });
         return { signals, skipReasons };
       }
@@ -167,6 +172,9 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
         const buyAmount = Math.min(quota, ctx.buyableAmount);
 
         for (let i = 0; i < gridLevels.length; i++) {
+          const gridLevel = i + 1;
+          if (completedGridLevels.has(gridLevel)) continue;
+
           const gridPrice = basePrice * (1 + gridLevels[i]);
           if (curPrice <= gridPrice) {
             const gridAmount = buyAmount * gridRatios[i];
@@ -180,6 +188,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
                 quantity: gridQty,
                 price: roundPrice(curPrice),
                 reason: `그리드매수 ${i + 1}단계: ${(gridLevels[i] * 100).toFixed(0)}% (${gridPrice.toFixed(0)})`,
+                metadata: { phase: 'grid-buy', gridLevel },
               });
               break; // 한 번에 하나의 그리드만
             }
@@ -271,6 +280,7 @@ export class GridMeanReversionStrategy implements PerStockTradingStrategy {
           quantity: buyQty,
           price: roundPrice(curPrice),
           reason: `그리드진입: BB하단=${bollingerLower.toFixed(0)}, RSI=${rsi14.toFixed(0)}, MACD상승전환`,
+          metadata: { phase: 'grid-entry' },
         });
       }
     }
