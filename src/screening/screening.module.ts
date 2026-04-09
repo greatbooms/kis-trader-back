@@ -3,13 +3,14 @@ import { KisModule } from '../kis/kis.module';
 import { NotificationModule } from '../notification/notification.module';
 import { TradingModule } from '../trading/trading.module';
 import { PrismaService } from '../prisma.service';
+import { StockMasterModule } from '../stock-master/stock-master.module';
 import { DeepAnalysisService } from './deep-analysis.service';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
 import { ScreeningResolver } from './screening.resolver';
 
 @Module({
-  imports: [KisModule, NotificationModule, TradingModule],
+  imports: [KisModule, NotificationModule, TradingModule, StockMasterModule],
   providers: [
     PrismaService,
     DeepAnalysisService,

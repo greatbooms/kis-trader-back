@@ -74,7 +74,12 @@ export class MarketRegimeService {
       );
 
       if (prices.length < 60) {
-        this.logger.warn(`Insufficient index data for ${refIndex.name}: ${prices.length} days`);
+        const message = `Insufficient index data for ${refIndex.name}: ${prices.length} days`;
+        if (refIndex.type === 'overseas' && prices.length === 0) {
+          this.logger.debug(`${message} (defaulting to SIDEWAYS)`);
+        } else {
+          this.logger.warn(message);
+        }
         return 'SIDEWAYS';
       }
 

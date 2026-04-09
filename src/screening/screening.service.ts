@@ -9,6 +9,7 @@ import { StrategyRegistryService } from '../trading/strategy/strategy-registry.s
 import { MarketCondition, StockFundamentals, StockIndicators, StockStrategyContext } from '../trading/types';
 import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';
+import { StockMasterService } from '../stock-master/stock-master.service';
 import { ScreeningCandidate, StockScore, StockIndicatorDetail, SuggestedStrategy, ScreeningMode, ForeignInstitutionDetail, detectEtf } from './types';
 import { pickNumeric, pickString } from './utils/api-data.util';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
@@ -63,6 +64,7 @@ export class ScreeningService {
     private marketAnalysis: MarketAnalysisService,
     private strategyRegistry: StrategyRegistryService,
     private marketDataCache: MarketDataCacheService,
+    private stockMasterService: StockMasterService,
   ) {}
 
   async screenDomestic(mode: ScreeningMode = 'FULL'): Promise<StockScore[]> {
@@ -448,7 +450,47 @@ export class ScreeningService {
       }
     }
 
+    if (candidates.length === 0 && this.shouldUseStockMasterFallback(exchangeCode)) {
+      const fallbackCandidates = this.stockMasterService.getStocksByExchange(
+        exchangeCode,
+        Math.min(maxCandidates, 25),
+      );
+
+      for (const item of fallbackCandidates) {
+        if (candidates.length >= maxCandidates) break;
+        if (!item.stockCode || seen.has(item.stockCode)) continue;
+
+        seen.add(item.stockCode);
+        candidates.push({
+          stockCode: item.stockCode,
+          stockName: item.stockName || item.stockCode,
+          exchangeCode,
+          market: 'OVERSEAS',
+          currentPrice: 0,
+          changeRate: 0,
+          volume: 0,
+          marketCap: minMcap,
+        });
+      }
+
+      if (candidates.length > 0) {
+        this.logger.log(
+          `Using stock master fallback for ${exchangeCode}: ${candidates.length} candidates`,
+        );
+      }
+    }
+
+    if (candidates.length === 0) {
+      this.logger.warn(`No overseas screening candidates collected for ${exchangeCode}`);
+    } else {
+      this.logger.log(`Collected ${candidates.length} overseas candidates for ${exchangeCode}`);
+    }
+
     return candidates;
+  }
+
+  private shouldUseStockMasterFallback(exchangeCode: string): boolean {
+    return ['TKSE', 'SEHK', 'SHAA', 'SZAA', 'HASE', 'VNSE'].includes(exchangeCode);
   }
 
   private async analyzeDomesticStock(

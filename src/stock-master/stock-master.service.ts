@@ -100,6 +100,11 @@ export class StockMasterService implements OnModuleInit {
     };
   }
 
+  getStocksByExchange(exchangeCode: string, limit?: number): StockInfo[] {
+    const stocks = this.overseasStocks.filter((stock) => stock.exchangeCode === exchangeCode);
+    return limit ? stocks.slice(0, limit) : stocks;
+  }
+
   private async loadAllMasters(): Promise<void> {
     if (!fs.existsSync(TEMP_DIR)) {
       fs.mkdirSync(TEMP_DIR, { recursive: true });

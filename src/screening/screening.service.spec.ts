@@ -1,5 +1,6 @@
 import { pickRecommendationsForStorage } from './screening.service';
 import { StockScore } from './types';
+import { ScreeningService } from './screening.service';
 
 function createScore(rank: number, isEtf: boolean, totalScore: number): StockScore {
   return {
@@ -56,5 +57,38 @@ describe('pickRecommendationsForStorage', () => {
     const selected = pickRecommendationsForStorage(scores, 4, 2);
 
     expect(selected.map((item) => item.totalScore)).toEqual([95, 90, 88, 84]);
+  });
+});
+
+describe('ScreeningService overseas candidate fallback', () => {
+  it('uses stock master fallback for TKSE when KIS candidate APIs return empty', async () => {
+    const service = new ScreeningService(
+      {} as any,
+      {} as any,
+      {
+        searchStocks: jest.fn().mockResolvedValue([]),
+        getVolumeRanking: jest.fn().mockResolvedValue([]),
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        getStocksByExchange: jest.fn().mockReturnValue([
+          { stockCode: '7203', stockName: '토요타자동차', market: 'OVERSEAS', exchangeCode: 'TKSE' },
+          { stockCode: '6758', stockName: '소니그룹', market: 'OVERSEAS', exchangeCode: 'TKSE' },
+        ]),
+      } as any,
+    );
+
+    const candidates = await (service as any).collectOverseasCandidates('TKSE');
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      stockCode: '7203',
+      stockName: '토요타자동차',
+      exchangeCode: 'TKSE',
+      market: 'OVERSEAS',
+    });
   });
 });
