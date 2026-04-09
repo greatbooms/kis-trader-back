@@ -1,5 +1,5 @@
 import { pickRecommendationsForStorage } from './screening.service';
-import { StockScore } from './types';
+import { StockScore, detectEtf } from './types';
 import { ScreeningService } from './screening.service';
 
 function createScore(rank: number, isEtf: boolean, totalScore: number): StockScore {
@@ -57,6 +57,28 @@ describe('pickRecommendationsForStorage', () => {
     const selected = pickRecommendationsForStorage(scores, 4, 2);
 
     expect(selected.map((item) => item.totalScore)).toEqual([95, 90, 88, 84]);
+  });
+
+  it('reclassifies ETF-like names before applying the ETF cap', () => {
+    const pseudoEtf = {
+      ...createScore(1, false, 99),
+      stockCode: 'BUFB',
+      stockName: 'INNOVATOR LADDERED ALLOCATION BUFFER',
+      exchangeCode: 'AMEX',
+      market: 'OVERSEAS' as const,
+    };
+    const stocks = Array.from({ length: 20 }, (_, index) => createScore(index + 1, false, 98 - index));
+    const etfs = Array.from({ length: 5 }, (_, index) => ({
+      ...createScore(index + 1, true, 97 - index),
+      exchangeCode: 'AMEX',
+      market: 'OVERSEAS' as const,
+    }));
+
+    const selected = pickRecommendationsForStorage([pseudoEtf, ...stocks, ...etfs], 20, 5);
+
+    expect(selected.filter((item) => item.isEtf)).toHaveLength(5);
+    const rebucketed = selected.find((item) => item.stockCode === 'BUFB');
+    expect(rebucketed?.isEtf).toBe(true);
   });
 });
 
@@ -153,5 +175,12 @@ describe('ScreeningService overseas candidate fallback', () => {
       exchangeCode: 'TKSE',
       market: 'OVERSEAS',
     });
+  });
+});
+
+describe('detectEtf', () => {
+  it('recognizes US buffer and commodity funds as ETFs', () => {
+    expect(detectEtf('INNOVATOR LADDERED ALLOCATION BUFFER', 'BUFB')).toBe(true);
+    expect(detectEtf('UNITED STATES OIL', 'USO')).toBe(true);
   });
 });

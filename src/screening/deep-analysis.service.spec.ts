@@ -55,4 +55,44 @@ describe('DeepAnalysisService SEC DCF', () => {
 
     expect(result).toBeUndefined();
   });
+
+  it('refreshes SEC fundamentals when cached data is missing revenue', async () => {
+    const getSecFundamentals = jest
+      .fn()
+      .mockResolvedValueOnce({
+        revenueGrowthRate: 10,
+        operatingMargin: 15,
+      })
+      .mockResolvedValueOnce({
+        latestRevenue: 1_500_000_000,
+        revenueGrowthRate: 10,
+        operatingMargin: 15,
+      });
+
+    const service = new DeepAnalysisService(
+      {
+        getInterestRates: jest.fn().mockResolvedValue([{ rate: 3.0 }]),
+      } as any,
+      {
+        getPrice: jest.fn().mockResolvedValue({
+          currentPrice: 100,
+          listedShares: 10_000_000,
+          stockName: 'Test',
+        }),
+        getDailyPrices: jest.fn().mockResolvedValue([]),
+      } as any,
+      {} as any,
+      {
+        getSecFundamentals,
+      } as any,
+    );
+    jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+
+    const analysis = await service.analyzeStock('TEST', 'NASD', 'OVERSEAS');
+
+    expect(getSecFundamentals).toHaveBeenNthCalledWith(1, 'TEST', 100, 'NASD');
+    expect(getSecFundamentals).toHaveBeenNthCalledWith(2, 'TEST', 100, 'NASD', true);
+    expect(analysis.dcfValuation).toBeDefined();
+    expect(analysis.dcfValuation?.intrinsicValue).toBeGreaterThan(0);
+  });
 });

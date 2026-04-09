@@ -94,6 +94,12 @@ const ETF_NAME_KEYWORDS = [
   '스팩',
 ];
 
+const ETF_NAME_PATTERNS = [
+  /^INNOVATOR\b/,
+  /\bBUFFER\b/,
+  /^UNITED STATES OIL\b/,
+];
+
 /** 종목코드 패턴 기반 ETF/ETN 판별 (국내) */
 const ETF_CODE_PATTERNS = [
   /^[0-9]{3}[A-Z][0-9]/, // ETN: 예) Q530031
@@ -104,6 +110,7 @@ const ETF_CODE_PATTERNS = [
 export function detectEtf(stockName: string, stockCode?: string): boolean {
   const upper = stockName.toUpperCase();
   if (ETF_NAME_KEYWORDS.some((kw) => upper.includes(kw))) return true;
+  if (ETF_NAME_PATTERNS.some((pattern) => pattern.test(upper))) return true;
   if (stockCode && ETF_CODE_PATTERNS.some((p) => p.test(stockCode))) return true;
   return false;
 }

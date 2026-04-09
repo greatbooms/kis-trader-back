@@ -58,10 +58,15 @@ export function pickRecommendationsForStorage(
   maxTotal = MAX_SCREENING_RESULTS,
   maxEtf = MAX_SCREENING_ETFS,
 ): StockScore[] {
-  const sortedStocks = scores
+  const normalizedScores = scores.map((item) => ({
+    ...item,
+    isEtf: item.isEtf || detectEtf(item.stockName, item.stockCode),
+  }));
+
+  const sortedStocks = normalizedScores
     .filter((item) => !item.isEtf)
     .sort((a, b) => b.totalScore - a.totalScore);
-  const sortedEtfs = scores
+  const sortedEtfs = normalizedScores
     .filter((item) => item.isEtf)
     .sort((a, b) => b.totalScore - a.totalScore);
 
@@ -171,6 +176,7 @@ export class ScreeningService {
     const selected = pickRecommendationsForStorage(scores);
     for (let index = 0; index < selected.length; index++) {
       const item = selected[index];
+      const isEtf = item.isEtf || detectEtf(item.stockName, item.stockCode);
       const existingAnalysis = existingDeepAnalysisMap.get(`${item.exchangeCode}:${item.stockCode}`);
       const hasCompletedDeepAnalysis = existingAnalysis?.deepAnalysisId && existingAnalysis.deepAnalysisStatus === 'SUCCESS';
 
@@ -193,7 +199,7 @@ export class ScreeningService {
           changeRate: item.changeRate,
           volume: item.volume,
           marketCap: item.marketCap,
-          isEtf: item.isEtf,
+          isEtf,
           factorScores: (item.factorScores ?? null) as any,
           deepAnalysisId: hasCompletedDeepAnalysis ? existingAnalysis.deepAnalysisId : item.deepAnalysisId,
           deepAnalysisStatus: hasCompletedDeepAnalysis ? 'SUCCESS' : 'PENDING',
@@ -348,6 +354,7 @@ export class ScreeningService {
 
     let completed = 0;
     for (const recommendation of recommendations) {
+      const isEtf = recommendation.isEtf || detectEtf(recommendation.stockName, recommendation.stockCode);
       try {
         const analysis = await this.deepAnalysisService.analyzeStock(
           recommendation.stockCode,
@@ -379,6 +386,7 @@ export class ScreeningService {
             deepAnalysisStatus: 'SUCCESS',
             deepAnalysisMessage: analysis.reportSummary || '딥 분석이 완료되었습니다.',
             deepAnalysisUpdatedAt: new Date(),
+            isEtf,
             indicators: mergedIndicators as any,
           },
         });
@@ -394,6 +402,7 @@ export class ScreeningService {
             deepAnalysisStatus: 'FAILED',
             deepAnalysisMessage: message,
             deepAnalysisUpdatedAt: new Date(),
+            isEtf,
           },
         });
       }
@@ -824,7 +833,7 @@ export class ScreeningService {
         candidate.currentPrice,
         candidate.exchangeCode,
       );
-      if (!secFundamentals) {
+      if (!secFundamentals || !secFundamentals.latestRevenue || secFundamentals.latestRevenue <= 0) {
         secFundamentals = await this.marketDataCache.getSecFundamentals(
           candidate.stockCode,
           candidate.currentPrice,
@@ -833,6 +842,15 @@ export class ScreeningService {
         );
       }
       this.applySecFundamentalIndicators(secFundamentals, indicators);
+      if (!secFundamentals) {
+        this.logger.warn(
+          `US screening DCF skipped for ${candidate.stockCode} (${candidate.exchangeCode}): SEC fundamentals unavailable`,
+        );
+      } else if (!secFundamentals.latestRevenue || secFundamentals.latestRevenue <= 0) {
+        this.logger.warn(
+          `US screening DCF skipped for ${candidate.stockCode} (${candidate.exchangeCode}): latestRevenue missing (latest=${secFundamentals.latestFilingForm ?? 'N/A'} ${secFundamentals.latestFilingDate ?? 'N/A'}, periodic=${secFundamentals.latestPeriodicFilingForm ?? 'N/A'} ${secFundamentals.latestPeriodicFilingDate ?? 'N/A'})`,
+        );
+      }
       if (priceDetail) {
         const dcfValuation = await this.deepAnalysisService.calculateSecDcfValuation(
           candidate.exchangeCode,
@@ -843,7 +861,13 @@ export class ScreeningService {
         if (dcfValuation) {
           indicators.intrinsicValue = dcfValuation.intrinsicValue;
           indicators.marginOfSafety = dcfValuation.marginOfSafety;
+        } else if (secFundamentals?.latestRevenue && secFundamentals.latestRevenue > 0) {
+          this.logger.warn(
+            `US screening DCF returned empty for ${candidate.stockCode} (${candidate.exchangeCode}) despite SEC fundamentals (revenue=${secFundamentals.latestRevenue}, margin=${secFundamentals.operatingMargin ?? 'N/A'}, growth=${secFundamentals.revenueGrowthRate ?? 'N/A'})`,
+          );
         }
+      } else {
+        this.logger.warn(`US screening DCF skipped for ${candidate.stockCode} (${candidate.exchangeCode}): price detail unavailable`);
       }
     }
 

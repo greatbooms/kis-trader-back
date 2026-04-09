@@ -65,7 +65,11 @@ export class DeepAnalysisService {
     let secFundamentals = market === 'OVERSEAS' && ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode)
       ? await this.marketDataCache.getSecFundamentals(stockCode, priceDetail?.currentPrice ?? 0, exchangeCode)
       : undefined;
-    if (!secFundamentals && market === 'OVERSEAS' && ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode)) {
+    if (
+      market === 'OVERSEAS' &&
+      ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode) &&
+      (!secFundamentals || !secFundamentals.latestRevenue || secFundamentals.latestRevenue <= 0)
+    ) {
       secFundamentals = await this.marketDataCache.getSecFundamentals(
         stockCode,
         priceDetail?.currentPrice ?? 0,
@@ -100,6 +104,11 @@ export class DeepAnalysisService {
       secFundamentals,
       beta,
     );
+    if (market === 'OVERSEAS' && ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode) && !dcfValuation) {
+      this.logger.warn(
+        `Skipping SEC DCF for ${stockCode} (${exchangeCode}): ${this.describeMissingSecDcfReason(priceDetail, secFundamentals)}`,
+      );
+    }
     const riskProfile = dailyPrices.length > 0
       ? this.assessRisk(stabilityRatio, shortSale, creditBalance, balanceSheet, dailyPrices, beta)
       : undefined;
@@ -164,6 +173,18 @@ export class DeepAnalysisService {
       secFundamentals.operatingMargin !== undefined ? secFundamentals.operatingMargin / 100 : undefined,
       1,
     );
+  }
+
+  private describeMissingSecDcfReason(
+    priceDetail?: StockPriceResult,
+    secFundamentals?: SecFundamentals,
+  ): string {
+    if (!priceDetail) return 'price detail unavailable';
+    if (!secFundamentals) return 'SEC fundamentals unavailable';
+    if (!secFundamentals.latestRevenue || secFundamentals.latestRevenue <= 0) {
+      return `latestRevenue missing (latest=${secFundamentals.latestFilingForm ?? 'N/A'} ${secFundamentals.latestFilingDate ?? 'N/A'}, periodic=${secFundamentals.latestPeriodicFilingForm ?? 'N/A'} ${secFundamentals.latestPeriodicFilingDate ?? 'N/A'})`;
+    }
+    return 'DCF returned no value despite SEC fundamentals';
   }
 
   private async calculateSimpleDCF(

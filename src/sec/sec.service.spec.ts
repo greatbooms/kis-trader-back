@@ -1,7 +1,14 @@
 import { ConfigService } from '@nestjs/config';
 import { SecService } from './sec.service';
+import axios from 'axios';
+
+jest.mock('axios');
 
 describe('SecService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('should derive annual fundamentals and filing metadata from SEC payloads', () => {
     const service = new SecService({
       get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
@@ -261,5 +268,167 @@ describe('SecService', () => {
     expect(filingMeta.latestPeriodicFilingForm).toBe('10-Q');
     expect(filingMeta.latestPeriodicFilingDate).toBe('2026-03-19');
     expect(filingMeta.secPeriodicReportAgeDays).toBeDefined();
+  });
+
+  it('should derive TTM revenue when annual revenue facts are unavailable', () => {
+    const service = new SecService({
+      get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
+    } as unknown as ConfigService);
+
+    const companyFacts = {
+      facts: {
+        'us-gaap': {
+          RevenueFromContractWithCustomerExcludingAssessedTax: {
+            units: {
+              USD: [
+                { val: 150, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 140, form: '10-Q', filed: '2025-11-10', end: '2025-09-30' },
+                { val: 130, form: '10-Q', filed: '2025-08-10', end: '2025-06-30' },
+                { val: 120, form: '10-Q', filed: '2025-05-10', end: '2025-03-31' },
+                { val: 110, form: '10-Q', filed: '2025-02-10', end: '2024-12-31' },
+                { val: 100, form: '10-Q', filed: '2024-11-10', end: '2024-09-30' },
+                { val: 90, form: '10-Q', filed: '2024-08-10', end: '2024-06-30' },
+                { val: 80, form: '10-Q', filed: '2024-05-10', end: '2024-03-31' },
+              ],
+            },
+          },
+          OperatingIncomeLoss: {
+            units: {
+              USD: [
+                { val: 30, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 28, form: '10-Q', filed: '2025-11-10', end: '2025-09-30' },
+                { val: 26, form: '10-Q', filed: '2025-08-10', end: '2025-06-30' },
+                { val: 24, form: '10-Q', filed: '2025-05-10', end: '2025-03-31' },
+                { val: 22, form: '10-Q', filed: '2025-02-10', end: '2024-12-31' },
+                { val: 20, form: '10-Q', filed: '2024-11-10', end: '2024-09-30' },
+                { val: 18, form: '10-Q', filed: '2024-08-10', end: '2024-06-30' },
+                { val: 16, form: '10-Q', filed: '2024-05-10', end: '2024-03-31' },
+              ],
+            },
+          },
+          NetIncomeLoss: {
+            units: {
+              USD: [
+                { val: 20, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 18, form: '10-Q', filed: '2025-11-10', end: '2025-09-30' },
+                { val: 16, form: '10-Q', filed: '2025-08-10', end: '2025-06-30' },
+                { val: 14, form: '10-Q', filed: '2025-05-10', end: '2025-03-31' },
+              ],
+            },
+          },
+          GrossProfit: {
+            units: {
+              USD: [
+                { val: 70, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 66, form: '10-Q', filed: '2025-11-10', end: '2025-09-30' },
+                { val: 62, form: '10-Q', filed: '2025-08-10', end: '2025-06-30' },
+                { val: 58, form: '10-Q', filed: '2025-05-10', end: '2025-03-31' },
+              ],
+            },
+          },
+          EarningsPerShareDiluted: {
+            units: {
+              'USD/shares': [
+                { val: 2.0, form: '10-K', filed: '2025-02-20', end: '2024-12-31' },
+                { val: 1.5, form: '10-K', filed: '2024-02-20', end: '2023-12-31' },
+              ],
+            },
+          },
+          Assets: {
+            units: {
+              USD: [
+                { val: 1000, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 900, form: '10-Q', filed: '2025-02-10', end: '2024-12-31' },
+              ],
+            },
+          },
+          Liabilities: {
+            units: {
+              USD: [
+                { val: 400, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+              ],
+            },
+          },
+          StockholdersEquity: {
+            units: {
+              USD: [
+                { val: 600, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+                { val: 500, form: '10-Q', filed: '2025-02-10', end: '2024-12-31' },
+              ],
+            },
+          },
+          AssetsCurrent: {
+            units: {
+              USD: [
+                { val: 300, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+              ],
+            },
+          },
+          LiabilitiesCurrent: {
+            units: {
+              USD: [
+                { val: 150, form: '10-Q', filed: '2026-02-10', end: '2025-12-31' },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const fundamentals = (service as any).buildFundamentalsFromFacts(companyFacts, undefined, 50);
+
+    expect(fundamentals.latestRevenue).toBe(540);
+    expect(fundamentals.revenueGrowthRate).toBeCloseTo(42.1053, 3);
+    expect(fundamentals.latestOperatingIncome).toBe(108);
+    expect(fundamentals.operatingMargin).toBeCloseTo(20, 3);
+  });
+
+  it('should retry SEC fetches before succeeding', async () => {
+    const service = new SecService({
+      get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
+    } as unknown as ConfigService);
+
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'getCikBySymbol').mockResolvedValue('1234');
+    const requestSpy = jest.spyOn(service as any, 'request');
+    requestSpy
+      .mockRejectedValueOnce(new Error('temporary sec failure'))
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ facts: {} })
+      .mockResolvedValueOnce({});
+
+    const buildSpy = jest.spyOn(service as any, 'buildFundamentalsFromFacts').mockReturnValue({
+      latestRevenue: 100,
+    });
+
+    const fundamentals = await service.getFundamentals('TEST', 10, true);
+
+    expect(fundamentals).toEqual({ latestRevenue: 100 });
+    expect(requestSpy).toHaveBeenCalledTimes(4);
+    expect((service as any).sleep).toHaveBeenCalledTimes(1);
+    expect((service as any).sleep).toHaveBeenCalledWith(500);
+    expect(buildSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return undefined after exhausting SEC fetch retries', async () => {
+    const service = new SecService({
+      get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
+    } as unknown as ConfigService);
+
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'getCikBySymbol').mockResolvedValue('1234');
+
+    const mockedGet = jest.mocked(axios.get);
+    mockedGet.mockRejectedValue(new Error('sec down'));
+
+    const fundamentals = await service.getFundamentals('FAIL', 10, true);
+
+    expect(fundamentals).toBeUndefined();
+    expect(mockedGet.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect((service as any).sleep).toHaveBeenCalledTimes(4);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(1, 500);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(2, 1000);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(3, 2000);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(4, 4000);
   });
 });
