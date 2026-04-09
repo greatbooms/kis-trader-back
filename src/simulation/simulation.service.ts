@@ -222,7 +222,7 @@ export class SimulationService {
       const { signals, skipReasons } = await strategy.evaluateStock(ctx);
       const hasSecondTargetSignal = signals.some((signal) => signal.metadata?.phase === 'take-profit-2');
 
-      if (signals.length === 0) {
+      if (signals.length === 0 && !this.isRoutineAlreadyExecutedSkip(skipReasons)) {
         this.logger.debug(
           `[SIM] ${session.stockCode} no signal | price=${price.currentPrice}` +
           ` ma20=${stockIndicators.ma20 ?? 'N/A'} ma60=${stockIndicators.ma60 ?? 'N/A'}` +
@@ -382,6 +382,10 @@ export class SimulationService {
     if (ctx.alreadyExecutedToday) return 'already executed today';
 
     return 'strategy conditions not met';
+  }
+
+  private isRoutineAlreadyExecutedSkip(skipReasons: string[]): boolean {
+    return skipReasons.length > 0 && skipReasons.every((reason) => reason.startsWith('오늘 이미 실행됨'));
   }
 
   private getPersistedSessionCycle(cycle: number): number {

@@ -128,7 +128,6 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
 
     // 오늘 이미 실행 → skip (손절은 위에서 이미 체크)
     if (ctx.alreadyExecutedToday) {
-      this.logger.debug(`[${watchStock.stockCode}] Already executed today, skip`);
       skipReasons.push('오늘 이미 실행됨');
       return { signals, skipReasons };
     }

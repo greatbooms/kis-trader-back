@@ -68,6 +68,10 @@ export class TradingService {
             quotaCarryEligibleIds.add(ctx.watchStock.id);
           }
 
+          if (this.isRoutineAlreadyExecutedSkip(skipReasons)) {
+            continue;
+          }
+
           const reason = skipReasons.length > 0 ? skipReasons.join('; ') : '시그널 없음';
 
           await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SKIPPED, reason, {
@@ -707,6 +711,10 @@ export class TradingService {
 
   private isQuotaCarryEligible(skipReasons: string[]): boolean {
     return skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
+  }
+
+  private isRoutineAlreadyExecutedSkip(skipReasons: string[]): boolean {
+    return skipReasons.length > 0 && skipReasons.every((reason) => reason.startsWith('오늘 이미 실행됨'));
   }
 
   private getTodayDate(): string {
