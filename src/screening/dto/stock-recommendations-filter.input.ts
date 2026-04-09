@@ -8,6 +8,9 @@ export class StockRecommendationsFilterInput {
   @Field({ nullable: true })
   market?: string;
 
+  @Field({ nullable: true })
+  country?: string;
+
   @Field(() => Float, { nullable: true })
   limit?: number;
 }

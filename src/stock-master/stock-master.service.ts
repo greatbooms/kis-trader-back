@@ -101,7 +101,8 @@ export class StockMasterService implements OnModuleInit {
   }
 
   getStocksByExchange(exchangeCode: string, limit?: number): StockInfo[] {
-    const stocks = this.overseasStocks.filter((stock) => stock.exchangeCode === exchangeCode);
+    const allStocks = [...this.domesticStocks, ...this.overseasStocks];
+    const stocks = allStocks.filter((stock) => stock.exchangeCode === exchangeCode);
     return limit ? stocks.slice(0, limit) : stocks;
   }
 

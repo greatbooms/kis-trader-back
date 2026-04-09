@@ -729,9 +729,15 @@ export class KisDomesticService {
       '/uapi/domestic-stock/v1/ranking/market-cap',
       'FHPST01740000',
       {
-        FID_COND_MRKT_DIV_CODE: 'J',
-        FID_COND_SCR_DIV_CODE: '20174',
-        FID_INPUT_ISCD: '0000',
+        fid_input_price_2: '',
+        fid_cond_mrkt_div_code: 'J',
+        fid_cond_scr_div_code: '20174',
+        fid_div_cls_code: '0',
+        fid_input_iscd: '0000',
+        fid_trgt_cls_code: '0',
+        fid_trgt_exls_cls_code: '0',
+        fid_input_price_1: '',
+        fid_vol_cnt: '',
       },
     );
   }

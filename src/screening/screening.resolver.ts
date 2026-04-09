@@ -38,6 +38,7 @@ export class ScreeningResolver {
   ): Promise<StockRecommendationType[]> {
     let targetDate = input?.date;
     const market = input?.market;
+    const country = input?.country;
     const limit = input?.limit ?? 20;
     if (!targetDate) {
       const dates = await this.screeningService.getScreeningDates(1);
@@ -45,7 +46,7 @@ export class ScreeningResolver {
     }
     if (!targetDate) return [];
 
-    const results = await this.screeningService.getRecommendations(targetDate, market, limit);
+    const results = await this.screeningService.getRecommendations(targetDate, market, country, limit);
     return results.map((r) => ({
       id: r.id,
       screeningDate: r.screeningDate,

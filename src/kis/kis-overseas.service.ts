@@ -456,25 +456,102 @@ export class KisOverseasService {
     return output;
   }
 
-  /** 해외 거래량순위 */
-  async getVolumeRanking(exchangeCode: string): Promise<any[]> {
+  private async fetchRanking(
+    exchangeCode: string,
+    endpoint: string,
+    trId: string,
+    params: Record<string, string> = {},
+  ): Promise<any[]> {
     const excd = EXCHANGE_CODE_MAP[exchangeCode] || exchangeCode;
     const res = await this.kisBase.get(
-      '/uapi/overseas-stock/v1/ranking/trade-vol',
-      'HHDFS76310010',
+      endpoint,
+      trId,
       {
         AUTH: '',
         EXCD: excd,
         NDAY: '0',
         PRC1: '',
         PRC2: '',
-        VOL_RANG: '0',
         KEYB: '',
+        ...params,
       },
     );
-    const output = (res.output2 as any[]) || [];
+
+    return (res.output2 as any[]) || [];
+  }
+
+  /** 해외 거래량순위 */
+  async getVolumeRanking(exchangeCode: string): Promise<any[]> {
+    const output = await this.fetchRanking(
+      exchangeCode,
+      '/uapi/overseas-stock/v1/ranking/trade-vol',
+      'HHDFS76310010',
+      { VOL_RANG: '0' },
+    );
     if (output.length === 0) {
-      this.logger.debug(`getVolumeRanking(${exchangeCode}) empty response - rt_cd: ${res.rt_cd}, msg1: ${res.msg1}`);
+      this.logger.debug(`getVolumeRanking(${exchangeCode}) empty response`);
+    }
+    return output;
+  }
+
+  async getTradeValueRanking(exchangeCode: string): Promise<any[]> {
+    const output = await this.fetchRanking(
+      exchangeCode,
+      '/uapi/overseas-stock/v1/ranking/trade-pbmn',
+      'HHDFS76320010',
+      {
+        VOL_RANG: '0',
+      },
+    );
+    if (output.length === 0) {
+      this.logger.debug(`getTradeValueRanking(${exchangeCode}) empty response`);
+    }
+    return output;
+  }
+
+  async getTurnoverRanking(exchangeCode: string): Promise<any[]> {
+    const output = await this.fetchRanking(
+      exchangeCode,
+      '/uapi/overseas-stock/v1/ranking/trade-turnover',
+      'HHDFS76340000',
+      {
+        VOL_RANG: '0',
+      },
+    );
+    if (output.length === 0) {
+      this.logger.debug(`getTurnoverRanking(${exchangeCode}) empty response`);
+    }
+    return output;
+  }
+
+  async getMarketCapRanking(exchangeCode: string): Promise<any[]> {
+    const output = await this.fetchRanking(
+      exchangeCode,
+      '/uapi/overseas-stock/v1/ranking/market-cap',
+      'HHDFS76350100',
+      {
+        CURR_GB: '',
+        VOL_RANG: '0',
+      },
+    );
+    if (output.length === 0) {
+      this.logger.debug(`getMarketCapRanking(${exchangeCode}) empty response`);
+    }
+    return output;
+  }
+
+  async getUpDownRanking(exchangeCode: string): Promise<any[]> {
+    const output = await this.fetchRanking(
+      exchangeCode,
+      '/uapi/overseas-stock/v1/ranking/updown-rate',
+      'HHDFS76290000',
+      {
+        GUBN: '1',
+        VOL_RANG: '0',
+      },
+    );
+    if (output.length === 0) {
+      this.logger.debug(`getUpDownRanking(${exchangeCode}) empty response`);
     }
     return output;
   }

@@ -30,6 +30,28 @@ const MAX_OVERSEAS_CANDIDATES_BY_EXCHANGE: Record<string, number> = {
 };
 const MAX_SCREENING_RESULTS = 20;
 const MAX_SCREENING_ETFS = 5;
+const MAX_DOMESTIC_ANALYSIS_CANDIDATES = 30;
+const MAX_OVERSEAS_ANALYSIS_CANDIDATES = 25;
+const EXCHANGE_TO_COUNTRY: Record<string, { code: string; label: string }> = {
+  KRX: { code: 'KR', label: '한국' },
+  NASD: { code: 'US', label: '미국' },
+  NYSE: { code: 'US', label: '미국' },
+  AMEX: { code: 'US', label: '미국' },
+  SEHK: { code: 'HK', label: '홍콩' },
+  SHAA: { code: 'CN', label: '중국' },
+  SZAA: { code: 'CN', label: '중국' },
+  TKSE: { code: 'JP', label: '일본' },
+  HASE: { code: 'VN', label: '베트남' },
+  VNSE: { code: 'VN', label: '베트남' },
+};
+const COUNTRY_TO_EXCHANGES = Object.entries(EXCHANGE_TO_COUNTRY).reduce<Record<string, string[]>>(
+  (acc, [exchangeCode, country]) => {
+    if (!acc[country.code]) acc[country.code] = [];
+    acc[country.code].push(exchangeCode);
+    return acc;
+  },
+  {},
+);
 
 export function pickRecommendationsForStorage(
   scores: StockScore[],
@@ -72,11 +94,12 @@ export class ScreeningService {
 
     const candidates = await this.collectDomesticCandidates();
     if (candidates.length === 0) return [];
+    const analysisCandidates = candidates.slice(0, MAX_DOMESTIC_ANALYSIS_CANDIDATES);
 
     const foreignInstMap = await this.collectForeignInstitutionData();
     const scores: StockScore[] = [];
 
-    for (const candidate of candidates) {
+    for (const candidate of analysisCandidates) {
       try {
         const score = await this.analyzeDomesticStock(candidate, foreignInstMap, mode);
         if (score.totalScore > 0 && (!score.dataAvailability || score.dataAvailability >= 30)) scores.push(score);
@@ -94,9 +117,10 @@ export class ScreeningService {
 
     const candidates = await this.collectOverseasCandidates(exchangeCode);
     if (candidates.length === 0) return [];
+    const analysisCandidates = candidates.slice(0, MAX_OVERSEAS_ANALYSIS_CANDIDATES);
 
     const scores: StockScore[] = [];
-    for (const candidate of candidates) {
+    for (const candidate of analysisCandidates) {
       try {
         const score = await this.analyzeOverseasStock(candidate, mode);
         if (score.totalScore > 0) scores.push(score);
@@ -113,8 +137,13 @@ export class ScreeningService {
     if (scores.length === 0) return;
 
     const market = scores[0].market;
+    const exchangeCodes = [...new Set(scores.map((item) => item.exchangeCode))];
     await this.prisma.stockRecommendation.deleteMany({
-      where: { screeningDate: date, market: market as any },
+      where: {
+        screeningDate: date,
+        market: market as any,
+        exchangeCode: { in: exchangeCodes },
+      },
     });
 
     const selected = pickRecommendationsForStorage(scores);
@@ -150,17 +179,23 @@ export class ScreeningService {
     }
   }
 
-  async getRecommendations(date: string, market?: string, limit = 20) {
+  async getRecommendations(date: string, market?: string, country?: string, limit = 20) {
+    const exchangeCodes = country ? COUNTRY_TO_EXCHANGES[country] ?? [] : undefined;
     const rows = await this.prisma.stockRecommendation.findMany({
       where: {
         screeningDate: date,
         ...(market ? { market: market as any } : {}),
+        ...(country ? { exchangeCode: { in: exchangeCodes } } : {}),
       },
-      orderBy: { rank: 'asc' },
-      take: limit,
+      orderBy: [
+        { totalScore: 'desc' },
+        { createdAt: 'asc' },
+      ],
+      take: limit > 0 ? limit : undefined,
     });
-    return rows.map((row) => ({
+    return rows.map((row, index) => ({
       ...row,
+      rank: index + 1,
       suggestedStrategies: this.filterExecutableStrategies((row.suggestedStrategies as SuggestedStrategy[] | null) ?? []),
     }));
   }
@@ -186,25 +221,12 @@ export class ScreeningService {
       _avg: { totalScore: true },
     });
 
-    const exchangeToCountry: Record<string, { code: string; label: string }> = {
-      KRX: { code: 'KR', label: '한국' },
-      NASD: { code: 'US', label: '미국' },
-      NYSE: { code: 'US', label: '미국' },
-      AMEX: { code: 'US', label: '미국' },
-      SEHK: { code: 'HK', label: '홍콩' },
-      SHAA: { code: 'CN', label: '중국' },
-      SZAA: { code: 'CN', label: '중국' },
-      TKSE: { code: 'JP', label: '일본' },
-      HASE: { code: 'VN', label: '베트남' },
-      VNSE: { code: 'VN', label: '베트남' },
-    };
-
     return dates.map((date) => {
       const dateRows = rows.filter((row) => row.screeningDate === date);
       const countryMap = new Map<string, { label: string; count: number; totalScore: number }>();
 
       for (const row of dateRows) {
-        const country = exchangeToCountry[row.exchangeCode] || { code: row.exchangeCode, label: row.exchangeCode };
+        const country = EXCHANGE_TO_COUNTRY[row.exchangeCode] || { code: row.exchangeCode, label: row.exchangeCode };
         const existing = countryMap.get(country.code) || { label: country.label, count: 0, totalScore: 0 };
         existing.count += row._count;
         existing.totalScore += (row._avg.totalScore?.toNumber() ?? 0) * row._count;
@@ -335,33 +357,56 @@ export class ScreeningService {
   }
 
   private async collectDomesticCandidates(): Promise<ScreeningCandidate[]> {
-    const volumeRank = await this.kisDomestic.getVolumeRanking();
     const candidates: ScreeningCandidate[] = [];
     const seen = new Set<string>();
 
-    for (const item of volumeRank.slice(0, 80)) {
-      const code = item.mksc_shrn_iscd;
-      if (!code || seen.has(code)) continue;
-      seen.add(code);
+    const rankingSources = await Promise.allSettled([
+      this.kisDomestic.getVolumeRanking(),
+      this.kisDomestic.getFluctuationRanking(),
+      this.kisDomestic.getMarketCapRanking(),
+    ]);
 
-      const price = parseInt(item.stck_prpr, 10) || 0;
-      if (price < 1000) continue;
+    const rankingLabels = [
+      'volume rank',
+      'fluctuation rank',
+      'market cap rank',
+    ];
 
-      candidates.push({
-        stockCode: code,
-        stockName: item.hts_kor_isnm || code,
-        exchangeCode: 'KRX',
-        market: 'DOMESTIC',
-        currentPrice: price,
-        changeRate: parseFloat(item.prdy_ctrt) || 0,
-        volume: parseInt(item.acml_vol, 10) || 0,
-        marketCap: 0,
-        volumeIncreaseRate: this.toNumber(item.vol_inrt),
-        avgVolume: this.toInteger(item.avrg_vol),
-        avgTradingValue: this.toNumber(item.avrg_tr_pbmn),
-        volumeTurnoverRate: this.toNumber(item.vol_tnrt),
-        nDayPriceRate: this.toNumber(item.n_befr_clpr_vrss_prpr_rate),
-      });
+    for (let i = 0; i < rankingSources.length; i++) {
+      const result = rankingSources[i];
+      const label = rankingLabels[i];
+      if (result.status === 'rejected') {
+        this.logger.warn(`Domestic ${label} failed: ${result.reason?.message ?? result.reason}`);
+        continue;
+      }
+
+      this.appendDomesticCandidates(candidates, seen, result.value ?? [], 80);
+    }
+
+    if (candidates.length === 0 && this.shouldUseStockMasterFallback('KRX')) {
+      const fallbackCandidates = this.stockMasterService.getStocksByExchange('KRX', 40);
+      for (const item of fallbackCandidates) {
+        if (candidates.length >= 80) break;
+        if (!item.stockCode || seen.has(item.stockCode)) continue;
+
+        seen.add(item.stockCode);
+        candidates.push({
+          stockCode: item.stockCode,
+          stockName: item.stockName || item.stockCode,
+          exchangeCode: 'KRX',
+          market: 'DOMESTIC',
+          currentPrice: 0,
+          changeRate: 0,
+          volume: 0,
+          marketCap: 0,
+        });
+      }
+    }
+
+    if (candidates.length === 0) {
+      this.logger.warn('No domestic screening candidates collected');
+    } else {
+      this.logger.log(`Collected ${candidates.length} domestic candidates`);
     }
 
     return candidates;
@@ -425,28 +470,38 @@ export class ScreeningService {
     }
 
     if (candidates.length < maxCandidates) {
-      try {
-        const volumeRank = await this.kisOverseas.getVolumeRanking(exchangeCode);
-        for (const item of volumeRank.slice(0, 30)) {
-          if (candidates.length >= maxCandidates) break;
+      const rankingSources = await Promise.allSettled([
+        this.kisOverseas.getVolumeRanking(exchangeCode),
+        this.kisOverseas.getTradeValueRanking(exchangeCode),
+        this.kisOverseas.getTurnoverRanking(exchangeCode),
+        this.kisOverseas.getMarketCapRanking(exchangeCode),
+        this.kisOverseas.getUpDownRanking(exchangeCode),
+      ]);
 
-          const code = item.symb;
-          if (!code || seen.has(code)) continue;
-          seen.add(code);
+      const rankingLabels = [
+        'volume rank',
+        'trade value rank',
+        'turnover rank',
+        'market cap rank',
+        'updown rank',
+      ];
 
-          candidates.push({
-            stockCode: code,
-            stockName: item.name || code,
-            exchangeCode,
-            market: 'OVERSEAS',
-            currentPrice: this.toNumber(item.last) ?? 0,
-            changeRate: this.toNumber(item.rate) ?? 0,
-            volume: this.toInteger(item.tvol),
-            marketCap: this.toInteger(item.valx),
-          });
+      for (let i = 0; i < rankingSources.length; i++) {
+        const result = rankingSources[i];
+        const label = rankingLabels[i];
+        if (result.status === 'rejected') {
+          this.logger.warn(`Overseas ${label} failed for ${exchangeCode}: ${result.reason?.message ?? result.reason}`);
+          continue;
         }
-      } catch (e) {
-        this.logger.warn(`Overseas volume rank failed for ${exchangeCode}: ${e.message}`);
+
+        this.appendOverseasCandidates(
+          candidates,
+          seen,
+          exchangeCode,
+          result.value,
+          maxCandidates,
+          minMcap,
+        );
       }
     }
 
@@ -490,7 +545,78 @@ export class ScreeningService {
   }
 
   private shouldUseStockMasterFallback(exchangeCode: string): boolean {
-    return ['TKSE', 'SEHK', 'SHAA', 'SZAA', 'HASE', 'VNSE'].includes(exchangeCode);
+    return ['KRX', 'TKSE', 'SEHK', 'SHAA', 'SZAA', 'HASE', 'VNSE'].includes(exchangeCode);
+  }
+
+  private appendDomesticCandidates(
+    candidates: ScreeningCandidate[],
+    seen: Set<string>,
+    items: any[],
+    maxCandidates: number,
+  ): void {
+    for (const item of items.slice(0, 80)) {
+      if (candidates.length >= maxCandidates) break;
+
+      const code = item.mksc_shrn_iscd;
+      if (!code || seen.has(code)) continue;
+
+      const price = parseInt(item.stck_prpr, 10) || 0;
+      if (price <= 0) continue;
+
+      seen.add(code);
+      candidates.push({
+        stockCode: code,
+        stockName: item.hts_kor_isnm || code,
+        exchangeCode: 'KRX',
+        market: 'DOMESTIC',
+        currentPrice: price,
+        changeRate: parseFloat(item.prdy_ctrt) || 0,
+        volume: parseInt(item.acml_vol, 10) || 0,
+        marketCap: this.toInteger(item.stck_avls ?? item.hts_avls),
+        volumeIncreaseRate: this.toNumber(item.vol_inrt),
+        avgVolume: this.toInteger(item.avrg_vol),
+        avgTradingValue: this.toNumber(item.avrg_tr_pbmn),
+        volumeTurnoverRate: this.toNumber(item.vol_tnrt),
+        nDayPriceRate: this.toNumber(item.n_befr_clpr_vrss_prpr_rate),
+      });
+    }
+  }
+
+  private appendOverseasCandidates(
+    candidates: ScreeningCandidate[],
+    seen: Set<string>,
+    exchangeCode: string,
+    items: any[],
+    maxCandidates: number,
+    minMcap: number,
+  ): void {
+    for (const item of items.slice(0, 30)) {
+      if (candidates.length >= maxCandidates) break;
+
+      const code = item.symb;
+      if (!code || seen.has(code)) continue;
+
+      const currentPrice = this.toNumber(item.last) ?? 0;
+      const volume = this.toInteger(item.tvol);
+      const marketCap = this.toInteger(item.valx);
+
+      if (currentPrice <= 0) continue;
+      if (volume <= 0 && marketCap < minMcap) continue;
+
+      seen.add(code);
+      candidates.push({
+        stockCode: code,
+        stockName: item.name || code,
+        exchangeCode,
+        market: 'OVERSEAS',
+        currentPrice,
+        changeRate: this.toNumber(item.rate) ?? 0,
+        volume,
+        marketCap,
+        per: this.toNumber(item.perx),
+        eps: this.toNumber(item.epsx),
+      });
+    }
   }
 
   private async analyzeDomesticStock(
