@@ -52,9 +52,26 @@ export class KisBaseService {
   }
 
   private isRetryable(error: any): boolean {
+    const status = error?.response?.status;
+    if (typeof status === 'number' && status >= 500) return true;
     if (error.code && RETRYABLE_ERRORS.has(error.code)) return true;
     const msg = error.message?.toLowerCase() ?? '';
     return msg.includes('socket hang up') || msg.includes('econnreset');
+  }
+
+  private formatHttpError(error: any): string {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+    if (typeof status !== 'number') {
+      return error?.message ?? 'Unknown error';
+    }
+
+    const msgCode = data?.msg_cd;
+    const msg = data?.msg1;
+    if (msgCode || msg) {
+      return `${error.message} (${status}${msgCode ? `, ${msgCode}` : ''}${msg ? `, ${msg}` : ''})`;
+    }
+    return `${error.message} (${status})`;
   }
 
   async get<T = any>(
@@ -84,11 +101,13 @@ export class KisBaseService {
       } catch (e) {
         if (attempt < this.maxRetries && this.isRetryable(e)) {
           const delay = (attempt + 1) * 500;
-          this.logger.warn(`Retrying GET ${path} [${trId}] after ${delay}ms (attempt ${attempt + 1}): ${e.message}`);
+          this.logger.warn(
+            `Retrying GET ${path} [${trId}] after ${delay}ms (attempt ${attempt + 1}): ${this.formatHttpError(e)}`,
+          );
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }
-        throw e;
+        throw new Error(this.formatHttpError(e));
       }
     }
 
@@ -121,11 +140,13 @@ export class KisBaseService {
       } catch (e) {
         if (attempt < this.maxRetries && this.isRetryable(e)) {
           const delay = (attempt + 1) * 500;
-          this.logger.warn(`Retrying POST ${path} [${trId}] after ${delay}ms (attempt ${attempt + 1}): ${e.message}`);
+          this.logger.warn(
+            `Retrying POST ${path} [${trId}] after ${delay}ms (attempt ${attempt + 1}): ${this.formatHttpError(e)}`,
+          );
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }
-        throw e;
+        throw new Error(this.formatHttpError(e));
       }
     }
 
