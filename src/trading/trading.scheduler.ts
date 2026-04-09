@@ -778,6 +778,8 @@ export class TradingScheduler implements OnModuleInit {
     stockIndicators.payoutRatio = secFundamentals.payoutRatio ?? stockIndicators.payoutRatio;
     stockIndicators.latestSecFilingDate = secFundamentals.latestFilingDate;
     stockIndicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    stockIndicators.latestSecPeriodicFilingDate = secFundamentals.latestPeriodicFilingDate;
+    stockIndicators.latestSecPeriodicFilingForm = secFundamentals.latestPeriodicFilingForm;
     stockIndicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
     stockIndicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
   }

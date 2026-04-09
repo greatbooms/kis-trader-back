@@ -24,6 +24,10 @@ interface NormalizedFactEntry {
   end?: string;
 }
 
+interface MetricPoint extends NormalizedFactEntry {
+  concept: string;
+}
+
 interface SecTickerMappingResponse {
   data?: Array<[number | string, string, string, string]>;
 }
@@ -122,33 +126,44 @@ export class SecService {
   }
 
   private buildFundamentalsFromFacts(companyFacts: any, submissions: SecSubmissionsResponse | undefined, currentPrice: number): SecFundamentals {
-    const latestRevenue = this.pickLatestAnnualMetric(companyFacts, [
+    const revenuePoints = this.collectMetricPoints(companyFacts, [
       'RevenueFromContractWithCustomerExcludingAssessedTax',
       'SalesRevenueNet',
       'Revenues',
-    ]);
-    const previousRevenue = this.pickPreviousAnnualMetric(companyFacts, [
-      'RevenueFromContractWithCustomerExcludingAssessedTax',
-      'SalesRevenueNet',
-      'Revenues',
-    ]);
-    const latestOperatingIncome = this.pickLatestAnnualMetric(companyFacts, ['OperatingIncomeLoss']);
-    const previousOperatingIncome = this.pickPreviousAnnualMetric(companyFacts, ['OperatingIncomeLoss']);
-    const latestNetIncome = this.pickLatestAnnualMetric(companyFacts, ['NetIncomeLoss']);
-    const latestGrossProfit = this.pickLatestAnnualMetric(companyFacts, ['GrossProfit']);
-    const latestEps = this.pickLatestAnnualMetric(companyFacts, ['EarningsPerShareDiluted', 'EarningsPerShareBasic']);
-    const previousEps = this.pickPreviousAnnualMetric(companyFacts, ['EarningsPerShareDiluted', 'EarningsPerShareBasic']);
-    const latestAssets = this.pickLatestInstantMetric(companyFacts, ['Assets']);
-    const previousAssets = this.pickPreviousInstantMetric(companyFacts, ['Assets']);
-    const latestEquity = this.pickLatestInstantMetric(companyFacts, ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest']);
-    const previousEquity = this.pickPreviousInstantMetric(companyFacts, ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest']);
-    const latestLiabilities = this.pickLatestInstantMetric(companyFacts, ['Liabilities']);
-    const latestCurrentAssets = this.pickLatestInstantMetric(companyFacts, ['AssetsCurrent']);
-    const latestCurrentLiabilities = this.pickLatestInstantMetric(companyFacts, ['LiabilitiesCurrent']);
-    const latestDividendPerShare = this.pickLatestAnnualMetric(companyFacts, [
+    ], 'annual');
+    const operatingIncomePoints = this.collectMetricPoints(companyFacts, ['OperatingIncomeLoss'], 'annual');
+    const netIncomePoints = this.collectMetricPoints(companyFacts, ['NetIncomeLoss'], 'annual');
+    const grossProfitPoints = this.collectMetricPoints(companyFacts, ['GrossProfit'], 'annual');
+    const epsPoints = this.collectMetricPoints(companyFacts, ['EarningsPerShareDiluted', 'EarningsPerShareBasic'], 'annual');
+    const assetsPoints = this.collectMetricPoints(companyFacts, ['Assets'], 'instant');
+    const equityPoints = this.collectMetricPoints(companyFacts, ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'], 'instant');
+    const liabilitiesPoints = this.collectMetricPoints(companyFacts, ['Liabilities'], 'instant');
+    const currentAssetsPoints = this.collectMetricPoints(companyFacts, ['AssetsCurrent'], 'instant');
+    const currentLiabilitiesPoints = this.collectMetricPoints(companyFacts, ['LiabilitiesCurrent'], 'instant');
+    const dividendPoints = this.collectMetricPoints(companyFacts, [
       'CommonStockDividendsPerShareDeclared',
       'CommonStockDividendsPerShareCashPaid',
-    ]);
+    ], 'annual');
+
+    const latestRevenuePoint = revenuePoints[0];
+    const previousRevenuePoint = revenuePoints[1];
+    const latestRevenue = latestRevenuePoint?.value;
+    const previousRevenue = previousRevenuePoint?.value;
+
+    const latestOperatingIncome = this.findMatchingPeriodValue(operatingIncomePoints, latestRevenuePoint) ?? operatingIncomePoints[0]?.value;
+    const previousOperatingIncome = operatingIncomePoints[1]?.value;
+    const latestNetIncome = this.findMatchingPeriodValue(netIncomePoints, latestRevenuePoint) ?? netIncomePoints[0]?.value;
+    const latestGrossProfit = this.findMatchingPeriodValue(grossProfitPoints, latestRevenuePoint) ?? grossProfitPoints[0]?.value;
+    const latestEps = epsPoints[0]?.value;
+    const previousEps = epsPoints[1]?.value;
+    const latestAssets = assetsPoints[0]?.value;
+    const previousAssets = assetsPoints[1]?.value;
+    const latestEquity = equityPoints[0]?.value;
+    const previousEquity = equityPoints[1]?.value;
+    const latestLiabilities = liabilitiesPoints[0]?.value;
+    const latestCurrentAssets = currentAssetsPoints[0]?.value;
+    const latestCurrentLiabilities = currentLiabilitiesPoints[0]?.value;
+    const latestDividendPerShare = this.findMatchingPeriodValue(dividendPoints, latestRevenuePoint) ?? dividendPoints[0]?.value;
 
     const filingMeta = this.buildFilingMeta(submissions);
 
@@ -185,17 +200,28 @@ export class SecService {
       payoutRatio,
       latestFilingDate: filingMeta.latestFilingDate,
       latestFilingForm: filingMeta.latestFilingForm,
+      latestPeriodicFilingDate: filingMeta.latestPeriodicFilingDate,
+      latestPeriodicFilingForm: filingMeta.latestPeriodicFilingForm,
       recentForm8KCount30d: filingMeta.recentForm8KCount30d,
       secPeriodicReportAgeDays: filingMeta.secPeriodicReportAgeDays,
     };
   }
 
-  private buildFilingMeta(submissions: SecSubmissionsResponse | undefined): Pick<SecFundamentals, 'latestFilingDate' | 'latestFilingForm' | 'recentForm8KCount30d' | 'secPeriodicReportAgeDays'> {
+  private buildFilingMeta(
+    submissions: SecSubmissionsResponse | undefined,
+  ): Pick<
+    SecFundamentals,
+    'latestFilingDate' | 'latestFilingForm' |
+    'latestPeriodicFilingDate' | 'latestPeriodicFilingForm' |
+    'recentForm8KCount30d' | 'secPeriodicReportAgeDays'
+  > {
     const recentForms = submissions?.filings?.recent?.form ?? [];
     const recentDates = submissions?.filings?.recent?.filingDate ?? [];
     const today = new Date();
     let latestFilingDate: string | undefined;
     let latestFilingForm: string | undefined;
+    let latestPeriodicFilingDate: string | undefined;
+    let latestPeriodicFilingForm: string | undefined;
     let secPeriodicReportAgeDays: number | undefined;
     let recentForm8KCount30d = 0;
 
@@ -212,7 +238,12 @@ export class SecService {
       const ageDays = Math.floor((today.getTime() - parsedDate.getTime()) / (24 * 60 * 60 * 1000));
 
       if (form === '8-K' && ageDays <= 30) recentForm8KCount30d += 1;
-      if (secPeriodicReportAgeDays === undefined && (SecService.ANNUAL_FORMS.has(form) || SecService.QUARTERLY_FORMS.has(form))) {
+      if (
+        latestPeriodicFilingDate === undefined &&
+        (SecService.ANNUAL_FORMS.has(form) || SecService.QUARTERLY_FORMS.has(form))
+      ) {
+        latestPeriodicFilingDate = filingDate;
+        latestPeriodicFilingForm = form;
         secPeriodicReportAgeDays = ageDays;
       }
     }
@@ -220,28 +251,60 @@ export class SecService {
     return {
       latestFilingDate,
       latestFilingForm,
+      latestPeriodicFilingDate,
+      latestPeriodicFilingForm,
       recentForm8KCount30d: recentForm8KCount30d || undefined,
       secPeriodicReportAgeDays,
     };
   }
 
-  private pickLatestAnnualMetric(companyFacts: any, concepts: string[]): number | undefined {
-    return this.pickPeriodicMetric(companyFacts, concepts, 'annual', 0);
+  private collectMetricPoints(
+    companyFacts: any,
+    concepts: string[],
+    periodType: 'annual' | 'instant',
+  ): MetricPoint[] {
+    const points = concepts.flatMap((concept) => this.normalizeEntries(companyFacts?.facts?.['us-gaap']?.[concept]?.units)
+      .filter((entry) => this.matchesPeriodType(entry.form, periodType))
+      .map((entry) => ({
+        ...entry,
+        concept,
+      })));
+
+    points.sort((a, b) => {
+      const bTime = new Date(`${b.end ?? b.filed}T00:00:00Z`).getTime();
+      const aTime = new Date(`${a.end ?? a.filed}T00:00:00Z`).getTime();
+      if (bTime !== aTime) return bTime - aTime;
+      return new Date(`${b.filed ?? b.end}T00:00:00Z`).getTime() - new Date(`${a.filed ?? a.end}T00:00:00Z`).getTime();
+    });
+
+    const deduped: MetricPoint[] = [];
+    const seen = new Set<string>();
+    for (const point of points) {
+      const key = point.end ?? point.filed;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(point);
+    }
+
+    return deduped;
   }
 
-  private pickPreviousAnnualMetric(companyFacts: any, concepts: string[]): number | undefined {
-    return this.pickPeriodicMetric(companyFacts, concepts, 'annual', 1);
-  }
-
-  private pickLatestInstantMetric(companyFacts: any, concepts: string[]): number | undefined {
-    return this.pickPeriodicMetric(companyFacts, concepts, 'instant', 0);
-  }
-
-  private pickPreviousInstantMetric(companyFacts: any, concepts: string[]): number | undefined {
-    return this.pickPeriodicMetric(companyFacts, concepts, 'instant', 1);
+  private findMatchingPeriodValue(points: MetricPoint[], target: MetricPoint | undefined): number | undefined {
+    if (!target?.end) return undefined;
+    return points.find((point) => point.end === target.end)?.value;
   }
 
   private pickPeriodicMetric(
+    companyFacts: any,
+    concepts: string[],
+    periodType: 'annual' | 'instant',
+    index: number,
+  ): number | undefined {
+    const points = this.collectMetricPoints(companyFacts, concepts, periodType);
+    return points[index]?.value;
+  }
+
+  private legacyPickPeriodicMetric(
     companyFacts: any,
     concepts: string[],
     periodType: 'annual' | 'instant',

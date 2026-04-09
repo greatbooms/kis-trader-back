@@ -120,6 +120,140 @@ describe('SecService', () => {
     expect(fundamentals.dividendYield).toBeCloseTo(2);
     expect(fundamentals.payoutRatio).toBeCloseTo(40);
     expect(fundamentals.latestFilingForm).toBe('10-K');
+    expect(fundamentals.latestPeriodicFilingForm).toBe('10-K');
     expect(fundamentals.recentForm8KCount30d).toBeDefined();
+  });
+
+  it('should prefer the most recent annual revenue concept and align margins to the same period', () => {
+    const service = new SecService({
+      get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
+    } as unknown as ConfigService);
+
+    const companyFacts = {
+      facts: {
+        'us-gaap': {
+          RevenueFromContractWithCustomerExcludingAssessedTax: {
+            units: {
+              USD: [
+                { val: 26914, form: '10-K', filed: '2022-03-18', end: '2022-01-30' },
+              ],
+            },
+          },
+          Revenues: {
+            units: {
+              USD: [
+                { val: 215938, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+                { val: 130497, form: '10-K', filed: '2025-02-26', end: '2025-01-26' },
+              ],
+            },
+          },
+          OperatingIncomeLoss: {
+            units: {
+              USD: [
+                { val: 130387, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+                { val: 81453, form: '10-K', filed: '2025-02-26', end: '2025-01-26' },
+              ],
+            },
+          },
+          NetIncomeLoss: {
+            units: {
+              USD: [
+                { val: 120067, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+          GrossProfit: {
+            units: {
+              USD: [
+                { val: 153463, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+          EarningsPerShareDiluted: {
+            units: {
+              'USD/shares': [
+                { val: 4.9, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+                { val: 2.94, form: '10-K', filed: '2025-02-26', end: '2025-01-26' },
+              ],
+            },
+          },
+          Assets: {
+            units: {
+              USD: [
+                { val: 206803, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+                { val: 111601, form: '10-K', filed: '2025-02-26', end: '2025-01-26' },
+              ],
+            },
+          },
+          Liabilities: {
+            units: {
+              USD: [
+                { val: 49510, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+          StockholdersEquity: {
+            units: {
+              USD: [
+                { val: 157293, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+                { val: 79327, form: '10-K', filed: '2025-02-26', end: '2025-01-26' },
+              ],
+            },
+          },
+          AssetsCurrent: {
+            units: {
+              USD: [
+                { val: 125605, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+          LiabilitiesCurrent: {
+            units: {
+              USD: [
+                { val: 32163, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+          CommonStockDividendsPerShareDeclared: {
+            units: {
+              'USD/shares': [
+                { val: 0.04, form: '10-K', filed: '2026-02-25', end: '2026-01-25' },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const fundamentals = (service as any).buildFundamentalsFromFacts(companyFacts, undefined, 177);
+
+    expect(fundamentals.revenueGrowthRate).toBeCloseTo(65.48, 1);
+    expect(fundamentals.operatingMargin).toBeCloseTo(60.38, 1);
+    expect(fundamentals.netMargin).toBeCloseTo(55.60, 1);
+    expect(fundamentals.grossMargin).toBeCloseTo(71.07, 1);
+    expect(fundamentals.dividendYield).toBeCloseTo(0.0226, 3);
+  });
+
+  it('should keep the latest filing separate from the latest periodic filing', () => {
+    const service = new SecService({
+      get: jest.fn((key: string) => key === 'sec.userAgent' ? 'kis-trader-test admin@example.com' : undefined),
+    } as unknown as ConfigService);
+
+    const submissions = {
+      filings: {
+        recent: {
+          form: ['4', '8-K', '10-Q', '10-K'],
+          filingDate: ['2026-04-03', '2026-04-02', '2026-03-19', '2025-10-03'],
+        },
+      },
+    };
+
+    const filingMeta = (service as any).buildFilingMeta(submissions);
+
+    expect(filingMeta.latestFilingForm).toBe('4');
+    expect(filingMeta.latestFilingDate).toBe('2026-04-03');
+    expect(filingMeta.latestPeriodicFilingForm).toBe('10-Q');
+    expect(filingMeta.latestPeriodicFilingDate).toBe('2026-03-19');
+    expect(filingMeta.secPeriodicReportAgeDays).toBeDefined();
   });
 });

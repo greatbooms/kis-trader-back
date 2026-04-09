@@ -22,6 +22,11 @@ const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
   NASD: 150000, NYSE: 150000, AMEX: 50000, TKSE: 20000000,
   SEHK: 1200000, SHAA: 1100000, SZAA: 1100000, HASE: 4000000000, VNSE: 4000000000,
 };
+const MAX_OVERSEAS_CANDIDATES_BY_EXCHANGE: Record<string, number> = {
+  NASD: 40,
+  NYSE: 40,
+  AMEX: 20,
+};
 const MAX_SCREENING_RESULTS = 20;
 const MAX_SCREENING_ETFS = 5;
 
@@ -385,10 +390,13 @@ export class ScreeningService {
     const candidates: ScreeningCandidate[] = [];
     const seen = new Set<string>();
     const minMcap = MIN_MARKET_CAP_BY_EXCHANGE[exchangeCode] ?? 200000;
+    const maxCandidates = MAX_OVERSEAS_CANDIDATES_BY_EXCHANGE[exchangeCode] ?? 40;
 
     try {
       const results = await this.kisOverseas.searchStocks(exchangeCode, {});
       for (const item of results) {
+        if (candidates.length >= maxCandidates) break;
+
         const code = item.symb;
         if (!code || seen.has(code)) continue;
 
@@ -414,26 +422,30 @@ export class ScreeningService {
       this.logger.warn(`Overseas search failed for ${exchangeCode}: ${e.message}`);
     }
 
-    try {
-      const volumeRank = await this.kisOverseas.getVolumeRanking(exchangeCode);
-      for (const item of volumeRank.slice(0, 30)) {
-        const code = item.symb;
-        if (!code || seen.has(code)) continue;
-        seen.add(code);
+    if (candidates.length < maxCandidates) {
+      try {
+        const volumeRank = await this.kisOverseas.getVolumeRanking(exchangeCode);
+        for (const item of volumeRank.slice(0, 30)) {
+          if (candidates.length >= maxCandidates) break;
 
-        candidates.push({
-          stockCode: code,
-          stockName: item.name || code,
-          exchangeCode,
-          market: 'OVERSEAS',
-          currentPrice: this.toNumber(item.last) ?? 0,
-          changeRate: this.toNumber(item.rate) ?? 0,
-          volume: this.toInteger(item.tvol),
-          marketCap: this.toInteger(item.valx),
-        });
+          const code = item.symb;
+          if (!code || seen.has(code)) continue;
+          seen.add(code);
+
+          candidates.push({
+            stockCode: code,
+            stockName: item.name || code,
+            exchangeCode,
+            market: 'OVERSEAS',
+            currentPrice: this.toNumber(item.last) ?? 0,
+            changeRate: this.toNumber(item.rate) ?? 0,
+            volume: this.toInteger(item.tvol),
+            marketCap: this.toInteger(item.valx),
+          });
+        }
+      } catch (e) {
+        this.logger.warn(`Overseas volume rank failed for ${exchangeCode}: ${e.message}`);
       }
-    } catch (e) {
-      this.logger.warn(`Overseas volume rank failed for ${exchangeCode}: ${e.message}`);
     }
 
     return candidates;
@@ -908,6 +920,8 @@ export class ScreeningService {
     indicators.payoutRatio = secFundamentals.payoutRatio ?? indicators.payoutRatio;
     indicators.latestSecFilingDate = secFundamentals.latestFilingDate;
     indicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    indicators.latestSecPeriodicFilingDate = secFundamentals.latestPeriodicFilingDate;
+    indicators.latestSecPeriodicFilingForm = secFundamentals.latestPeriodicFilingForm;
     indicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
     indicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
   }

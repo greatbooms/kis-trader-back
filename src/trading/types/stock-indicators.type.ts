@@ -71,6 +71,8 @@ export interface StockIndicators {
   latestOwnershipReportDate?: string; // 최근 지분공시일
   latestSecFilingDate?: string; // 최근 SEC filing 일자
   latestSecFilingForm?: string; // 최근 SEC filing 양식
+  latestSecPeriodicFilingDate?: string; // 최근 SEC 정기보고서 일자
+  latestSecPeriodicFilingForm?: string; // 최근 SEC 정기보고서 양식
   recentSecForm8KCount30d?: number; // 최근 30일 8-K 건수
   secPeriodicReportAgeDays?: number; // 최근 정기보고서 경과일
 }

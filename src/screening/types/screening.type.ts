@@ -199,6 +199,8 @@ export interface StockIndicatorDetail {
   latestOwnershipReportDate?: string;
   latestSecFilingDate?: string;
   latestSecFilingForm?: string;
+  latestSecPeriodicFilingDate?: string;
+  latestSecPeriodicFilingForm?: string;
   recentSecForm8KCount30d?: number;
   secPeriodicReportAgeDays?: number;
   // 해외 추가

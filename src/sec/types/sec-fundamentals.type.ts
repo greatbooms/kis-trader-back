@@ -14,6 +14,8 @@ export interface SecFundamentals {
   payoutRatio?: number;
   latestFilingDate?: string;
   latestFilingForm?: string;
+  latestPeriodicFilingDate?: string;
+  latestPeriodicFilingForm?: string;
   recentForm8KCount30d?: number;
   secPeriodicReportAgeDays?: number;
 }
