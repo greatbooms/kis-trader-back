@@ -169,9 +169,9 @@ describe('InfiniteBuyStrategy', () => {
       // 매수 없음
       const buys = signals.filter((s) => s.side === 'BUY');
       expect(buys).toHaveLength(0);
-      // 매도 시그널은 생성됨 (Sell1/Sell2)
+      // 매도 시그널은 생성됨
       const sells = signals.filter((s) => s.side === 'SELL');
-      expect(sells.length).toBeGreaterThanOrEqual(1);
+      expect(sells).toHaveLength(1);
     });
   });
 
@@ -283,7 +283,7 @@ describe('InfiniteBuyStrategy', () => {
       expect(buys[0].price).toBe(70000);
     });
 
-    it('should generate sell signals with dynamic target rates', async () => {
+    it('should generate first take-profit target based on T', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -296,11 +296,71 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
-      const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
+      const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
 
-      expect(sell2).toBeDefined();
-      // T=5 → sell2Rate = max(15 - 5/3, 8)% = 13.3%
-      expect(sell2!.price).toBe(Math.round(70000 * (1 + (15 - 5 / 3) / 100)));
+      expect(takeProfit).toBeDefined();
+      // T=5 → +13.0%
+      expect(takeProfit!.price).toBe(Math.round(70000 * 1.13));
+      expect(takeProfit!.quantity).toBe(10);
+      expect(takeProfit!.metadata?.secondaryTargetPrice).toBe(Math.round(70000 * 1.156));
+      expect(takeProfit!.metadata?.secondaryTargetQuantity).toBe(10);
+    });
+
+    it('should emit only second take-profit while secondary exit plan is active', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 70000,
+          totalInvested: 500000,
+        },
+      });
+      ctx.watchStock.strategyParams = {
+        secondaryExitPlan: {
+          firstTargetDate: '2026-04-08',
+          secondTargetPrice: 80920,
+          secondTargetRate: 0.156,
+          secondTargetQuantity: 10,
+        },
+      };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      const buys = signals.filter((s) => s.side === 'BUY');
+      const sells = signals.filter((s) => s.side === 'SELL');
+      expect(buys).toHaveLength(0);
+      expect(sells).toHaveLength(1);
+      expect(sells[0].reason).toContain('Take profit 2');
+      expect(sells[0].quantity).toBe(10);
+      expect(sells[0].price).toBe(80920);
+    });
+
+    it('should resume normal mode after second target attempt day passes', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 70000,
+          totalInvested: 500000,
+        },
+        totalPortfolioValue: 10000000,
+      });
+      ctx.watchStock.strategyParams = {
+        secondaryExitPlan: {
+          firstTargetDate: '2026-04-07',
+          secondTargetPrice: 80920,
+          secondTargetRate: 0.156,
+          secondTargetQuantity: 10,
+          secondTargetAttemptedDate: '2026-04-08',
+        },
+      };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals.some((s) => s.reason?.includes('Take profit 1'))).toBe(true);
+      expect(signals.some((s) => s.reason?.includes('Take profit 2'))).toBe(false);
     });
   });
 
@@ -324,7 +384,7 @@ describe('InfiniteBuyStrategy', () => {
       expect(buys.every((b) => b.reason?.includes('Buy2'))).toBe(true);
     });
 
-    it('should use higher sell target rate when T >= 20', async () => {
+    it('should lower the take-profit target when T >= 20', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -337,11 +397,12 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
-      const sell2 = signals.find((s) => s.reason?.includes('Sell2'));
+      const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
 
-      expect(sell2).toBeDefined();
-      // T=25 → sell2Rate = max(15 - 25/3, 8)% = 8.0%
-      expect(sell2!.price).toBe(Math.round(70000 * 1.08));
+      expect(takeProfit).toBeDefined();
+      // T=25 → +7.4%
+      expect(takeProfit!.price).toBe(Math.round(70000 * 1.074));
+      expect(takeProfit!.quantity).toBe(18);
     });
   });
 

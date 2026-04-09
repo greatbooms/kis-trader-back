@@ -8,4 +8,5 @@ export interface SimulationPendingOrder {
   price: number; // 지정가
   reason: string;
   createdAt: Date;
+  metadata?: Record<string, any>;
 }

@@ -5,7 +5,14 @@ import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { Market, Side, SimulationStatus, SimulationTradeStatus, Prisma } from '@prisma/client';
-import { StockStrategyContext, WatchStockConfig, StockFundamentals, RiskState, MarketRegimeLabel } from '../trading/types';
+import {
+  StockStrategyContext,
+  WatchStockConfig,
+  StockFundamentals,
+  RiskState,
+  MarketRegimeLabel,
+  InfiniteBuyStrategyParams,
+} from '../trading/types';
 import { MarketRegimeService } from '../trading/market-regime.service';
 import { StockPriceResult } from '../kis/types/kis-api.types';
 import { SimulationMetrics, SimulationPendingOrder } from './types';
@@ -204,6 +211,7 @@ export class SimulationService {
       };
 
       const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+      const hasSecondTargetSignal = signals.some((signal) => signal.metadata?.phase === 'take-profit-2');
 
       if (signals.length === 0) {
         this.logger.debug(
@@ -224,6 +232,9 @@ export class SimulationService {
           this.logger.log(`[SIM] ${session.stockCode} fill: ${signal.side} x${signal.quantity} @ ${signalPrice || price.currentPrice} | reason=${signal.reason}`);
           await this.virtualExecute(sessionId, signal, price.currentPrice);
         } else {
+          if (session.strategyName === 'infinite-buy' && signal.metadata?.phase === 'take-profit-2') {
+            await this.markInfiniteBuySecondTargetAttempted(sessionId);
+          }
           const pending: SimulationPendingOrder = {
             sessionId,
             market: signal.market,
@@ -234,6 +245,7 @@ export class SimulationService {
             price: signalPrice,
             reason: signal.reason,
             createdAt: new Date(),
+            metadata: signal.metadata,
           };
           const orders = this.pendingOrders.get(sessionId) || [];
           orders.push(pending);
@@ -254,7 +266,11 @@ export class SimulationService {
               data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
             });
           }
-        } else if (perCycleQuota > 0 && params.lastAccumulatedDate !== today) {
+        } else if (
+          perCycleQuota > 0
+          && params.lastAccumulatedDate !== today
+          && !(session.strategyName === 'infinite-buy' && (hasSecondTargetSignal || this.hasActiveInfiniteBuySecondTarget(params as Record<string, any>)))
+        ) {
           const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
           await this.prisma.simulationSession.update({
             where: { id: session.id },
@@ -308,6 +324,78 @@ export class SimulationService {
 
   private getPersistedSessionCycle(cycle: number): number {
     return Math.max(0, Math.floor(cycle));
+  }
+
+  private getTodayDate(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private hasActiveInfiniteBuySecondTarget(strategyParams?: Record<string, any>): boolean {
+    const plan = (strategyParams as InfiniteBuyStrategyParams | undefined)?.secondaryExitPlan;
+    if (!plan || !plan.firstTargetDate || plan.secondTargetQuantity <= 0) return false;
+
+    const today = this.getTodayDate();
+    if (plan.firstTargetDate >= today) return false;
+    return !plan.secondTargetAttemptedDate || plan.secondTargetAttemptedDate === today;
+  }
+
+  private async updateInfiniteBuyStrategyParams(
+    sessionId: string,
+    updater: (params: InfiniteBuyStrategyParams) => InfiniteBuyStrategyParams,
+  ): Promise<void> {
+    const session = await this.prisma.simulationSession.findUnique({
+      where: { id: sessionId },
+      select: { strategyParams: true },
+    });
+    if (!session) return;
+
+    const currentParams = ((session.strategyParams as Record<string, any>) || {}) as InfiniteBuyStrategyParams;
+    await this.prisma.simulationSession.update({
+      where: { id: sessionId },
+      data: { strategyParams: updater(currentParams) },
+    });
+  }
+
+  private async markInfiniteBuySecondTargetAttempted(sessionId: string): Promise<void> {
+    const today = this.getTodayDate();
+    await this.updateInfiniteBuyStrategyParams(sessionId, (params) => {
+      if (!params.secondaryExitPlan) return params;
+      return {
+        ...params,
+        secondaryExitPlan: {
+          ...params.secondaryExitPlan,
+          secondTargetAttemptedDate: today,
+        },
+      };
+    });
+  }
+
+  private async clearInfiniteBuySecondaryExitPlan(sessionId: string): Promise<void> {
+    await this.updateInfiniteBuyStrategyParams(sessionId, (params) => {
+      const { secondaryExitPlan: _secondaryExitPlan, ...rest } = params;
+      return rest;
+    });
+  }
+
+  private async persistInfiniteBuySecondaryExitPlan(
+    sessionId: string,
+    signal: { metadata?: Record<string, any> },
+  ): Promise<void> {
+    const secondTargetPrice = Number(signal.metadata?.secondaryTargetPrice);
+    const secondTargetRate = Number(signal.metadata?.secondaryTargetRate);
+    const secondTargetQuantity = Number(signal.metadata?.secondaryTargetQuantity);
+    if (!secondTargetPrice || !secondTargetRate || !secondTargetQuantity) return;
+
+    const today = this.getTodayDate();
+    await this.updateInfiniteBuyStrategyParams(sessionId, (params) => ({
+      ...params,
+      secondaryExitPlan: {
+        firstTargetDate: today,
+        secondTargetPrice,
+        secondTargetRate,
+        secondTargetQuantity,
+      },
+    }));
   }
 
   private async syncSessionCycle(sessionId: string, exchangeCode: string, stockCode: string): Promise<void> {
@@ -398,7 +486,7 @@ export class SimulationService {
 
   private async virtualExecute(
     sessionId: string,
-    signal: { market: string; exchangeCode: string; stockCode: string; side: string; quantity: number; price?: number; reason: string },
+    signal: { market: string; exchangeCode: string; stockCode: string; side: string; quantity: number; price?: number; reason: string; metadata?: Record<string, any> },
     currentMarketPrice: number,
   ): Promise<void> {
     const session = await this.prisma.simulationSession.findUnique({ where: { id: sessionId } });
@@ -500,6 +588,10 @@ export class SimulationService {
         data: { currentCash: { decrement: new Prisma.Decimal(totalAmount) } },
       });
 
+      if (session.strategyName === 'infinite-buy') {
+        await this.clearInfiniteBuySecondaryExitPlan(sessionId);
+      }
+
       await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
 
       this.logger.log(`[SIM] BUY ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
@@ -599,6 +691,14 @@ export class SimulationService {
         data: { currentCash: { increment: new Prisma.Decimal(totalAmount) } },
       });
 
+      if (session.strategyName === 'infinite-buy') {
+        if (signal.metadata?.phase === 'take-profit-1' && newQty > 0) {
+          await this.persistInfiniteBuySecondaryExitPlan(sessionId, signal);
+        } else {
+          await this.clearInfiniteBuySecondaryExitPlan(sessionId);
+        }
+      }
+
       await this.syncSessionCycle(sessionId, signal.exchangeCode, signal.stockCode);
 
       this.logger.log(`[SIM] SELL ${signal.stockCode} x${signal.quantity} @ ${price} (session: ${sessionId})`);
@@ -656,6 +756,7 @@ export class SimulationService {
           quantity: order.quantity,
           price: order.price,
           reason: order.reason,
+          metadata: order.metadata,
         }, currentPrice);
       } else {
         remaining.push(order);
@@ -1131,6 +1232,8 @@ export class SimulationService {
     stockIndicators.payoutRatio = secFundamentals.payoutRatio ?? stockIndicators.payoutRatio;
     stockIndicators.latestSecFilingDate = secFundamentals.latestFilingDate;
     stockIndicators.latestSecFilingForm = secFundamentals.latestFilingForm;
+    stockIndicators.latestSecPeriodicFilingDate = secFundamentals.latestPeriodicFilingDate;
+    stockIndicators.latestSecPeriodicFilingForm = secFundamentals.latestPeriodicFilingForm;
     stockIndicators.recentSecForm8KCount30d = secFundamentals.recentForm8KCount30d;
     stockIndicators.secPeriodicReportAgeDays = secFundamentals.secPeriodicReportAgeDays;
   }

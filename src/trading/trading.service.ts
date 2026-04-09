@@ -6,6 +6,7 @@ import {
   TradingSignal,
   PerStockTradingStrategy,
   StockStrategyContext,
+  InfiniteBuyStrategyParams,
 } from './types';
 import { BalanceItem } from '../kis/types/kis-api.types';
 import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
@@ -53,6 +54,8 @@ export class TradingService {
     strategy: PerStockTradingStrategy,
     contexts: StockStrategyContext[],
   ): Promise<void> {
+    const skipQuotaAccumulationIds = new Set<string>();
+
     for (const ctx of contexts) {
       try {
         const { signals, skipReasons } = await strategy.evaluateStock(ctx);
@@ -109,6 +112,13 @@ export class TradingService {
           await this.executeSignal(signal, strategy.name, ctx);
         }
 
+        if (
+          strategy.name === 'infinite-buy'
+          && signals.some((signal) => signal.metadata?.phase === 'take-profit-2')
+        ) {
+          skipQuotaAccumulationIds.add(ctx.watchStock.id);
+        }
+
         // 분할매수 전략: 매수 시그널 성공 시 누적 quota 리셋
         if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
           const hasBuySignal = signals.some((s) => s.side === 'BUY');
@@ -131,7 +141,7 @@ export class TradingService {
 
     // 분할매수 전략: 매수 시그널 없었던 종목에 대해 quota 누적
     if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
-      await this.accumulateUnusedQuotas(strategy.name, contexts);
+      await this.accumulateUnusedQuotas(strategy.name, contexts, skipQuotaAccumulationIds);
     }
   }
 
@@ -362,6 +372,10 @@ export class TradingService {
       record.id,
     );
 
+    if (strategyName === 'infinite-buy' && signal.metadata?.phase === 'take-profit-2' && ctx?.watchStock?.id) {
+      await this.markInfiniteBuySecondTargetAttempted(ctx.watchStock.id);
+    }
+
     try {
       let result;
       if (signal.market === 'DOMESTIC') {
@@ -404,6 +418,10 @@ export class TradingService {
       if (result.success) {
         this.logger.log(`Order executed: ${signal.side} ${signal.stockCode} x ${signal.quantity}`);
 
+        if (strategyName === 'infinite-buy' && ctx?.watchStock?.id) {
+          await this.handleInfiniteBuySignalFill(ctx.watchStock.id, signal, ctx.position?.quantity || 0);
+        }
+
         // Send Slack trade alert
         if (this.slackService?.isEnabled()) {
           const position = await this.prisma.position.findFirst({
@@ -430,14 +448,16 @@ export class TradingService {
           };
 
           if (ctx) {
-            const T = ctx.position?.totalInvested
-              ? ctx.position.totalInvested / (ctx.watchStock.quota || 1)
+            const perCycleQuota = (ctx.watchStock.quota && ctx.watchStock.maxCycles > 0)
+              ? ctx.watchStock.quota / ctx.watchStock.maxCycles
               : 0;
-            const baseRate = (10 - T / 2 + 100) / 100;
+            const T = ctx.position?.totalInvested && perCycleQuota > 0
+              ? ctx.position.totalInvested / perCycleQuota
+              : 0;
             alertCtx.strategyDetails = {
               tValue: T,
               maxCycles: ctx.watchStock.maxCycles,
-              pivotPrice: baseRate * (ctx.position?.avgPrice || signal.price || 0),
+              pivotPrice: signal.price || ctx.position?.avgPrice || 0,
               rsi: ctx.stockIndicators?.rsi14,
               ma200: ctx.stockIndicators?.ma200,
               originalQuota: ctx.watchStock.quota,
@@ -547,11 +567,14 @@ export class TradingService {
   private async accumulateUnusedQuotas(
     strategyName: string,
     contexts: StockStrategyContext[],
+    skipWatchStockIds: Set<string> = new Set(),
   ): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
 
     for (const ctx of contexts) {
       if (ctx.alreadyExecutedToday) continue;
+      if (skipWatchStockIds.has(ctx.watchStock.id)) continue;
+      if (strategyName === 'infinite-buy' && this.hasActiveInfiniteBuySecondTarget(ctx.watchStock.strategyParams)) continue;
 
       const ws = await this.prisma.watchStock.findUnique({ where: { id: ctx.watchStock.id } });
       if (!ws || !ws.quota) continue;
@@ -581,6 +604,101 @@ export class TradingService {
       this.logger.log(
         `[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (no buy signal today)`,
       );
+    }
+  }
+
+  private getTodayDate(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private hasActiveInfiniteBuySecondTarget(strategyParams?: Record<string, any>): boolean {
+    const plan = (strategyParams as InfiniteBuyStrategyParams | undefined)?.secondaryExitPlan;
+    if (!plan || !plan.firstTargetDate || plan.secondTargetQuantity <= 0) return false;
+
+    const today = this.getTodayDate();
+    if (plan.firstTargetDate >= today) return false;
+    return !plan.secondTargetAttemptedDate || plan.secondTargetAttemptedDate === today;
+  }
+
+  private async updateInfiniteBuyStrategyParams(
+    watchStockId: string,
+    updater: (params: InfiniteBuyStrategyParams) => InfiniteBuyStrategyParams,
+  ): Promise<void> {
+    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+    if (!watchStock) return;
+
+    const currentParams = ((watchStock.strategyParams as Record<string, any>) || {}) as InfiniteBuyStrategyParams;
+    await this.prisma.watchStock.update({
+      where: { id: watchStockId },
+      data: { strategyParams: updater(currentParams) },
+    });
+  }
+
+  private async markInfiniteBuySecondTargetAttempted(watchStockId: string): Promise<void> {
+    const today = this.getTodayDate();
+    await this.updateInfiniteBuyStrategyParams(watchStockId, (params) => {
+      if (!params.secondaryExitPlan) return params;
+      return {
+        ...params,
+        secondaryExitPlan: {
+          ...params.secondaryExitPlan,
+          secondTargetAttemptedDate: today,
+        },
+      };
+    });
+  }
+
+  private async clearInfiniteBuySecondaryExitPlan(watchStockId: string): Promise<void> {
+    await this.updateInfiniteBuyStrategyParams(watchStockId, (params) => {
+      const { secondaryExitPlan: _secondaryExitPlan, ...rest } = params;
+      return rest;
+    });
+  }
+
+  private async persistInfiniteBuySecondaryExitPlan(watchStockId: string, signal: TradingSignal): Promise<void> {
+    const secondTargetPrice = Number(signal.metadata?.secondaryTargetPrice);
+    const secondTargetRate = Number(signal.metadata?.secondaryTargetRate);
+    const secondTargetQuantity = Number(signal.metadata?.secondaryTargetQuantity);
+    if (!secondTargetPrice || !secondTargetRate || !secondTargetQuantity) return;
+
+    const today = this.getTodayDate();
+    await this.updateInfiniteBuyStrategyParams(watchStockId, (params) => ({
+      ...params,
+      secondaryExitPlan: {
+        firstTargetDate: today,
+        secondTargetPrice,
+        secondTargetRate,
+        secondTargetQuantity,
+      },
+    }));
+  }
+
+  private async handleInfiniteBuySignalFill(
+    watchStockId: string,
+    signal: TradingSignal,
+    currentPositionQty: number,
+  ): Promise<void> {
+    if (signal.side === 'BUY') {
+      await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
+      return;
+    }
+
+    if (signal.metadata?.phase === 'take-profit-1') {
+      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      if (remainingQty > 0) {
+        await this.persistInfiniteBuySecondaryExitPlan(watchStockId, signal);
+      } else {
+        await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
+      }
+      return;
+    }
+
+    if (
+      signal.metadata?.phase === 'take-profit-2'
+      || this.isStopLossSignal(signal)
+      || signal.quantity >= currentPositionQty
+    ) {
+      await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
     }
   }
 }

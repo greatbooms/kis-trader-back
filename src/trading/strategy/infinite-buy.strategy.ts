@@ -6,6 +6,8 @@ import {
   StrategyEvaluationResult,
   ExecutionMode,
   StrategyMeta,
+  InfiniteBuyStrategyParams,
+  InfiniteBuySecondaryExitPlan,
 } from '../types';
 
 function hasNegativeConsensus(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
@@ -28,6 +30,61 @@ function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicator
 function hasEventDrivenRisk(stockIndicators: StockStrategyContext['stockIndicators']): boolean {
   return (stockIndicators.recentMaterialDisclosureCount30d ?? 0) >= 2
     || (stockIndicators.recentSecForm8KCount30d ?? 0) >= 3;
+}
+
+function getTargetProfitRate(T: number): number {
+  if (T < 2) return 0.15;
+  if (T < 4) return 0.14;
+  if (T < 6) return 0.13;
+  if (T < 8) return 0.12;
+  if (T < 10) return 0.11;
+  if (T < 12) return 0.10;
+  if (T < 14) return 0.095;
+  if (T < 16) return 0.09;
+  if (T < 18) return 0.085;
+  if (T < 20) return 0.08;
+  if (T < 24) return 0.077;
+  if (T < 28) return 0.074;
+  if (T < 32) return 0.072;
+  if (T < 36) return 0.07;
+  return 0.068;
+}
+
+function getSecondaryTargetBonusRate(T: number): number {
+  if (T < 4) return 0.03;
+  if (T < 8) return 0.026;
+  if (T < 12) return 0.022;
+  if (T < 20) return 0.018;
+  if (T < 28) return 0.014;
+  return 0.011;
+}
+
+function getTodayDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getSecondaryExitPlan(strategyParams?: Record<string, any>): InfiniteBuySecondaryExitPlan | undefined {
+  const plan = (strategyParams as InfiniteBuyStrategyParams | undefined)?.secondaryExitPlan;
+  if (!plan) return undefined;
+  if (
+    !plan.firstTargetDate
+    || !Number.isFinite(plan.secondTargetPrice)
+    || !Number.isFinite(plan.secondTargetRate)
+    || !Number.isFinite(plan.secondTargetQuantity)
+  ) {
+    return undefined;
+  }
+  return plan;
+}
+
+function isActiveSecondaryExitPlan(
+  plan: InfiniteBuySecondaryExitPlan | undefined,
+  today: string,
+): boolean {
+  if (!plan) return false;
+  if (plan.secondTargetQuantity <= 0) return false;
+  if (plan.firstTargetDate >= today) return false;
+  return !plan.secondTargetAttemptedDate || plan.secondTargetAttemptedDate === today;
 }
 
 
@@ -64,24 +121,35 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 미체결 시 장 마감 후 자동 취소, 다음 날 새 가격으로 재주문',
     '',
     '【매도 조건】',
-    '- Sell1: 보유량의 1/3을 평균단가 +max(10-T/2, 3)%에 매도',
-    '- Sell2: 나머지 2/3를 평균단가 +max(15-T/3, 8)%에 매도',
-    '- T가 높을수록 목표가가 낮아져 빠르게 탈출 (물린 구간 대응)',
+    '- 기본적으로 1차 목표가 1개만 계산하고, 도달 시 보유 수량의 50% 매도',
+    '- 1차 매도 후 남은 50%는 다음 거래일에만 2차 목표가를 시도',
+    '- 2차 목표가 미체결 시 분할매도 상태를 해제하고 일반 무한매수 모드로 복귀',
+    '- 목표수익률은 T가 높을수록 단계적으로 낮아져 탈출 우선',
     '- 손절: 평균단가 대비 설정 손절률(기본 30%) 하회 시 전량 매도',
     '',
-    '  T   | Sell1(1/3) | Sell2(2/3) | 가중평균',
-    '  ----+------------+------------+---------',
-    '   0  |   +10.0%   |   +15.0%   |  +13.3%',
-    '   4  |    +8.0%   |   +13.7%   |  +11.8%',
-    '  10  |    +5.0%   |   +11.7%   |   +9.4%',
-    '  14  |    +3.0%   |   +10.3%   |   +7.9%',
-    '  20  |    +3.0%   |    +8.3%   |   +6.6%',
-    '  30  |    +3.0%   |    +8.0%   |   +6.3%',
+    '  T 구간    | 1차 목표 | 2차 추가',
+    '  ----------+----------+----------',
+    '   0 ~ <2   | +15.0%   | +3.0%p',
+    '   2 ~ <4   | +14.0%   | +3.0%p',
+    '   4 ~ <6   | +13.0%   | +2.6%p',
+    '   6 ~ <8   | +12.0%   | +2.6%p',
+    '   8 ~ <10  | +11.0%   | +2.2%p',
+    '  10 ~ <12  | +10.0%   | +2.2%p',
+    '  12 ~ <14  |  +9.5%   | +1.8%p',
+    '  14 ~ <16  |  +9.0%   | +1.8%p',
+    '  16 ~ <18  |  +8.5%   | +1.8%p',
+    '  18 ~ <20  |  +8.0%   | +1.8%p',
+    '  20 ~ <24  |  +7.7%   | +1.4%p',
+    '  24 ~ <28  |  +7.4%   | +1.4%p',
+    '  28 ~ <32  |  +7.2%   | +1.1%p',
+    '  32 ~ <36  |  +7.0%   | +1.1%p',
+    '  36 이상   |  +6.8%   | +1.1%p',
     '',
     '【특징】',
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
     '- 시초가 변동 안정 후 주문하여 적정 가격에 진입',
     '- Buy2 지정가는 장 마감까지 체결 기회를 가짐',
+    '- 1차 익절 후 다음 거래일에만 추가 상승을 한 번 더 노림',
     '',
     '【안전장치】',
     '- 투자유의/시장경고 종목은 신규 진입 차단',
@@ -95,7 +163,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     riskLevel: 'medium',
     mddBuyBlock: -0.25,
     mddLiquidate: -0.35,
-    expectedReturn: '사이클당 +3~15% (T에 따라 동적)',
+    expectedReturn: '1차 +6.8~15%, 2차 +7.9~18%',
     maxLoss: '-30% (손절 기본값)',
     investmentPeriod: '3개월~1년',
     tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 02시)',
@@ -128,6 +196,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const exchangeCode = watchStock.exchangeCode;
     const isOverseas = market === 'OVERSEAS';
     const hasPosition = !!position && position.quantity > 0;
+    const strategyParams = (watchStock.strategyParams as InfiniteBuyStrategyParams | undefined) || {};
+    const today = getTodayDate();
 
     // --- 기본 무한매수법 계산 ---
     const quota = watchStock.quota;
@@ -168,6 +238,32 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     if (ctx.alreadyExecutedToday) {
       this.logger.debug(`[${watchStock.stockCode}] Already executed today, skip`);
       skipReasons.push('오늘 이미 실행됨');
+      return { signals, skipReasons };
+    }
+
+    const secondaryExitPlan = getSecondaryExitPlan(strategyParams);
+    if (hasPosition && isActiveSecondaryExitPlan(secondaryExitPlan, today)) {
+      const remainingQty = Math.min(holdQty, secondaryExitPlan!.secondTargetQuantity);
+      const targetPrice = roundPrice(secondaryExitPlan!.secondTargetPrice);
+
+      if (remainingQty > 0 && targetPrice > 0) {
+        signals.push({
+          market,
+          exchangeCode,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: remainingQty,
+          price: targetPrice,
+          reason:
+            `Take profit 2: T=${T.toFixed(1)}, +${(secondaryExitPlan!.secondTargetRate * 100).toFixed(1)}%, ` +
+            `${remainingQty}주 @ ${targetPrice}`,
+          orderDivision: '00',
+          metadata: {
+            phase: 'take-profit-2',
+          },
+        });
+      }
+
       return { signals, skipReasons };
     }
 
@@ -349,46 +445,35 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
       if (holdQty > 0) {
-        // 동적 익절률: T가 높을수록 목표가 낮아져 빠르게 탈출
-        // Sell1: max(10 - T/2, 3)%  — 초기 10% → T=14부터 3% 바닥
-        // Sell2: max(15 - T/3, 8)%  — 초기 15% → T=21부터 8% 바닥
-        const sell1Rate = Math.max(10 - T / 2, 3) / 100;
-        const sell2Rate = Math.max(15 - T / 3, 8) / 100;
+        const targetProfitRate = getTargetProfitRate(T);
+        const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
+        const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
+        const secondSellQty = holdQty - firstSellQty;
+        const secondaryTargetRate = targetProfitRate + getSecondaryTargetBonusRate(T);
+        const secondaryTargetPrice = roundPrice(avgPrice * (1 + secondaryTargetRate));
 
-        // Sell1: 보유량의 1/3 매도 (1차 익절)
-        const sell1Qty = Math.max(1, Math.round(holdQty / 3));
-        const sell1Price = roundPrice(avgPrice * (1 + sell1Rate));
-
-        if (sell1Price > 0) {
+        if (targetPrice > 0) {
           signals.push({
             market,
             exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'SELL',
-            quantity: sell1Qty,
-            price: sell1Price,
-            reason: `Sell1: T=${T.toFixed(1)}, +${(sell1Rate * 100).toFixed(1)}%, ${sell1Qty}주 @ ${sell1Price}`,
+            quantity: firstSellQty,
+            price: targetPrice,
+            reason:
+              secondSellQty > 0
+                ? `Take profit 1: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${targetPrice}`
+                : `Take profit: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${targetPrice}`,
             orderDivision: '00',
+            metadata: secondSellQty > 0
+              ? {
+                  phase: 'take-profit-1',
+                  secondaryTargetPrice,
+                  secondaryTargetRate,
+                  secondaryTargetQuantity: secondSellQty,
+                }
+              : undefined,
           });
-        }
-
-        // Sell2: 나머지 전량 매도 (2차 익절)
-        const sell2Qty = holdQty - sell1Qty;
-        if (sell2Qty > 0) {
-          const sell2Price = roundPrice(avgPrice * (1 + sell2Rate));
-
-          if (sell2Price > 0) {
-            signals.push({
-              market,
-              exchangeCode,
-              stockCode: watchStock.stockCode,
-              side: 'SELL',
-              quantity: sell2Qty,
-              price: sell2Price,
-              reason: `Sell2: T=${T.toFixed(1)}, +${(sell2Rate * 100).toFixed(1)}%, ${sell2Qty}주 @ ${sell2Price}`,
-              orderDivision: '00',
-            });
-          }
         }
       }
     } else if (!hasPosition && !buyAllowed) {

@@ -101,7 +101,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       quantity = 15; // roughly 1M / 70000 avg
       const avgPrice = totalInvested / quantity;
 
-      // Day 30: T=10, price drops to 60000 → sell targets should adjust
+      // Day 30: T=10, price drops to 60000 → 1차 목표가가 낮아져야 함
       const ctx2 = createBaseContext({
         position: {
           stockCode: '005930',
@@ -115,17 +115,16 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       ctx2.stockIndicators.rsi14 = 25; // oversold → 1.5x quota
       const { signals: signals2 } = await strategy.evaluateStock(ctx2);
 
-      // Should have buy + sell signals
+      // Should have buy + first take-profit signal
       const buys2 = signals2.filter((s) => s.side === 'BUY');
       const sells2 = signals2.filter((s) => s.side === 'SELL');
       expect(buys2.length).toBeGreaterThanOrEqual(1);
-      expect(sells2.length).toBeGreaterThanOrEqual(1);
+      expect(sells2).toHaveLength(1);
 
-      // T=10이므로 target = 10%
-      const sell2Target = sells2.find((s) => s.reason.includes('Sell2'));
-      if (sell2Target) {
-        expect(sell2Target.price).toBeGreaterThan(avgPrice);
-      }
+      // T=10이므로 1차 target = +10%
+      expect(sells2[0].reason).toContain('Take profit 1');
+      expect(sells2[0].price).toBe(Math.round(avgPrice * 1.10));
+      expect(sells2[0].quantity).toBe(Math.ceil(quantity / 2));
 
       // Day 60: 급락 → 손절 발동 (stopLossRate = 0.3 → -30%)
       totalInvested = perCycleQuota * 20; // T=20
