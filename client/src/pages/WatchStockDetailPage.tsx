@@ -15,6 +15,7 @@ import {
   useGetAvailableStrategiesQuery,
 } from '@/graphql/generated'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
+import { getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 
@@ -93,7 +94,7 @@ export function WatchStockDetailPage() {
   })
 
   const actualTrades = useMemo(
-    () => (tradesData?.trades ?? []).filter((trade) => trade.status === 'FILLED'),
+    () => (tradesData?.trades ?? []).filter((trade) => trade.status === 'FILLED' || (trade.executedQty ?? 0) > 0),
     [tradesData],
   )
 
@@ -357,6 +358,7 @@ export function WatchStockDetailPage() {
                 <TableRow>
                   <TableHead>일시</TableHead>
                   <TableHead>구분</TableHead>
+                  <TableHead>상태</TableHead>
                   <TableHead className="text-right">수량</TableHead>
                   <TableHead className="text-right">가격</TableHead>
                   <TableHead>사유</TableHead>
@@ -371,11 +373,29 @@ export function WatchStockDetailPage() {
                         {trade.side === 'BUY' ? '매수' : '매도'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">{formatNumber(trade.executedQty ?? trade.quantity)}</TableCell>
+                    <TableCell>
+                      {(() => {
+                        const info = getTradeRecordDisplayInfo(trade)
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <Badge variant={info.variant}>{info.label}</Badge>
+                            {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
+                          </div>
+                        )
+                      })()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div>{formatNumber(trade.executedQty ?? trade.quantity)}</div>
+                      {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
+                        <div className="text-xs text-muted-foreground">주문 {formatNumber(trade.quantity)}</div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       {formatCurrency(trade.executedPrice ?? trade.price, trade.market, trade.exchangeCode)}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{trade.reason ?? '-'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

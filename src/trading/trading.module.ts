@@ -13,6 +13,7 @@ import { ConservativeStrategy } from './strategy/conservative.strategy';
 import { TrendFollowingStrategy } from './strategy/trend-following.strategy';
 import { ValueFactorStrategy } from './strategy/value-factor.strategy';
 import { DailyDcaStrategy } from './strategy/daily-dca.strategy';
+import { OrderSyncService } from './order-sync.service';
 import { KisModule } from '../kis/kis.module';
 import { PrismaService } from '../prisma.service';
 import { NotificationModule } from '../notification/notification.module';
@@ -21,6 +22,7 @@ import { NotificationModule } from '../notification/notification.module';
   imports: [KisModule, NotificationModule],
   providers: [
     TradingService,
+    OrderSyncService,
     TradingScheduler,
     TradingResolver,
     MarketAnalysisService,
@@ -36,6 +38,6 @@ import { NotificationModule } from '../notification/notification.module';
     DailyDcaStrategy,
     PrismaService,
   ],
-  exports: [TradingService, TradingScheduler, MarketAnalysisService, MarketRegimeService, StrategyRegistryService, RiskManagementService],
+  exports: [TradingService, OrderSyncService, TradingScheduler, MarketAnalysisService, MarketRegimeService, StrategyRegistryService, RiskManagementService],
 })
 export class TradingModule {}

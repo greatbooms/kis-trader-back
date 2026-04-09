@@ -11,9 +11,9 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
-import { HolidayItem, StockPriceResult } from '../kis/types/kis-api.types';
-import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy, StockIndicators } from './types';
-import { Market } from '@prisma/client';
+import { HolidayItem, StockPriceResult, UnfilledOrder } from '../kis/types/kis-api.types';
+import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy, StockIndicators, PositionQuantitySnapshot } from './types';
+import { Market, OrderStatus } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from '../screening/utils/consensus.util';
@@ -22,6 +22,7 @@ import { pickNumeric } from '../screening/utils/api-data.util';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';
+import { OrderSyncService } from './order-sync.service';
 
 @Injectable()
 export class TradingScheduler implements OnModuleInit {
@@ -29,6 +30,8 @@ export class TradingScheduler implements OnModuleInit {
   private readonly isPaper: boolean;
   private isDomesticRunning = false;
   private isOverseasRunning = false;
+  private isDomesticOrderSyncRunning = false;
+  private isOverseasOrderSyncRunning = false;
 
   // 휴장일 캐시 (일 1회)
   private holidayCache: { date: string; domestic: HolidayItem[]; overseas: HolidayItem[] } | null = null;
@@ -40,6 +43,7 @@ export class TradingScheduler implements OnModuleInit {
     private marketAnalysis: MarketAnalysisService,
     private marketRegimeService: MarketRegimeService,
     private riskManagement: RiskManagementService,
+    private orderSyncService: OrderSyncService,
     private strategyRegistry: StrategyRegistryService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
@@ -64,6 +68,15 @@ export class TradingScheduler implements OnModuleInit {
     krCloseJob.start();
     this.logger.log('Trading domestic cron registered: every 1min 09:00-15:29 KST');
 
+    const krOrderSyncJob = new CronJob('*/10 * 9-14 * * 1-5', () => this.syncDomesticOpenOrders(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-domestic-order-sync', krOrderSyncJob);
+    krOrderSyncJob.start();
+
+    const krOrderSyncCloseJob = new CronJob('*/10 * 15 * * 1-5', () => this.syncDomesticOpenOrders(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-domestic-order-sync-close', krOrderSyncCloseJob);
+    krOrderSyncCloseJob.start();
+    this.logger.log('Trading domestic order sync cron registered: every 10s 09:00-15:29 KST');
+
     // 해외 시장 (아시아): 매 1분, 09:00-16:59 KST (일본/베트남 09:00~, 홍콩/중국 10:30~17:00)
     const asiaJob = new CronJob('*/1 9-16 * * 1-5', () => this.executeOverseas(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-asia', asiaJob);
@@ -79,6 +92,19 @@ export class TradingScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning', usMorningJob);
     usMorningJob.start();
     this.logger.log('Trading overseas-us cron registered: every 1min 23:00-05:59 KST');
+
+    const asiaOrderSyncJob = new CronJob('*/15 * 9-16 * * 1-5', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-asia-order-sync', asiaOrderSyncJob);
+    asiaOrderSyncJob.start();
+
+    const usNightOrderSyncJob = new CronJob('*/15 * 23 * * 1-5', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-us-night-order-sync', usNightOrderSyncJob);
+    usNightOrderSyncJob.start();
+
+    const usMorningOrderSyncJob = new CronJob('*/15 * 0-5 * * 2-6', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-us-morning-order-sync', usMorningOrderSyncJob);
+    usMorningOrderSyncJob.start();
+    this.logger.log('Trading overseas order sync cron registered: every 15s during overseas sessions');
 
     // 시장 상태 판별 (각 시장 장전)
     const regimeKrJob = new CronJob('50 8 * * 1-5', () => this.detectRegime('DOMESTIC', 'KRX'), null, false, 'Asia/Seoul');
@@ -158,6 +184,35 @@ export class TradingScheduler implements OnModuleInit {
     }
   }
 
+  private async syncDomesticOpenOrders(): Promise<void> {
+    if (!this.isMarketOpen('KRX')) return;
+    if (this.isDomesticRunning || this.isDomesticOrderSyncRunning) return;
+    this.isDomesticOrderSyncRunning = true;
+
+    try {
+      if (await this.isHoliday('DOMESTIC')) return;
+      await this.syncMarketOrdersOnly('DOMESTIC');
+    } catch (e) {
+      this.logger.error(`Domestic order sync error: ${e.message}`);
+    } finally {
+      this.isDomesticOrderSyncRunning = false;
+    }
+  }
+
+  private async syncOverseasOpenOrders(): Promise<void> {
+    if (this.isOverseasRunning || this.isOverseasOrderSyncRunning) return;
+    this.isOverseasOrderSyncRunning = true;
+
+    try {
+      if (await this.isHoliday('OVERSEAS')) return;
+      await this.syncMarketOrdersOnly('OVERSEAS');
+    } catch (e) {
+      this.logger.error(`Overseas order sync error: ${e.message}`);
+    } finally {
+      this.isOverseasOrderSyncRunning = false;
+    }
+  }
+
   /**
    * 단일 시장(거래소) 실행 — 모든 전략을 한 루프에서 처리
    */
@@ -214,6 +269,14 @@ export class TradingScheduler implements OnModuleInit {
       where: { market: market as Market },
     });
 
+    await this.orderSyncService.syncMarketOrders(
+      market,
+      positions.map((position) => this.toPositionSnapshot(position)),
+      { force: true },
+    );
+
+    const unfilledOrders = await this.getUnfilledOrders(market);
+
     const totalPortfolioValue = positions.reduce(
       (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
       0,
@@ -228,7 +291,7 @@ export class TradingScheduler implements OnModuleInit {
     });
 
     if (hasOnceDailyNow) {
-      await this.cancelUnfilledOrders(market);
+      await this.cancelUnfilledOrders(market, unfilledOrders);
     }
 
     // 4. 전략별 그룹핑
@@ -320,7 +383,7 @@ export class TradingScheduler implements OnModuleInit {
             where: {
               stockCode: ws.stockCode,
               strategyName,
-              status: 'FILLED',
+              status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL] },
               createdAt: { gte: todayStart, lte: todayEnd },
             },
           });
@@ -478,6 +541,23 @@ export class TradingScheduler implements OnModuleInit {
     }
   }
 
+  private async syncMarketOrdersOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
+    const balance = market === 'DOMESTIC'
+      ? await this.kisDomestic.getBalance()
+      : await this.kisOverseas.getBalance();
+
+    await this.tradingService.syncPositions(market, balance);
+
+    const positions = await this.prisma.position.findMany({
+      where: { market: market as Market },
+    });
+
+    await this.orderSyncService.syncMarketOrders(
+      market,
+      positions.map((position) => this.toPositionSnapshot(position)),
+    );
+  }
+
   // ========== 타이밍 판단 ==========
 
   private shouldExecuteNow(strategy: PerStockTradingStrategy, market: 'DOMESTIC' | 'OVERSEAS', exchangeCode: string): boolean {
@@ -545,28 +625,61 @@ export class TradingScheduler implements OnModuleInit {
 
   // ========== 미체결 주문 정리 ==========
 
-  private async cancelUnfilledOrders(marketType: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
+  private toPositionSnapshot(position: {
+    market: Market;
+    exchangeCode: string;
+    stockCode: string;
+    quantity: number;
+  }): PositionQuantitySnapshot {
+    return {
+      market: position.market as 'DOMESTIC' | 'OVERSEAS',
+      exchangeCode: position.exchangeCode,
+      stockCode: position.stockCode,
+      quantity: position.quantity,
+    };
+  }
+
+  private async getUnfilledOrders(marketType: 'DOMESTIC' | 'OVERSEAS'): Promise<UnfilledOrder[]> {
+    return this.orderSyncService.getMarketUnfilledOrders(marketType);
+  }
+
+  private async cancelUnfilledOrders(
+    marketType: 'DOMESTIC' | 'OVERSEAS',
+    orders: UnfilledOrder[],
+  ): Promise<void> {
     try {
       if (marketType === 'OVERSEAS') {
-        const orders = await this.kisOverseas.getUnfilledOrders();
         for (const order of orders) {
           this.logger.log(`Cancelling overseas unfilled order: ${order.stockCode} #${order.orderNo}`);
-          await this.kisOverseas.cancelOrder(
+          const result = await this.kisOverseas.cancelOrder(
             order.exchangeCode ?? '',
             order.orderNo,
             order.stockCode,
             order.quantity,
             order.price,
           );
+          if (result.success) {
+            await this.tradingService.markOpenOrderCancelled(
+              'OVERSEAS',
+              order.orderNo,
+              '장중 재실행 전 미체결 주문 취소',
+            );
+          }
         }
         if (orders.length > 0) {
           this.logger.log(`Cancelled ${orders.length} overseas unfilled orders`);
         }
       } else {
-        const orders = await this.kisDomestic.getUnfilledOrders();
         for (const order of orders) {
           this.logger.log(`Cancelling domestic unfilled order: ${order.stockCode} #${order.orderNo}`);
-          await this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity);
+          const result = await this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity);
+          if (result.success) {
+            await this.tradingService.markOpenOrderCancelled(
+              'DOMESTIC',
+              order.orderNo,
+              '장중 재실행 전 미체결 주문 취소',
+            );
+          }
         }
         if (orders.length > 0) {
           this.logger.log(`Cancelled ${orders.length} domestic unfilled orders`);

@@ -11,6 +11,7 @@ import {
   DailyPrice,
   UnfilledOrder,
   HolidayItem,
+  BrokerOrderStatus,
 } from './types/kis-api.types';
 import {
   EXCHANGE_CODE_MAP,
@@ -289,6 +290,60 @@ export class KisOverseasService {
         price: parseFloat(item.ft_ord_unpr3) || 0,
         exchangeCode: item.ovrs_excg_cd,
       }));
+  }
+
+  /** 해외 주문/체결 조회 */
+  async getOrderExecutions(startDate: string, endDate: string): Promise<BrokerOrderStatus[]> {
+    const trId = this.isPaper ? 'VTTS3035R' : 'TTTS3035R';
+
+    const res = await this.kisBase.get(
+      '/uapi/overseas-stock/v1/trading/inquire-ccnl',
+      trId,
+      {
+        CANO: this.accountNo.substring(0, 8),
+        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
+        PDNO: '',
+        ORD_STRT_DT: startDate,
+        ORD_END_DT: endDate,
+        SLL_BUY_DVSN: '00',
+        CCLD_NCCS_DVSN: '00',
+        OVRS_EXCG_CD: '',
+        SORT_SQN: 'DS',
+        ORD_DT: '',
+        ORD_GNO_BRNO: '',
+        ODNO: '',
+        CTX_AREA_NK200: '',
+        CTX_AREA_FK200: '',
+      },
+    );
+
+    const output = (res.output as any[]) || [];
+    return output
+      .filter((item: any) => !!item.odno)
+      .map((item: any) => {
+        const orderQuantity = parseInt(item.ft_ord_qty, 10) || 0;
+        const filledQuantity = parseInt(item.ft_ccld_qty, 10) || 0;
+        const remainingQuantity = item.nccs_qty
+          ? parseInt(item.nccs_qty, 10) || 0
+          : Math.max(0, orderQuantity - filledQuantity);
+        const rejectedReason = item.rjct_rson_name || item.rjct_rson || undefined;
+
+        return {
+          orderNo: item.odno,
+          stockCode: item.pdno,
+          side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
+          orderQuantity,
+          filledQuantity,
+          remainingQuantity,
+          orderPrice: item.ft_ord_unpr3 ? parseFloat(item.ft_ord_unpr3) || 0 : undefined,
+          filledPrice: item.ft_ccld_unpr3 ? parseFloat(item.ft_ccld_unpr3) || 0 : undefined,
+          exchangeCode: item.ovrs_excg_cd,
+          orderDate: item.ord_dt,
+          orderTime: item.ord_tmd,
+          rejected: !!rejectedReason,
+          rejectedReason,
+        };
+      });
   }
 
   /** 해외 주문 취소 */

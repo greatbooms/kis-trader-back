@@ -14,6 +14,7 @@ import {
   type Market,
   type Side,
 } from '@/graphql/generated'
+import { getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatPercent, formatNumber, formatDate } from '@/lib/utils'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 
@@ -396,7 +397,10 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
               </TableHeader>
               <TableBody>
                 {trades.map((trade) => (
-                  <TableRow key={trade.id} className={trade.status === 'FAILED' ? 'bg-red-50/60' : undefined}>
+                  <TableRow
+                    key={trade.id}
+                    className={trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : undefined}
+                  >
                     <TableCell className="py-2 text-xs">{formatDate(trade.createdAt)}</TableCell>
                     <TableCell className="py-2">
                       <div className="font-medium">{trade.stockName}</div>
@@ -407,15 +411,28 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                         {trade.side === 'BUY' ? '매수' : '매도'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="py-2 text-right">{formatNumber(trade.quantity)}</TableCell>
+                    <TableCell className="py-2 text-right">
+                      <div>{formatNumber(trade.quantity)}</div>
+                      {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
+                        <div className="text-xs text-muted-foreground">체결 {formatNumber(trade.executedQty ?? 0)}</div>
+                      )}
+                    </TableCell>
                     <TableCell className="py-2 text-right">{formatCurrency(trade.executedPrice ?? trade.price, trade.market)}</TableCell>
                     <TableCell className="py-2">
-                      <Badge variant={trade.status === 'FILLED' ? 'success' : trade.status === 'FAILED' ? 'danger' : 'warning'}>
-                        {trade.status === 'FILLED' ? '체결' : trade.status === 'FAILED' ? '실패' : '대기'}
-                      </Badge>
+                      {(() => {
+                        const info = getTradeRecordDisplayInfo(trade)
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <Badge variant={info.variant}>{info.label}</Badge>
+                            {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
+                          </div>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[200px] truncate">{trade.reason ?? '-'}</TableCell>
+                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[260px]">
+                      <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -435,4 +452,3 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
     </Card>
   )
 }
-

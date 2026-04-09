@@ -10,3 +10,6 @@ export { StockStrategyContext, PerStockTradingStrategy, ExecutionMode, StrategyM
 export { InfiniteBuyStrategyParams, InfiniteBuySecondaryExitPlan } from './infinite-buy-strategy-params.type';
 export { MomentumBreakoutStrategyParams } from './momentum-breakout-strategy-params.type';
 export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-params.type';
+export { PositionQuantitySnapshot } from './order-reconciliation.type';
+export { OrderSyncOptions } from './order-sync-options.type';
+export { OrderSyncWindow } from './order-sync-window.type';

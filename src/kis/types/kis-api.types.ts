@@ -220,5 +220,22 @@ export interface UnfilledOrder {
   exchangeCode?: string;
 }
 
+/** 주문 체결/미체결 상태 (브로커 조회 기준) */
+export interface BrokerOrderStatus {
+  orderNo: string;
+  stockCode: string;
+  side: 'BUY' | 'SELL';
+  orderQuantity: number;
+  filledQuantity: number;
+  remainingQuantity: number;
+  orderPrice?: number;
+  filledPrice?: number;
+  exchangeCode?: string;
+  orderDate?: string;
+  orderTime?: string;
+  rejected?: boolean;
+  rejectedReason?: string;
+}
+
 /** 해외 주문 구분 (00=지정가, 32=장전시간외, 33=장후시간외, 34=LOC) */
 export type OverseasOrderDivision = '00' | '32' | '33' | '34';

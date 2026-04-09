@@ -12,6 +12,7 @@ import {
   InterestRateItem,
   HolidayItem,
   UnfilledOrder,
+  BrokerOrderStatus,
 } from './types/kis-api.types';
 
 @Injectable()
@@ -363,6 +364,54 @@ export class KisDomesticService {
         quantity: parseInt(item.psbl_qty, 10) || 0,
         price: parseFloat(item.ord_unpr) || 0,
       }));
+  }
+
+  /** 국내 주문/체결 조회 */
+  async getOrderExecutions(startDate: string, endDate: string): Promise<BrokerOrderStatus[]> {
+    const trId = this.isPaper ? 'VTTC0081R' : 'TTTC0081R';
+
+    const res = await this.kisBase.get(
+      '/uapi/domestic-stock/v1/trading/inquire-daily-ccld',
+      trId,
+      {
+        CANO: this.accountNo.substring(0, 8),
+        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
+        INQR_STRT_DT: startDate,
+        INQR_END_DT: endDate,
+        SLL_BUY_DVSN_CD: '00',
+        INQR_DVSN: '00',
+        PDNO: '',
+        CCLD_DVSN: '00',
+        ORD_GNO_BRNO: '',
+        ODNO: '',
+        INQR_DVSN_3: '00',
+        INQR_DVSN_1: '',
+        CTX_AREA_FK100: '',
+        CTX_AREA_NK100: '',
+      },
+    );
+
+    const output = (res.output1 as any[]) || [];
+    return output
+      .filter((item: any) => !!item.odno)
+      .map((item: any) => {
+        const orderQuantity = parseInt(item.ord_qty, 10) || 0;
+        const filledQuantity = parseInt(item.tot_ccld_qty, 10) || 0;
+
+        return {
+          orderNo: item.odno,
+          stockCode: item.pdno,
+          side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
+          orderQuantity,
+          filledQuantity,
+          remainingQuantity: Math.max(0, orderQuantity - filledQuantity),
+          orderPrice: item.ord_unpr ? parseFloat(item.ord_unpr) || 0 : undefined,
+          filledPrice: item.avg_prvs ? parseFloat(item.avg_prvs) || 0 : undefined,
+          exchangeCode: 'KRX',
+          orderDate: item.ord_dt,
+          orderTime: item.ord_tmd,
+        };
+      });
   }
 
   /** 국내 주문 취소 */

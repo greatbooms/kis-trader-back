@@ -222,15 +222,15 @@ export class TradeRecordService {
       await this.prisma.tradeRecord.update({
         where: { id: record.id },
         data: {
-          status: result.success ? OrderStatus.FILLED : OrderStatus.FAILED,
+          status: result.success ? OrderStatus.PENDING : OrderStatus.FAILED,
           orderNo: result.orderNo,
           reason: result.message,
         },
       });
 
       if (result.success) {
-        this.logger.log(`Manual sell executed: ${input.stockCode} x ${sellQty} @ ${roundPrice}`);
-        return { success: true, orderNo: result.orderNo, message: `${sellQty}주 매도 주문 완료` };
+        this.logger.log(`Manual sell order submitted: ${input.stockCode} x ${sellQty} @ ${roundPrice}`);
+        return { success: true, orderNo: result.orderNo, message: `${sellQty}주 매도 주문 접수` };
       } else {
         return { success: false, message: result.message };
       }

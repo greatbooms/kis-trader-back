@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TradeRecordService } from './trade-record.service';
 import { PrismaService } from '../prisma.service';
+import { KisDomesticService } from '../kis/kis-domestic.service';
+import { KisOverseasService } from '../kis/kis-overseas.service';
 
 describe('TradeRecordService', () => {
   let service: TradeRecordService;
@@ -23,6 +25,8 @@ describe('TradeRecordService', () => {
       providers: [
         TradeRecordService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: KisDomesticService, useValue: {} },
+        { provide: KisOverseasService, useValue: {} },
       ],
     }).compile();
 
