@@ -63,12 +63,16 @@ export class SecService {
     return !!this.userAgent;
   }
 
-  async getFundamentals(symbol: string, currentPrice: number): Promise<SecFundamentals | undefined> {
+  async getFundamentals(symbol: string, currentPrice: number, forceRefresh = false): Promise<SecFundamentals | undefined> {
     if (!this.isConfigured()) return undefined;
 
     const cacheKey = symbol.toUpperCase();
-    const cached = this.fundamentalsCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.data;
+    if (forceRefresh) {
+      this.fundamentalsCache.delete(cacheKey);
+    } else {
+      const cached = this.fundamentalsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) return cached.data;
+    }
 
     try {
       const cik = await this.getCikBySymbol(cacheKey);
@@ -175,6 +179,9 @@ export class SecService {
       : undefined;
 
     return {
+      latestRevenue,
+      latestOperatingIncome,
+      latestNetIncome,
       revenueGrowthRate: this.calculateGrowthRate(latestRevenue, previousRevenue),
       operatingProfitGrowthRate: this.calculateGrowthRate(latestOperatingIncome, previousOperatingIncome),
       epsGrowthRate: this.calculateGrowthRate(latestEps, previousEps),

@@ -81,8 +81,8 @@ mutation UpdateScreeningSettings($input: UpdateScreeningSettingsInput!) {
   }
 }
 
-query GetStockDeepAnalysis($stockCode: String!, $date: String) {
-  stockDeepAnalysis(stockCode: $stockCode, date: $date) {
+query GetStockDeepAnalysis($stockCode: String!, $date: String, $exchangeCode: String) {
+  stockDeepAnalysis(stockCode: $stockCode, date: $date, exchangeCode: $exchangeCode) {
     id
     screeningDate
     stockCode

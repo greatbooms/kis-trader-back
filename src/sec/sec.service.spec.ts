@@ -107,6 +107,9 @@ describe('SecService', () => {
 
     const fundamentals = (service as any).buildFundamentalsFromFacts(companyFacts, submissions, 60);
 
+    expect(fundamentals.latestRevenue).toBe(1200);
+    expect(fundamentals.latestOperatingIncome).toBe(180);
+    expect(fundamentals.latestNetIncome).toBe(96);
     expect(fundamentals.revenueGrowthRate).toBeCloseTo(20);
     expect(fundamentals.operatingProfitGrowthRate).toBeCloseTo(50);
     expect(fundamentals.epsGrowthRate).toBeCloseTo(50);
@@ -227,6 +230,9 @@ describe('SecService', () => {
 
     const fundamentals = (service as any).buildFundamentalsFromFacts(companyFacts, undefined, 177);
 
+    expect(fundamentals.latestRevenue).toBe(215938);
+    expect(fundamentals.latestOperatingIncome).toBe(130387);
+    expect(fundamentals.latestNetIncome).toBe(120067);
     expect(fundamentals.revenueGrowthRate).toBeCloseTo(65.48, 1);
     expect(fundamentals.operatingMargin).toBeCloseTo(60.38, 1);
     expect(fundamentals.netMargin).toBeCloseTo(55.60, 1);

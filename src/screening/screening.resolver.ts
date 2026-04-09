@@ -79,6 +79,7 @@ export class ScreeningResolver {
   async stockDeepAnalysis(
     @Args('stockCode') stockCode: string,
     @Args('date', { nullable: true }) date?: string,
+    @Args('exchangeCode', { nullable: true }) exchangeCode?: string,
   ): Promise<StockDeepAnalysisType | null> {
     let targetDate = date;
     if (!targetDate) {
@@ -87,7 +88,7 @@ export class ScreeningResolver {
     }
     if (!targetDate) return null;
 
-    const analysis = await this.screeningService.getStockDeepAnalysis(targetDate, stockCode);
+    const analysis = await this.screeningService.getStockDeepAnalysis(targetDate, stockCode, exchangeCode);
     if (!analysis) return null;
 
     return {
@@ -135,10 +136,13 @@ export class ScreeningResolver {
   ): Promise<boolean> {
     if (input.market === 'DOMESTIC') {
       await this.screeningScheduler.runDomesticScreening();
+      await this.screeningScheduler.runDomesticDeepAnalysis();
     } else if (input.exchangeCode) {
       await this.screeningScheduler.runOverseasScreening([input.exchangeCode]);
+      await this.screeningScheduler.runOverseasDeepAnalysis([input.exchangeCode]);
     } else {
       await this.screeningScheduler.runOverseasScreening(['NASD', 'NYSE', 'AMEX']);
+      await this.screeningScheduler.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX']);
     }
     return true;
   }

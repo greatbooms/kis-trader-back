@@ -10,6 +10,7 @@ import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consen
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
 import { summarizeDividendSchedule } from './utils/dividend.util';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
+import { SecFundamentals } from '../sec/types';
 
 @Injectable()
 export class DeepAnalysisService {
@@ -61,6 +62,17 @@ export class DeepAnalysisService {
         this.marketDataCache.getKisDomesticBalanceSheet(stockCode),
       ])
       : [];
+    let secFundamentals = market === 'OVERSEAS' && ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode)
+      ? await this.marketDataCache.getSecFundamentals(stockCode, priceDetail?.currentPrice ?? 0, exchangeCode)
+      : undefined;
+    if (!secFundamentals && market === 'OVERSEAS' && ['NASD', 'NYSE', 'AMEX'].includes(exchangeCode)) {
+      secFundamentals = await this.marketDataCache.getSecFundamentals(
+        stockCode,
+        priceDetail?.currentPrice ?? 0,
+        exchangeCode,
+        true,
+      );
+    }
 
     const incomeStatement = this.getSettledValue<any[]>(domesticFinanceGroup[0]);
     const growthRatio = this.getSettledValue<any[]>(domesticFinanceGroup[1]);
@@ -80,6 +92,12 @@ export class DeepAnalysisService {
       priceDetail,
       incomeStatement,
       growthRatio,
+      beta,
+    ) ?? await this.calculateSecDcfValuation(
+      exchangeCode,
+      dailyPrices,
+      priceDetail,
+      secFundamentals,
       beta,
     );
     const riskProfile = dailyPrices.length > 0
@@ -126,6 +144,28 @@ export class DeepAnalysisService {
     return this.calculateSimpleDCF(incomeStatement, growthRatio, priceDetail, resolvedBeta);
   }
 
+  async calculateSecDcfValuation(
+    exchangeCode: string,
+    dailyPrices: DailyPrice[],
+    priceDetail?: StockPriceResult,
+    secFundamentals?: SecFundamentals,
+    beta?: number,
+  ): Promise<DCFValuation | undefined> {
+    if (!priceDetail || !secFundamentals?.latestRevenue || secFundamentals.latestRevenue <= 0) {
+      return undefined;
+    }
+
+    const resolvedBeta = beta ?? await this.calculateBeta(exchangeCode, dailyPrices);
+    return this.calculateRevenueBasedDCF(
+      secFundamentals.latestRevenue,
+      secFundamentals.revenueGrowthRate ?? 5,
+      priceDetail,
+      resolvedBeta,
+      secFundamentals.operatingMargin !== undefined ? secFundamentals.operatingMargin / 100 : undefined,
+      1,
+    );
+  }
+
   private async calculateSimpleDCF(
     incomeStatement: any[],
     growthRatio: any[],
@@ -155,12 +195,34 @@ export class DeepAnalysisService {
       'revenue_growth_rate',
       '매출액증가율',
     ]) ?? 5;
+    const operatingMargin = operatingIncome && revenue > 0
+      ? Math.max(operatingIncome / revenue, 0.02)
+      : undefined;
+
+    return this.calculateRevenueBasedDCF(
+      revenue,
+      revenueGrowthRate,
+      priceDetail,
+      beta,
+      operatingMargin,
+    );
+  }
+
+  private async calculateRevenueBasedDCF(
+    revenue: number,
+    revenueGrowthRate: number,
+    priceDetail: StockPriceResult,
+    beta = 1,
+    operatingMarginOverride?: number,
+    monetaryUnitMultiplier = DeepAnalysisService.KOREAN_FINANCIAL_STATEMENT_UNIT,
+  ): Promise<DCFValuation | undefined> {
+    if (!revenue || revenue <= 0) return undefined;
 
     const riskFreeRate = await this.getRiskFreeRate();
     const wacc = riskFreeRate + beta * DeepAnalysisService.MARKET_PREMIUM;
     const terminalGrowthRate = DeepAnalysisService.TERMINAL_GROWTH;
-    const operatingMargin = operatingIncome && revenue > 0
-      ? Math.max(operatingIncome / revenue, 0.02)
+    const operatingMargin = operatingMarginOverride !== undefined
+      ? Math.max(operatingMarginOverride, 0.02)
       : 0.08;
 
     const projectedRevenue: number[] = [];
@@ -181,7 +243,7 @@ export class DeepAnalysisService {
     const terminalValue = freeCashFlows[freeCashFlows.length - 1] * (1 + terminalRate)
       / Math.max(discountRate - terminalRate, 0.01);
     const enterpriseValue = discounted + terminalValue / Math.pow(1 + discountRate, 5);
-    const enterpriseValueInKrw = enterpriseValue * DeepAnalysisService.KOREAN_FINANCIAL_STATEMENT_UNIT;
+    const enterpriseValueInKrw = enterpriseValue * monetaryUnitMultiplier;
     const intrinsicValue = priceDetail.listedShares && priceDetail.listedShares > 0
       ? enterpriseValueInKrw / priceDetail.listedShares
       : enterpriseValueInKrw;

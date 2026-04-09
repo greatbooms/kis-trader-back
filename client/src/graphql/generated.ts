@@ -262,7 +262,6 @@ export type Query = {
   overseasQuote?: Maybe<StockPriceType>;
   positions: Array<PositionType>;
   quote?: Maybe<StockPriceType>;
-  riskState: RiskStateType;
   screeningDateSummaries: Array<ScreeningDateSummary>;
   screeningDates: Array<Scalars['String']['output']>;
   screeningSettings: ScreeningSettingsType;
@@ -301,11 +300,6 @@ export type QueryPositionsArgs = {
 
 export type QueryQuoteArgs = {
   stockCode: Scalars['String']['input'];
-};
-
-
-export type QueryRiskStateArgs = {
-  input: RiskStateFilterInput;
 };
 
 
@@ -356,6 +350,7 @@ export type QuerySimulationTradesArgs = {
 
 export type QueryStockDeepAnalysisArgs = {
   date?: InputMaybe<Scalars['String']['input']>;
+  exchangeCode?: InputMaybe<Scalars['String']['input']>;
   stockCode: Scalars['String']['input'];
 };
 
@@ -393,21 +388,6 @@ export type QueryWatchStockExecutionLogsArgs = {
 
 export type QueryWatchStocksArgs = {
   input?: InputMaybe<WatchStocksFilterInput>;
-};
-
-export type RiskStateFilterInput = {
-  market: Market;
-};
-
-export type RiskStateType = {
-  __typename?: 'RiskStateType';
-  buyBlocked: Scalars['Boolean']['output'];
-  dailyPnlRate: Scalars['Float']['output'];
-  drawdown: Scalars['Float']['output'];
-  investedRate: Scalars['Float']['output'];
-  liquidateAll: Scalars['Boolean']['output'];
-  positionCount: Scalars['Float']['output'];
-  reasons: Array<Scalars['String']['output']>;
 };
 
 export type RunScreeningInput = {
@@ -647,6 +627,7 @@ export type StockRecommendationType = {
 };
 
 export type StockRecommendationsFilterInput = {
+  country?: InputMaybe<Scalars['String']['input']>;
   date?: InputMaybe<Scalars['String']['input']>;
   limit?: InputMaybe<Scalars['Float']['input']>;
   market?: InputMaybe<Scalars['String']['input']>;
@@ -867,6 +848,7 @@ export type UpdateScreeningSettingsMutation = { __typename?: 'Mutation', updateS
 export type GetStockDeepAnalysisQueryVariables = Exact<{
   stockCode: Scalars['String']['input'];
   date?: InputMaybe<Scalars['String']['input']>;
+  exchangeCode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
@@ -1375,8 +1357,12 @@ export function useUpdateScreeningSettingsMutation(baseOptions?: ApolloReactHook
       }
 export type UpdateScreeningSettingsMutationHookResult = ReturnType<typeof useUpdateScreeningSettingsMutation>;
 export const GetStockDeepAnalysisDocument = gql`
-    query GetStockDeepAnalysis($stockCode: String!, $date: String) {
-  stockDeepAnalysis(stockCode: $stockCode, date: $date) {
+    query GetStockDeepAnalysis($stockCode: String!, $date: String, $exchangeCode: String) {
+  stockDeepAnalysis(
+    stockCode: $stockCode
+    date: $date
+    exchangeCode: $exchangeCode
+  ) {
     id
     screeningDate
     stockCode
@@ -1416,6 +1402,7 @@ export const GetStockDeepAnalysisDocument = gql`
  *   variables: {
  *      stockCode: // value for 'stockCode'
  *      date: // value for 'date'
+ *      exchangeCode: // value for 'exchangeCode'
  *   },
  * });
  */

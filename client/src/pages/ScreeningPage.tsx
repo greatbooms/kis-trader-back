@@ -394,14 +394,10 @@ function StockDetailView({
   const marketFilter = countryOption?.market ?? undefined
 
   const { data, loading } = useGetStockRecommendationsQuery({
-    variables: { input: { date, market: marketFilter, limit: 100 } },
+    variables: { input: { date, market: marketFilter, country, limit: 100 } },
   })
 
-  const allRecommendations = data?.stockRecommendations ?? []
-  const countryFiltered = allRecommendations.filter((item) => {
-    if (!countryOption) return true
-    return countryOption.exchanges.includes(item.exchangeCode)
-  })
+  const countryFiltered = data?.stockRecommendations ?? []
 
   const stockRecs = countryFiltered.filter((item) => !item.isEtf)
   const etfRecs = countryFiltered.filter((item) => item.isEtf)
@@ -514,7 +510,7 @@ function RecommendationCard({
   try { indicators = JSON.parse(rec.indicators) } catch { /* ignore invalid JSON */ }
 
   const { data: deepAnalysisData, loading: deepLoading } = useGetStockDeepAnalysisQuery({
-    variables: { stockCode: rec.stockCode, date },
+    variables: { stockCode: rec.stockCode, exchangeCode: rec.exchangeCode, date },
     skip: !expanded,
   })
 

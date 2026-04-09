@@ -1,4 +1,7 @@
 export interface SecFundamentals {
+  latestRevenue?: number;
+  latestOperatingIncome?: number;
+  latestNetIncome?: number;
   revenueGrowthRate?: number;
   operatingProfitGrowthRate?: number;
   epsGrowthRate?: number;

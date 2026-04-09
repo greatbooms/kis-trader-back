@@ -243,7 +243,7 @@ export class MarketDataCacheService {
         ttlMs: MarketDataCacheService.TTL.SEC_MS,
         forceRefresh,
       },
-      () => this.secService.getFundamentals(stockCode, 0),
+      () => this.secService.getFundamentals(stockCode, 0, forceRefresh),
     );
     if (!raw) return undefined;
     return {

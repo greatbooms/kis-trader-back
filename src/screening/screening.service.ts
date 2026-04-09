@@ -248,11 +248,12 @@ export class ScreeningService {
     });
   }
 
-  async getStockDeepAnalysis(date: string, stockCode: string) {
+  async getStockDeepAnalysis(date: string, stockCode: string, exchangeCode?: string) {
     return this.prisma.stockDeepAnalysis.findFirst({
       where: {
         screeningDate: date,
         stockCode,
+        ...(exchangeCode ? { exchangeCode } : {}),
       },
     });
   }
@@ -771,12 +772,32 @@ export class ScreeningService {
       indicators.prevDayVolumeChangeRate = ((candidate.volume / priceDetail.prevDayVolume) - 1) * 100;
     }
     if (mode === 'FULL' && !isEtf && ['NASD', 'NYSE', 'AMEX'].includes(candidate.exchangeCode)) {
-      const secFundamentals = await this.marketDataCache.getSecFundamentals(
+      let secFundamentals = await this.marketDataCache.getSecFundamentals(
         candidate.stockCode,
         candidate.currentPrice,
         candidate.exchangeCode,
       );
+      if (!secFundamentals) {
+        secFundamentals = await this.marketDataCache.getSecFundamentals(
+          candidate.stockCode,
+          candidate.currentPrice,
+          candidate.exchangeCode,
+          true,
+        );
+      }
       this.applySecFundamentalIndicators(secFundamentals, indicators);
+      if (priceDetail) {
+        const dcfValuation = await this.deepAnalysisService.calculateSecDcfValuation(
+          candidate.exchangeCode,
+          dailyPrices,
+          priceDetail,
+          secFundamentals,
+        );
+        if (dcfValuation) {
+          indicators.intrinsicValue = dcfValuation.intrinsicValue;
+          indicators.marginOfSafety = dcfValuation.marginOfSafety;
+        }
+      }
     }
 
     if (!isEtf && (indicators.volatility30d ?? 0) > 300) {

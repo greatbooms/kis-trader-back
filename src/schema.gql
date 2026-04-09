@@ -425,7 +425,7 @@ type Query {
   simulationMetrics(sessionId: String!): SimulationMetricsType!
   searchStocks(input: SearchStocksInput!): [StockSearchResult!]!
   stockRecommendations(input: StockRecommendationsFilterInput): [StockRecommendationType!]!
-  stockDeepAnalysis(stockCode: String!, date: String): StockDeepAnalysisType
+  stockDeepAnalysis(stockCode: String!, date: String, exchangeCode: String): StockDeepAnalysisType
   screeningDates(input: ScreeningListFilterInput): [String!]!
   screeningDateSummaries(input: ScreeningListFilterInput): [ScreeningDateSummary!]!
   screeningSettings: ScreeningSettingsType!
