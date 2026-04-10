@@ -446,32 +446,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     let buySignalCount = 0;
 
-    if (!hasPosition && buyAllowed) {
-      // --- 첫 매수 (포지션 없음) ---
-      const buyQty = Math.floor(adjustedQuota / curPrice);
-      if (buyQty > 0) {
-        const dividendNote = (stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5
-          ? ', 배당안정성+'
-          : '';
-        signals.push({
-          market,
-          exchangeCode,
-          stockCode: watchStock.stockCode,
-          side: 'BUY',
-          quantity: buyQty,
-          price: roundPrice(curPrice),
-          reason: `Initial buy: ${buyQty}주 @ ${roundPrice(curPrice)}${dividendNote}`,
-          orderDivision: '00',
-        });
-        buySignalCount++;
-      } else {
-        details.minimumExecutablePrice = adjustedQuota;
-        skipReasons.push(
-          `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)} ` +
-          `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
-        );
-      }
-    } else if (hasPosition) {
+    if (buyAllowed) {
       // --- 매수 시그널 ---
       // Buy2 dipRate: T가 높을수록 더 낮은 가격에 지정가 (보수적)
       const dipRate = T < 10 ? 0.01 : T < 20 ? 0.02 : 0.03;
@@ -492,6 +467,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           buy1Qty = Math.floor(adjustedQuota / buy1Price);
         }
 
+        const dividendNote = !hasPosition
+          && (stockIndicators.dividendYield ?? 0) >= 2
+          && (stockIndicators.consecutiveDividendYears ?? 0) >= 5
+          ? ', 배당안정성+'
+          : '';
+
         if (buy1Qty > 0 && buy1Price > 0) {
           signals.push({
             market,
@@ -500,7 +481,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             side: 'BUY',
             quantity: buy1Qty,
             price: buy1Price,
-            reason: `Buy1: T=${T.toFixed(1)}, ${buy1Qty}주 @ ${buy1Price}`,
+            reason: `Buy1: T=${T.toFixed(1)}, ${buy1Qty}주 @ ${buy1Price}${dividendNote}`,
             orderDivision: '00',
           });
           buySignalCount++;
@@ -554,8 +535,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         }
       }
 
-      // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
-      if (holdQty > 0) {
+    }
+
+    // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
+    if (holdQty > 0) {
         const targetProfitRate = getTargetProfitRate(T);
         const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
         const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
@@ -587,7 +570,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           });
         }
       }
-    } else if (!hasPosition && !buyAllowed) {
+    if (!hasPosition && !buyAllowed) {
       // 포지션 없고 매수 불가
       if (maxCyclesReached) {
         skipReasons.push(`최대 사이클 도달: T=${T.toFixed(1)} ≥ ${watchStock.maxCycles}`);

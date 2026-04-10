@@ -269,14 +269,17 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('initial buy (no position)', () => {
-    it('should generate initial buy signal', async () => {
+    it('should generate split buy signals on first entry', async () => {
       const ctx = createContext();
+      ctx.price.currentPrice = 30000;
       const { signals } = await strategy.evaluateStock(ctx);
 
-      expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(Math.floor(100000 / 70000)); // 1
-      expect(signals[0].reason).toContain('Initial buy');
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+      expect(buys).toHaveLength(2);
+      expect(buys[0].reason).toContain('Buy1');
+      expect(buys[1].reason).toContain('Buy2');
+      expect(buys[0].quantity).toBe(1);
+      expect(buys[1].quantity).toBe(1);
     });
 
     it('should not buy when price is too high for quota', async () => {
@@ -289,7 +292,7 @@ describe('InfiniteBuyStrategy', () => {
       // buyQty = floor(100000 / 200000) = 0
       expect(signals).toHaveLength(0);
       expect(skipReasons).toContain(
-        '매수 수량 부족: 조정 할당금 2500 < 현재가 200000 (1주 매수 가능 기준가 2500 이하)',
+        '매수 수량 부족: 조정 할당금 2500 < 기준가 198000 (1주 매수 가능 기준가 2500 이하)',
       );
     });
   });
@@ -640,9 +643,10 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(1);
-      expect(signals[0].quantity).toBe(3);
-      expect(signals[0].reason).toContain('배당안정성+');
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+      expect(buys).toHaveLength(2);
+      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(2);
+      expect(buys[0].reason).toContain('배당안정성+');
     });
 
     it('should reduce buy amount when volatility and sell flow are both adverse', async () => {
@@ -667,8 +671,9 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(1);
-      expect(signals[0].quantity).toBe(2);
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+      expect(buys).toHaveLength(2);
+      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(2);
     });
 
   });

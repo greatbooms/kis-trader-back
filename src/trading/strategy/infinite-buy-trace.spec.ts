@@ -104,7 +104,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
   // Day 1: 첫 매수 (포지션 없음) — $50.00
   // ============================================================
   describe('Day 1: 첫 매수 @ $50.00', () => {
-    it('should buy initial position', async () => {
+    it('should split first buy into Buy1 + Buy2', async () => {
       const ctx = makeCtx({
         price: {
           stockCode: 'TQQQ', stockName: 'TQQQ',
@@ -114,14 +114,21 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
 
-      // 첫 매수: adjustedQuota = perCycleQuota = $250
-      // buyQty = floor(250 / 50) = 5주
-      expect(signals).toHaveLength(1);
+      // 첫 매수도 T=0 기준 Buy1 + Buy2 분할
+      // halfQuota = $125
+      // Buy1 = floor(125 / 50.00) = 2주
+      // Buy2 = floor(125 / 49.50) = 2주
+      expect(signals).toHaveLength(2);
       expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(5);
+      expect(signals[0].quantity).toBe(2);
       expect(signals[0].price).toBe(50);
       expect(signals[0].orderDivision).toBe('00');
-      expect(signals[0].reason).toContain('Initial buy');
+      expect(signals[0].reason).toContain('Buy1');
+      expect(signals[1].side).toBe('BUY');
+      expect(signals[1].quantity).toBe(2);
+      expect(signals[1].price).toBe(49.5);
+      expect(signals[1].orderDivision).toBe('00');
+      expect(signals[1].reason).toContain('Buy2');
     });
   });
 
@@ -497,11 +504,12 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       });
 
       // perCycleQuota=$250 × 0.8 × 1.25 = $250
-      // buyQty = floor(250 / 50) = 5
+      // Buy1 = floor(125 / 50) = 2, Buy2 = floor(125 / 49.5) = 2
       const { signals } = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(5);
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+      expect(buys).toHaveLength(2);
+      expect(buys[0].quantity).toBe(2);
+      expect(buys[1].quantity).toBe(2);
     });
   });
 
