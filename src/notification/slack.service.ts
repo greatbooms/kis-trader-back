@@ -33,7 +33,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     this.appToken = this.configService.get<string>('slack.appToken') ?? '';
   }
 
-  async onModuleInit() {
+  onModuleInit() {
     if (!this.enabled) {
       this.logger.log('Slack notifications disabled');
       return;
@@ -44,38 +44,44 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.connect();
+    this.initializeApp();
+    this.logger.log('Slack Socket Mode connect requested in background');
+    void this.connect();
+  }
+
+  private initializeApp(): void {
+    if (this.app) return;
+
+    this.app = new App({
+      token: this.botToken,
+      appToken: this.appToken,
+      socketMode: true,
+      logLevel: LogLevel.WARN,
+    });
+
+    // WebSocket 에러가 프로세스를 죽이지 않도록
+    this.app.error(async (error) => {
+      this.logger.error(`Slack app error: ${error.message}`);
+      this.connected = false;
+      this.scheduleReconnect();
+    });
   }
 
   private async connect(): Promise<boolean> {
     try {
-      // 기존 앱이 있으면 정리
-      if (this.app) {
-        try { await this.app.stop(); } catch { /* ignore */ }
-        this.app = null;
+      this.initializeApp();
+      const app = this.app;
+      if (!app) {
+        this.connected = false;
+        return false;
       }
 
-      this.app = new App({
-        token: this.botToken,
-        appToken: this.appToken,
-        socketMode: true,
-        logLevel: LogLevel.WARN,
-      });
-
-      // WebSocket 에러가 프로세스를 죽이지 않도록
-      this.app.error(async (error) => {
-        this.logger.error(`Slack app error: ${error.message}`);
-        this.connected = false;
-        this.scheduleReconnect();
-      });
-
-      await this.app.start();
+      await app.start();
       this.connected = true;
       this.logger.log('Slack Socket Mode connected');
       return true;
     } catch (e) {
       this.logger.error(`Slack Socket Mode failed to connect: ${e.message}`);
-      this.app = null;
       this.connected = false;
       return false;
     }
