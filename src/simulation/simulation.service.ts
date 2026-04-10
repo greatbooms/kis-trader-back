@@ -1466,10 +1466,30 @@ export class SimulationService {
     id: string,
     data: {
       name?: string;
+      quota?: number;
       stopLossRate?: number;
       maxCycles?: number;
     },
   ) {
+    const current = await this.prisma.simulationSession.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        market: true,
+        exchangeCode: true,
+        stockCode: true,
+        strategyName: true,
+        quota: true,
+        currentCash: true,
+        maxCycles: true,
+        strategyParams: true,
+      },
+    });
+
+    if (!current) {
+      throw new BadRequestException('시뮬레이션 세션을 찾을 수 없습니다.');
+    }
+
     const updateData: Prisma.SimulationSessionUpdateInput = {};
 
     if (data.name !== undefined) {
@@ -1478,6 +1498,13 @@ export class SimulationService {
         throw new BadRequestException('시뮬레이션 이름은 비워둘 수 없습니다.');
       }
       updateData.name = name;
+    }
+
+    if (data.quota !== undefined) {
+      if (data.quota <= 0) {
+        throw new BadRequestException('투자금은 0보다 커야 합니다.');
+      }
+      updateData.quota = new Prisma.Decimal(data.quota);
     }
 
     if (data.stopLossRate !== undefined) {
@@ -1493,6 +1520,11 @@ export class SimulationService {
       }
       updateData.maxCycles = data.maxCycles;
     }
+
+    const rebasedUpdate = await this.buildInfiniteBuyRebasedUpdate(current, data);
+    if (rebasedUpdate.cycle !== undefined) updateData.cycle = rebasedUpdate.cycle;
+    if (rebasedUpdate.strategyParams !== undefined) updateData.strategyParams = rebasedUpdate.strategyParams;
+    if (rebasedUpdate.currentCash !== undefined) updateData.currentCash = new Prisma.Decimal(rebasedUpdate.currentCash);
 
     return this.prisma.simulationSession.update({
       where: { id },
@@ -1522,6 +1554,111 @@ export class SimulationService {
       where: { sessionId },
       orderBy: { stockCode: 'asc' },
     });
+  }
+
+  private async buildInfiniteBuyRebasedUpdate(
+    current: {
+      id: string;
+      market: Market;
+      exchangeCode: string | null;
+      stockCode: string;
+      strategyName: string;
+      quota: Prisma.Decimal;
+      currentCash: Prisma.Decimal;
+      maxCycles: number;
+      strategyParams: Prisma.JsonValue | null;
+    },
+    data: {
+      quota?: number;
+      maxCycles?: number;
+    },
+  ): Promise<{ cycle?: number; strategyParams?: Record<string, any>; currentCash?: number }> {
+    if (current.strategyName !== 'infinite-buy') {
+      return this.buildSimulationCashUpdate(current, data);
+    }
+
+    const currentQuota = Number(current.quota ?? 0);
+    const nextQuota = data.quota !== undefined ? Number(data.quota) : currentQuota;
+    const nextMaxCycles = data.maxCycles !== undefined ? data.maxCycles : current.maxCycles;
+    const quotaChanged = data.quota !== undefined && nextQuota !== currentQuota;
+    const maxCyclesChanged = data.maxCycles !== undefined && nextMaxCycles !== current.maxCycles;
+
+    const cashUpdate = await this.buildSimulationCashUpdate(current, data);
+    if (!quotaChanged && !maxCyclesChanged) {
+      return cashUpdate;
+    }
+
+    const mergedParams = {
+      ...(current.strategyParams as Record<string, any> | null ?? {}),
+    } as InfiniteBuyStrategyParams;
+
+    const nextPerCycleQuota = nextQuota > 0 && nextMaxCycles > 0 ? nextQuota / nextMaxCycles : 0;
+    const currentPerCycleQuota = currentQuota > 0 && current.maxCycles > 0 ? currentQuota / current.maxCycles : 0;
+
+    const position = await this.prisma.simulationPosition.findFirst({
+      where: {
+        sessionId: current.id,
+        stockCode: current.stockCode,
+      },
+      select: { totalInvested: true },
+    });
+
+    const totalInvested = Number(position?.totalInvested ?? 0);
+    const cycle =
+      nextPerCycleQuota > 0 && totalInvested > 0
+        ? Math.max(0, Math.floor(totalInvested / nextPerCycleQuota))
+        : 0;
+
+    const update: { cycle?: number; strategyParams?: Record<string, any>; currentCash?: number } = {
+      ...cashUpdate,
+      cycle,
+    };
+
+    const currentAccumulatedQuota = Number(mergedParams.accumulatedQuota || 0);
+    if (currentAccumulatedQuota > 0 && currentPerCycleQuota > 0 && nextPerCycleQuota > 0) {
+      const carriedCycles = currentAccumulatedQuota / currentPerCycleQuota;
+      const rebasedAccumulatedQuota = this.roundQuota(carriedCycles * nextPerCycleQuota);
+      if (rebasedAccumulatedQuota > 0) {
+        mergedParams.accumulatedQuota = rebasedAccumulatedQuota;
+      } else {
+        delete mergedParams.accumulatedQuota;
+      }
+      update.strategyParams = mergedParams;
+    }
+
+    this.logger.log(
+      `[SIM ${current.stockCode}] Rebased infinite-buy state after quota update: ` +
+      `quota ${currentQuota} -> ${nextQuota}, maxCycles ${current.maxCycles} -> ${nextMaxCycles}, ` +
+      `cycle=${cycle}, accumulatedQuota=${update.strategyParams?.accumulatedQuota ?? mergedParams.accumulatedQuota ?? 0}`,
+    );
+
+    return update;
+  }
+
+  private async buildSimulationCashUpdate(
+    current: {
+      id: string;
+      stockCode: string;
+      quota: Prisma.Decimal;
+      currentCash: Prisma.Decimal;
+    },
+    data: { quota?: number },
+  ): Promise<{ currentCash?: number }> {
+    if (data.quota === undefined) return {};
+
+    const currentQuota = Number(current.quota ?? 0);
+    const nextQuota = Number(data.quota);
+    const nextCash = Number(current.currentCash ?? 0) + (nextQuota - currentQuota);
+
+    if (nextCash < 0) {
+      throw new BadRequestException('현재 보유 상태보다 작은 투자금으로는 변경할 수 없습니다.');
+    }
+
+    return { currentCash: this.roundQuota(nextCash) };
+  }
+
+  private roundQuota(value: number): number {
+    return Math.round(value * 100) / 100;
   }
 
   async getTrades(

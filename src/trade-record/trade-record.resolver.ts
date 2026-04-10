@@ -38,8 +38,16 @@ export class TradeRecordResolver {
   }
 
   @Query(() => [PositionType], { name: 'positions' })
-  positions(@Args('input', { nullable: true }) input?: PositionsFilterInput) {
-    return this.tradeRecordService.findPositions(input?.market);
+  async positions(@Args('input', { nullable: true }) input?: PositionsFilterInput) {
+    const positions = await this.tradeRecordService.findPositions(input?.market);
+    return positions.map((position) => ({
+      ...position,
+      avgPrice: Number(position.avgPrice),
+      currentPrice: Number(position.currentPrice),
+      profitLoss: Number(position.profitLoss),
+      profitRate: Number(position.profitRate) / 100,
+      totalInvested: Number(position.totalInvested),
+    }));
   }
 
   @Query(() => StockPriceType, { name: 'quote', nullable: true })

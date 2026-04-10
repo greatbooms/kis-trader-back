@@ -11,6 +11,7 @@ describe('SimulationService', () => {
     },
     simulationPosition: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
     simulationTrade: {
       findFirst: jest.fn(),
@@ -98,10 +99,22 @@ describe('SimulationService', () => {
 
   describe('updateSettings', () => {
     it('should persist editable simulation settings', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        strategyName: 'momentum-breakout',
+        quota: 10000,
+        currentCash: 7000,
+        maxCycles: 40,
+        strategyParams: null,
+      });
       mockPrisma.simulationSession.update.mockResolvedValue({ id: 'session-1' });
 
       await service.updateSettings('session-1', {
         name: '  새 이름  ',
+        quota: 12000,
         stopLossRate: 0.2,
         maxCycles: 50,
       });
@@ -110,7 +123,48 @@ describe('SimulationService', () => {
         where: { id: 'session-1' },
         data: expect.objectContaining({
           name: '새 이름',
+          quota: expect.anything(),
+          currentCash: expect.anything(),
           maxCycles: 50,
+        }),
+        include: { positions: true },
+      });
+    });
+
+    it('should rebase infinite-buy cycle and accumulated quota when quota changes', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-2',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        strategyName: 'infinite-buy',
+        quota: 4000000,
+        currentCash: 2500000,
+        maxCycles: 40,
+        strategyParams: {
+          accumulatedQuota: 200000,
+          custom: true,
+        },
+      });
+      mockPrisma.simulationPosition.findFirst.mockResolvedValue({
+        totalInvested: 1500000,
+      });
+      mockPrisma.simulationSession.update.mockResolvedValue({ id: 'session-2' });
+
+      await service.updateSettings('session-2', {
+        quota: 8000000,
+      });
+
+      expect(mockPrisma.simulationSession.update).toHaveBeenCalledWith({
+        where: { id: 'session-2' },
+        data: expect.objectContaining({
+          quota: expect.anything(),
+          currentCash: expect.anything(),
+          cycle: 7,
+          strategyParams: {
+            accumulatedQuota: 400000,
+            custom: true,
+          },
         }),
         include: { positions: true },
       });

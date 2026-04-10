@@ -147,8 +147,12 @@ mutation UpdateSimulationSettings($input: UpdateSimulationSettingsInput!) {
   updateSimulationSettings(input: $input) {
     id
     name
+    currentCash
+    quota
     stopLossRate
     maxCycles
+    cycle
+    strategyParams
   }
 }
 

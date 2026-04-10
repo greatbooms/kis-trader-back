@@ -69,7 +69,7 @@ export function DashboardPage() {
             </div>
             {!accountLoading && (
               <Badge variant={profitRate >= 0 ? 'success' : 'danger'} className="mt-1">
-                {formatPercent(profitRate)}
+                {profitRate >= 0 ? '+' : ''}{profitRate.toFixed(2)}%
               </Badge>
             )}
           </CardContent>
@@ -101,7 +101,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {summaryLoading ? '--' : formatPercent(summary?.winRate ?? 0)}
+              {summaryLoading ? '--' : `${(summary?.winRate ?? 0).toFixed(2)}%`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {summaryLoading ? '로딩중...' : `오늘 ${formatNumber(summary?.todayTradeCount ?? 0)}건 / 누적 ${formatNumber(summary?.totalTradeCount ?? 0)}건`}

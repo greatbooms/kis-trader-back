@@ -9,6 +9,9 @@ export class UpdateSimulationSettingsInput {
   name?: string;
 
   @Field(() => Float, { nullable: true })
+  quota?: number;
+
+  @Field(() => Float, { nullable: true })
   stopLossRate?: number;
 
   @Field(() => Int, { nullable: true })

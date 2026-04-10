@@ -772,6 +772,7 @@ export type UpdateSimulationSettingsInput = {
   id: Scalars['String']['input'];
   maxCycles?: InputMaybe<Scalars['Int']['input']>;
   name?: InputMaybe<Scalars['String']['input']>;
+  quota?: InputMaybe<Scalars['Float']['input']>;
   stopLossRate?: InputMaybe<Scalars['Float']['input']>;
 };
 
@@ -954,7 +955,7 @@ export type UpdateSimulationSettingsMutationVariables = Exact<{
 }>;
 
 
-export type UpdateSimulationSettingsMutation = { __typename?: 'Mutation', updateSimulationSettings: { __typename?: 'SimulationSessionType', id: string, name: string, stopLossRate: number, maxCycles: number } };
+export type UpdateSimulationSettingsMutation = { __typename?: 'Mutation', updateSimulationSettings: { __typename?: 'SimulationSessionType', id: string, name: string, currentCash: number, quota: number, stopLossRate: number, maxCycles: number, cycle: number, strategyParams?: string | null } };
 
 export type UpdateSimulationStatusMutationVariables = Exact<{
   input: UpdateSimulationStatusInput;
@@ -1886,8 +1887,12 @@ export const UpdateSimulationSettingsDocument = gql`
   updateSimulationSettings(input: $input) {
     id
     name
+    currentCash
+    quota
     stopLossRate
     maxCycles
+    cycle
+    strategyParams
   }
 }
     `;

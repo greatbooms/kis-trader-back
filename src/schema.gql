@@ -609,6 +609,7 @@ input UpdateSimulationStatusInput {
 input UpdateSimulationSettingsInput {
   id: String!
   name: String
+  quota: Float
   stopLossRate: Float
   maxCycles: Int
 }

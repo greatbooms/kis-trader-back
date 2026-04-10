@@ -37,6 +37,7 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
     : ''
 
   const [name, setName] = useState('')
+  const [quota, setQuota] = useState('')
   const [stopLossRate, setStopLossRate] = useState('')
   const [maxCycles, setMaxCycles] = useState('')
   const [error, setError] = useState('')
@@ -60,6 +61,7 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
   useEffect(() => {
     if (!session) return
     setName(session.name)
+    setQuota(String(session.quota))
     setStopLossRate(String(Math.round(Math.abs(session.stopLossRate) * 100)))
     setMaxCycles(String(session.maxCycles))
     setError('')
@@ -80,11 +82,13 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
 
   const isDirty =
     name.trim() !== session.name ||
+    Number(quota || 0) !== session.quota ||
     Number(stopLossRate || 0) !== Math.round(Math.abs(session.stopLossRate) * 100) ||
     (cycleEnabled && Number(maxCycles || 0) !== session.maxCycles)
 
   const resetForm = () => {
     setName(session.name)
+    setQuota(String(session.quota))
     setStopLossRate(String(Math.round(Math.abs(session.stopLossRate) * 100)))
     setMaxCycles(String(session.maxCycles))
     setError('')
@@ -94,6 +98,11 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
     const trimmedName = name.trim()
     if (!trimmedName) {
       setError('시뮬레이션 이름을 입력해주세요')
+      return
+    }
+
+    if (!quota || Number(quota) <= 0) {
+      setError('투자금은 0보다 크게 입력해주세요')
       return
     }
 
@@ -115,6 +124,7 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
           input: {
             id: sessionId,
             name: trimmedName,
+            quota: Number(quota),
             stopLossRate: Number(stopLossRate) / 100,
             maxCycles: cycleEnabled ? Number(maxCycles) : undefined,
           },
@@ -186,11 +196,17 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">투자금</label>
               <Input
-                value={formatCurrency(session.quota, session.market, primaryExchangeCode)}
-                readOnly
-                disabled
+                type="number"
+                min="0"
+                step="0.01"
+                value={quota}
+                onChange={(e) => setQuota(e.target.value)}
+                disabled={!isEditing}
+                readOnly={!isEditing}
               />
-              <p className="text-xs text-muted-foreground">투자금은 생성 후 고정됩니다.</p>
+              <p className="text-xs text-muted-foreground">
+                총 투자금 변경 시 무한매수는 기존 보유 기준으로 사이클과 이월금을 다시 계산합니다.
+              </p>
             </div>
 
             <div className="space-y-1.5">
