@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,9 +9,67 @@ import {
   useGetPositionsQuery,
   useGetMarketRegimeQuery,
 } from '@/graphql/generated'
-import { formatCurrency, formatPercent, formatNumber } from '@/lib/utils'
+import { formatCurrencyByCode, formatPercent, formatNumber } from '@/lib/utils'
 import { COUNTRY_OPTIONS, type CountryOption } from '@/lib/market-constants'
-import type { CapitalSummaryCardProps, PositionInsightsCardProps } from '@/pages/types/dashboard.types'
+import type {
+  CapitalSummaryCardProps,
+  DashboardAccountSummary,
+  DashboardCapitalSummary,
+  DashboardPosition,
+  PositionInsightsCardProps,
+} from '@/pages/types/dashboard.types'
+
+const COUNTRY_CURRENCY: Record<string, string> = {
+  KR: 'KRW',
+  US: 'USD',
+  HK: 'HKD',
+  CN: 'CNY',
+  JP: 'JPY',
+  VN: 'VND',
+}
+
+function getCurrencyCodeByCountry(country: CountryOption): string {
+  return COUNTRY_CURRENCY[country.value] ?? 'KRW'
+}
+
+function getCurrencyCodeByExchange(exchangeCode?: string | null): string {
+  if (!exchangeCode) return 'KRW'
+  const country = COUNTRY_OPTIONS.find((option) => option.exchanges.includes(exchangeCode))
+  return country ? getCurrencyCodeByCountry(country) : 'KRW'
+}
+
+function buildCountryCapitalSummary(
+  country: CountryOption,
+  account?: DashboardAccountSummary,
+  positions: DashboardPosition[] = [],
+): DashboardCapitalSummary | undefined {
+  if (!account) return undefined
+
+  const currencyCode = getCurrencyCodeByCountry(country)
+  const countryPositions = positions.filter((position) =>
+    country.exchanges.includes(position.exchangeCode ?? ''),
+  )
+  const countryCashBalances = account.cashBalances.filter(
+    (balance) => balance.currencyCode === currencyCode,
+  )
+
+  const costBasis = countryPositions.reduce((sum, position) => sum + position.totalInvested, 0)
+  const totalProfitLoss = countryPositions.reduce((sum, position) => sum + position.profitLoss, 0)
+  const currentValue = costBasis + totalProfitLoss
+  const cashBalance = countryCashBalances.reduce((sum, balance) => sum + balance.amount, 0)
+  const totalAssets = currentValue + cashBalance
+
+  return {
+    currencyCode,
+    cashBalance,
+    currentValue,
+    costBasis,
+    totalAssets,
+    totalProfitLoss,
+    positionCount: countryPositions.length,
+    cashBalanceCount: countryCashBalances.length,
+  }
+}
 
 export function DashboardPage() {
   const [selectedCountry, setSelectedCountry] = useState<CountryOption>(COUNTRY_OPTIONS[0])
@@ -22,14 +80,20 @@ export function DashboardPage() {
   const account = accountData?.accountSummary
   const summary = summaryData?.dashboardSummary
   const positions = positionsData?.positions ?? []
-  const totalAssets = account?.totalAssets ?? 0
-  const cashBalance = account?.cashBalance ?? 0
-  const totalProfitLoss = account?.totalProfitLoss ?? 0
-  const profitRate = account?.profitRate ?? 0
+  const selectedPositions = positions.filter((position) =>
+    selectedCountry.exchanges.includes(position.exchangeCode ?? ''),
+  )
+  const capitalSummary = buildCountryCapitalSummary(selectedCountry, account, positions)
+  const totalAssets = capitalSummary?.totalAssets ?? 0
+  const currentValue = capitalSummary?.currentValue ?? 0
+  const cashBalance = capitalSummary?.cashBalance ?? 0
+  const totalProfitLoss = capitalSummary?.totalProfitLoss ?? 0
+  const profitRate = capitalSummary?.costBasis ? (totalProfitLoss / capitalSummary.costBasis) * 100 : 0
   const cashRatio = totalAssets > 0 ? cashBalance / totalAssets : 0
-  const investedRatio = totalAssets > 0 ? (account?.totalInvested ?? 0) / totalAssets : 0
-  const winningCount = positions.filter((p) => p.profitLoss > 0).length
-  const losingCount = positions.filter((p) => p.profitLoss < 0).length
+  const investedRatio = totalAssets > 0 ? currentValue / totalAssets : 0
+  const winningCount = selectedPositions.filter((position) => position.profitLoss > 0).length
+  const losingCount = selectedPositions.filter((position) => position.profitLoss < 0).length
+  const displayCurrency = capitalSummary?.currencyCode ?? getCurrencyCodeByCountry(selectedCountry)
 
   return (
     <div className="space-y-6">
@@ -38,20 +102,33 @@ export function DashboardPage() {
         <p className="text-sm text-muted-foreground mt-1">자동매매 현황과 포지션 상태를 한눈에 확인하세요</p>
       </div>
 
+      <div className="flex gap-2 flex-wrap">
+        {COUNTRY_OPTIONS.map((country) => (
+          <Button
+            key={country.value}
+            variant={selectedCountry.value === country.value ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCountry(country)}
+          >
+            {country.label}
+          </Button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-muted-foreground">총 자산</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">현재 평가자산</CardTitle>
               <Wallet className="h-4 w-4 text-primary-500" />
             </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {accountLoading ? '--' : formatCurrency(totalAssets)}
+              {accountLoading ? '--' : formatCurrencyByCode(totalAssets, displayCurrency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {accountLoading ? '로딩중...' : `${account?.positionCount ?? 0}개 종목 보유`}
+              {accountLoading ? '로딩중...' : `${selectedCountry.label} ${capitalSummary?.positionCount ?? 0}개 종목 보유`}
             </p>
           </CardContent>
         </Card>
@@ -65,7 +142,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${accountLoading ? '' : totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
-              {accountLoading ? '--' : formatCurrency(totalProfitLoss)}
+              {accountLoading ? '--' : formatCurrencyByCode(totalProfitLoss, displayCurrency)}
             </div>
             {!accountLoading && (
               <Badge variant={profitRate >= 0 ? 'success' : 'danger'} className="mt-1">
@@ -78,7 +155,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-muted-foreground">투자 여력</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">현금 비중</CardTitle>
               <PieChart className="h-4 w-4 text-info" />
             </div>
           </CardHeader>
@@ -87,7 +164,7 @@ export function DashboardPage() {
               {accountLoading ? '--' : formatPercent(cashRatio)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {accountLoading ? '로딩중...' : `투자 비중 ${formatPercent(investedRatio)}`}
+              {accountLoading ? '로딩중...' : `보유 평가 비중 ${formatPercent(investedRatio)}`}
             </p>
           </CardContent>
         </Card>
@@ -104,33 +181,20 @@ export function DashboardPage() {
               {summaryLoading ? '--' : `${(summary?.winRate ?? 0).toFixed(2)}%`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {summaryLoading ? '로딩중...' : `오늘 ${formatNumber(summary?.todayTradeCount ?? 0)}건 / 누적 ${formatNumber(summary?.totalTradeCount ?? 0)}건`}
+              {summaryLoading ? '로딩중...' : `전체 기준 오늘 ${formatNumber(summary?.todayTradeCount ?? 0)}건 / 누적 ${formatNumber(summary?.totalTradeCount ?? 0)}건`}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        {COUNTRY_OPTIONS.map((c) => (
-          <Button
-            key={c.value}
-            variant={selectedCountry.value === c.value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCountry(c)}
-          >
-            {c.label}
-          </Button>
-        ))}
-      </div>
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <MarketRegimeCard country={selectedCountry} />
-        <CapitalSummaryCard loading={accountLoading} summary={account} />
+        <CapitalSummaryCard loading={accountLoading} countryLabel={selectedCountry.label} summary={capitalSummary} />
       </div>
 
       <PositionInsightsCard
         loading={positionsLoading || accountLoading}
-        positions={positions}
+        positions={selectedPositions}
         totalAssets={totalAssets}
         winningCount={winningCount}
         losingCount={losingCount}
@@ -172,7 +236,7 @@ function MarketRegimeCard({ country }: { country: CountryOption }) {
   )
 }
 
-function CapitalSummaryCard({ loading, summary }: CapitalSummaryCardProps) {
+function CapitalSummaryCard({ loading, countryLabel, summary }: CapitalSummaryCardProps) {
   if (loading) {
     return (
       <Card>
@@ -189,7 +253,7 @@ function CapitalSummaryCard({ loading, summary }: CapitalSummaryCardProps) {
     )
   }
 
-  const investedRatio = summary.totalAssets > 0 ? summary.totalInvested / summary.totalAssets : 0
+  const investedRatio = summary.totalAssets > 0 ? summary.currentValue / summary.totalAssets : 0
   const cashRatio = summary.totalAssets > 0 ? summary.cashBalance / summary.totalAssets : 0
 
   return (
@@ -199,33 +263,35 @@ function CapitalSummaryCard({ loading, summary }: CapitalSummaryCardProps) {
           <PieChart className="h-5 w-5 text-primary-500" />
           <CardTitle>계좌 배분</CardTitle>
         </div>
-        <CardDescription>예수금과 투자금, 실현 손익을 같이 확인할 수 있는 자금 요약입니다</CardDescription>
+        <CardDescription>{countryLabel} 시장 기준 통화별 자금 요약입니다</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="rounded-lg border border-border/50 p-4">
             <p className="text-xs text-muted-foreground">예수금</p>
-            <p className="mt-2 text-xl font-bold">{formatCurrency(summary.cashBalance)}</p>
+            <p className="mt-2 text-xl font-bold">{formatCurrencyByCode(summary.cashBalance, summary.currencyCode)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{summary.cashBalanceCount}개 현금 항목</p>
           </div>
           <div className="rounded-lg border border-border/50 p-4">
-            <p className="text-xs text-muted-foreground">총 투자금</p>
-            <p className="mt-2 text-xl font-bold">{formatCurrency(summary.totalInvested)}</p>
+            <p className="text-xs text-muted-foreground">현재 평가금액</p>
+            <p className="mt-2 text-xl font-bold">{formatCurrencyByCode(summary.currentValue, summary.currencyCode)}</p>
+            <p className="text-xs text-muted-foreground mt-1">{summary.positionCount}개 종목 보유</p>
           </div>
           <div className="rounded-lg border border-border/50 p-4">
-            <p className="text-xs text-muted-foreground">실현 손익</p>
-            <p className={`mt-2 text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-success' : 'text-danger'}`}>
-              {formatCurrency(summary.realizedPnL)}
+            <p className="text-xs text-muted-foreground">매입원가</p>
+            <p className="mt-2 text-xl font-bold">{formatCurrencyByCode(summary.costBasis, summary.currencyCode)}</p>
+          </div>
+          <div className="rounded-lg border border-border/50 p-4">
+            <p className="text-xs text-muted-foreground">평가 손익</p>
+            <p className={`mt-2 text-xl font-bold ${summary.totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+              {formatCurrencyByCode(summary.totalProfitLoss, summary.currencyCode)}
             </p>
-          </div>
-          <div className="rounded-lg border border-border/50 p-4">
-            <p className="text-xs text-muted-foreground">보유 종목 수</p>
-            <p className="mt-2 text-xl font-bold">{formatNumber(summary.positionCount)}</p>
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>총 자산</span>
-            <span>{formatCurrency(summary.totalAssets)}</span>
+            <span>현재 평가자산</span>
+            <span>{formatCurrencyByCode(summary.totalAssets, summary.currencyCode)}</span>
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-muted">
             <div className="flex h-full">
@@ -234,7 +300,7 @@ function CapitalSummaryCard({ loading, summary }: CapitalSummaryCardProps) {
             </div>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span>투자 비중 {formatPercent(investedRatio)}</span>
+            <span>보유 평가 비중 {formatPercent(investedRatio)}</span>
             <span>현금 비중 {formatPercent(cashRatio)}</span>
           </div>
         </div>
@@ -266,7 +332,7 @@ function PositionInsightsCard({
             <BarChart3 className="h-5 w-5 text-primary-500" />
             <CardTitle>포지션 인사이트</CardTitle>
           </div>
-          <CardDescription>보유 포지션이 생기면 수익률과 비중 요약을 보여줍니다</CardDescription>
+          <CardDescription>선택한 국가의 보유 포지션이 생기면 수익률과 비중 요약을 보여줍니다</CardDescription>
         </CardHeader>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">보유 중인 포지션이 없습니다</CardContent>
       </Card>
@@ -276,7 +342,7 @@ function PositionInsightsCard({
   const best = positions.reduce((top, current) => current.profitRate > top.profitRate ? current : top, positions[0])
   const worst = positions.reduce((bottom, current) => current.profitRate < bottom.profitRate ? current : bottom, positions[0])
   const largest = positions.reduce((top, current) => current.totalInvested > top.totalInvested ? current : top, positions[0])
-  const largestWeight = totalAssets > 0 ? largest.totalInvested / totalAssets : 0
+  const largestWeight = totalAssets > 0 ? (largest.totalInvested + largest.profitLoss) / totalAssets : 0
 
   return (
     <Card>
@@ -294,40 +360,66 @@ function PositionInsightsCard({
           <Badge variant="outline">보합 {Math.max(0, positions.length - winningCount - losingCount)}개</Badge>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="rounded-lg border border-border/50 p-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Trophy className="h-4 w-4 text-success" />
-              최고 수익
-            </div>
-            <p className="mt-3 font-semibold">{best.stockName}</p>
-            <p className="text-xs text-muted-foreground">{best.stockCode}</p>
-            <p className={`mt-2 text-lg font-bold ${best.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
-              {formatPercent(best.profitRate)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border/50 p-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <AlertTriangle className="h-4 w-4 text-danger" />
-              최저 수익
-            </div>
-            <p className="mt-3 font-semibold">{worst.stockName}</p>
-            <p className="text-xs text-muted-foreground">{worst.stockCode}</p>
-            <p className={`mt-2 text-lg font-bold ${worst.profitRate >= 0 ? 'text-success' : 'text-danger'}`}>
-              {formatPercent(worst.profitRate)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border/50 p-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <PieChart className="h-4 w-4 text-warning" />
-              최대 비중
-            </div>
-            <p className="mt-3 font-semibold">{largest.stockName}</p>
-            <p className="text-xs text-muted-foreground">{largest.stockCode}</p>
-            <p className="mt-2 text-lg font-bold">{formatCurrency(largest.totalInvested)}</p>
-            <p className="text-xs text-muted-foreground mt-1">총 자산 대비 {formatPercent(largestWeight)}</p>
-          </div>
+          <InsightMetricCard
+            icon={<Trophy className="h-4 w-4 text-success" />}
+            label="최고 수익"
+            stockName={best.stockName}
+            stockCode={best.stockCode}
+            value={`${best.profitRate >= 0 ? '+' : ''}${best.profitRate.toFixed(2)}%`}
+            valueClassName={best.profitRate >= 0 ? 'text-success' : 'text-danger'}
+          />
+          <InsightMetricCard
+            icon={<AlertTriangle className="h-4 w-4 text-danger" />}
+            label="최저 수익"
+            stockName={worst.stockName}
+            stockCode={worst.stockCode}
+            value={`${worst.profitRate >= 0 ? '+' : ''}${worst.profitRate.toFixed(2)}%`}
+            valueClassName={worst.profitRate >= 0 ? 'text-success' : 'text-danger'}
+          />
+          <InsightMetricCard
+            icon={<PieChart className="h-4 w-4 text-warning" />}
+            label="최대 비중"
+            stockName={largest.stockName}
+            stockCode={largest.stockCode}
+            value={formatCurrencyByCode(largest.totalInvested + largest.profitLoss, getCurrencyCodeByExchange(largest.exchangeCode))}
+            valueClassName="text-foreground"
+            subValue={`평가자산 대비 ${formatPercent(largestWeight)}`}
+          />
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function InsightMetricCard({
+  icon,
+  label,
+  stockName,
+  stockCode,
+  value,
+  valueClassName,
+  subValue,
+}: {
+  icon: ReactNode
+  label: string
+  stockName: string
+  stockCode: string
+  value: string
+  valueClassName: string
+  subValue?: string
+}) {
+  return (
+    <div className="rounded-lg border border-border/50 p-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="mt-3">
+        <p className="font-semibold">{stockName}</p>
+        <p className="text-xs text-muted-foreground">{stockCode}</p>
+      </div>
+      <p className={`mt-2 text-lg font-bold ${valueClassName}`}>{value}</p>
+      {subValue && <p className="mt-1 text-xs text-muted-foreground">{subValue}</p>}
+    </div>
   )
 }
