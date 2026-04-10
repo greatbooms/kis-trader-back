@@ -1,228 +1,196 @@
 # 배포 가이드
 
-Koyeb (무료 서버 + DB) + UptimeRobot (Keep-alive)으로 **월 $0** 배포.
-NestJS가 React 정적 빌드를 직접 서빙하는 단일 배포 구조입니다.
+이 프로젝트는 self-hosted macOS 서버 기준으로 배포할 수 있습니다.  
+배포는 `GitHub Actions + Tailscale + SSH + PM2` 조합을 기준으로 구성되어 있습니다.
 
-## 1. 아키텍처 개요
+## 배포 구조
 
-```
-┌───────────────────────────────┐
-│  Koyeb (무료)                 │
-│  ┌─────────────────────────┐  │
-│  │  NestJS Server          │  │
-│  │  + React SPA (정적 서빙)│  │
-│  │  0.1 vCPU / 512MB       │  │
-│  └──────────┬──────────────┘  │
-│             │                 │
-│  ┌──────────▼──────────────┐  │
-│  │  PostgreSQL (무료)      │  │
-│  │  Koyeb 내장 DB          │  │
-│  └─────────────────────────┘  │
-└───────────────────────────────┘
-        ▲
-        │ 5분마다 ping
-   ┌────┴──────────────┐
-   │  UptimeRobot      │
-   │  (Keep-alive)     │
-   └───────────────────┘
-```
+흐름:
 
-- `GET /health` — 헬스체크
-- `POST /graphql` — GraphQL API
-- `GET /*` — React SPA (ServeStaticModule)
+1. `main` 브랜치에 push
+2. GitHub Actions 실행
+3. Tailscale OAuth로 tailnet 접속
+4. 운영 서버에 SSH 접속
+5. 소스 아카이브 업로드
+6. 원격 `scripts/deploy.sh` 실행
+7. 의존성 설치, Prisma migration, `yarn build:all`
+8. `pm2 startOrRestart ecosystem.config.js --only kis-trader-back`
+9. `http://localhost:8888/health` 헬스체크
 
-**Koyeb 무료 인스턴스는 5분 트래픽 없으면 Scale-to-Zero로 슬립됩니다.**
-UptimeRobot(무료)으로 5분 간격 `/health` 핑을 보내 슬립을 방지합니다.
+관련 파일:
 
-## 2. Koyeb 계정 생성
+- 워크플로우: [deploy.yml](/Users/shinsanghoon/workspace/kis-trader-back/.github/workflows/deploy.yml)
+- 원격 배포 스크립트: [deploy.sh](/Users/shinsanghoon/workspace/kis-trader-back/scripts/deploy.sh)
+- PM2 설정: [ecosystem.config.js](/Users/shinsanghoon/workspace/kis-trader-back/ecosystem.config.js)
 
-1. [koyeb.com](https://www.koyeb.com/) 가입 (GitHub 연동 권장)
-2. 무료 플랜 확인 (Free tier: 1 Web Service + 1 PostgreSQL)
+## 실행 환경
 
-## 3. PostgreSQL 데이터베이스 생성
+운영 포트:
 
-1. Koyeb 대시보드 → **Databases** → **Create Database**
-2. 설정:
-   - Name: `kis-trader-db`
-   - Region: **Washington, D.C.** (서버와 동일 리전 권장)
-3. **Create** 클릭
-4. 생성 완료 후 **Connection string** 복사
+- 백엔드/Nest: `8888`
 
-`DATABASE_URL` 형식:
-```
-postgresql://username:password@ep-xxxxx.us-east-2.pg.koyeb.app/koyebdb?sslmode=require
-```
+개발 포트:
 
-> Koyeb 무료 PostgreSQL: 단일 사용자 자동매매 데이터에 충분한 용량입니다.
-> 앱과 DB가 같은 플랫폼에 있어 네트워크 지연도 최소화됩니다.
+- 백엔드: `10100`
+- 프론트 Vite: `10101`
 
-## 4. 웹 서비스 배포
+환경파일:
 
-### 4-1. Web Service 생성
+- 개발: `.env.dev`
+- 운영: `.env.prod`
 
-1. Apps → **Create App** → **Web Service**
-2. Source: **GitHub** → 레포 연결 (`kis-trader-back`)
-3. Builder: **Dockerfile**
-4. Region: **Washington, D.C.** (DB와 동일 리전)
-5. Instance: **Free** (0.1 vCPU, 512MB RAM)
+중요 설정:
 
-### 4-2. 환경변수 설정
+- `.env.dev` → `TRADING_ENABLED=false`
+- `.env.prod` → `TRADING_ENABLED=true`
+- `.env.prod`에는 `ADMIN_PASSWORD`, `JWT_SECRET`가 반드시 있어야 함
 
-Settings → Environment Variables:
+## 운영 서버 사전 준비
 
-| 변수 | 값 | 비고 |
-|------|------|------|
-| `DATABASE_URL` | Koyeb DB Connection string | 3단계에서 복사 |
-| `KIS_APP_KEY` | KIS 앱 키 | [키 발급 가이드](kis-api-setup.md) 참고 |
-| `KIS_APP_SECRET` | KIS 앱 시크릿 | |
-| `KIS_ACCOUNT_NO` | 계좌번호 (10자리) | |
-| `KIS_PROD_CODE` | `01` | |
-| `KIS_ENV` | `prod` | |
-| `OPENDART_API_KEY` | OpenDART API 키 | [보조 데이터 가이드](market-data-setup.md) 참고 |
-| `SEC_USER_AGENT` | SEC 요청용 User-Agent | 예: `MyCompany kis-trader admin@example.com` |
-| `FRED_API_KEY` | FRED API 키 | 미국 금리 보강용 |
-| `ADMIN_USERNAME` | 관리자 아이디 | |
-| `ADMIN_PASSWORD` | 관리자 비밀번호 | 강한 비밀번호 사용 |
-| `JWT_SECRET` | JWT 시크릿 키 | 32자 이상 랜덤 문자열 |
-| `PORT` | `3000` | |
-| `SLACK_ENABLED` | `true` 또는 `false` | Slack 사용 시 `true` |
-| `SLACK_BOT_TOKEN` | Slack Bot OAuth 토큰 | [Slack 가이드](slack-setup-guide.md) 참고 |
-| `SLACK_APP_TOKEN` | Slack App-Level 토큰 | |
-| `SLACK_CHANNEL` | `#trading-alerts` | |
+필수:
 
-> 프론트엔드와 백엔드가 같은 서버에서 서빙되므로 `CORS_ORIGIN`은 불필요합니다.
+- Node.js 20+
+- Yarn 1.x
+- PostgreSQL 또는 Docker 기반 Postgres
+- `pm2` 설치
+- Tailscale 로그인 완료
+- GitHub Actions용 SSH 공개키 등록
 
-### 4-3. Health Check 설정
-
-- Path: `/health`
-- Protocol: HTTP
-- Port: 3000
-
-### 4-4. 배포
-
-**Deploy** 클릭 → Dockerfile 빌드 → 자동 배포. 완료 시 HTTPS URL 제공.
-
-배포 확인:
-```bash
-# 헬스체크
-curl https://<your-app>.koyeb.app/health
-
-# 프론트엔드 (React SPA)
-# 브라우저에서 https://<your-app>.koyeb.app
-
-# GraphQL Playground
-# 브라우저에서 https://<your-app>.koyeb.app/graphql
-```
-
-## 5. UptimeRobot Keep-alive 설정
-
-Koyeb 무료 인스턴스의 Scale-to-Zero를 방지하기 위한 외부 핑 서비스.
-
-1. [uptimerobot.com](https://uptimerobot.com/) 가입 (무료)
-2. **Add New Monitor** 클릭
-3. 설정:
-   - Monitor Type: **HTTP(s)**
-   - Friendly Name: `kis-trader`
-   - URL: `https://<your-app>.koyeb.app/health`
-   - Monitoring Interval: **5 minutes**
-4. **Create Monitor** 클릭
-
-## 6. CI/CD (GitHub Actions)
-
-main 브랜치에 push하면 자동으로 빌드 + DB 마이그레이션 + Koyeb 배포.
-
-`.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - run: yarn install --frozen-lockfile
-
-      - run: yarn build
-
-      - name: Run DB migration
-        run: yarn prisma migrate deploy
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      - name: Deploy to Koyeb
-        uses: koyeb/action-git-deploy@v1
-        with:
-          app-name: kis-trader
-          service-name: kis-trader
-        env:
-          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-```
-
-**GitHub Secrets 설정** (Settings → Secrets and variables → Actions):
-
-| 시크릿 | 설명 |
-|--------|------|
-| `DATABASE_URL` | Koyeb DB Connection string |
-| `KOYEB_TOKEN` | Koyeb API 토큰 (Account → API → Create Token) |
-
-## 7. 로컬 개발
+PM2 설치:
 
 ```bash
-# Terminal 1: 백엔드 (port 3000)
-yarn start:dev
-
-# Terminal 2: 프론트엔드 (port 5173, proxy → 3000)
-yarn client:dev
+npm install -g pm2
 ```
 
-프로덕션 빌드 테스트:
+운영 환경파일 배치:
+
 ```bash
-yarn build:all && yarn start:prod
-# http://localhost:3000 에서 React 앱 + GraphQL 모두 확인
+mkdir -p <DEPLOY_PATH>
+cp .env.prod <DEPLOY_PATH>/.env.prod
 ```
 
-## 8. 운영 체크리스트
+`DEPLOY_PATH/.env.prod`는 배포 시 계속 보존됩니다.
 
-- [ ] Koyeb DB 생성 + `DATABASE_URL` 확보
-- [ ] Koyeb 서비스 생성 + 환경변수 설정
-- [ ] 강한 `JWT_SECRET` 설정 (32자 이상 랜덤 문자열)
-- [ ] 강한 `ADMIN_PASSWORD` 설정
-- [ ] UptimeRobot 모니터 추가 (5분 간격, `/health`)
-- [ ] 헬스체크 정상 응답 확인 (`GET /health`)
-- [ ] 프론트엔드 접속 확인 (로그인 → 쿠키 인증 동작)
-- [ ] (선택) Slack 알림 설정 (`SLACK_ENABLED=true` + 토큰)
-- [ ] (선택) Koyeb 커스텀 도메인 설정
+예시:
 
-## 9. 비용 요약
+- `DEPLOY_PATH=/opt/apps/kis-trader-back`
+- 또는 `DEPLOY_PATH=$HOME/apps/kis-trader-back`
 
-| 항목 | 서비스 | 월 비용 |
-|------|--------|---------|
-| 서버 + 프론트엔드 | Koyeb Free (0.1 vCPU, 512MB) | $0 |
-| 데이터베이스 | Koyeb PostgreSQL (무료) | $0 |
-| Keep-alive | UptimeRobot (5분 간격 핑) | $0 |
-| **합계** | | **$0** |
+## GitHub Secrets
 
-## 10. 트러블슈팅
+Repository → `Settings` → `Secrets and variables` → `Actions`
 
-### 배포 실패 시
-- Koyeb 대시보드 → 서비스 → **Logs** 탭에서 빌드/런타임 로그 확인
-- Dockerfile 빌드 에러: 로컬에서 `docker build .` 테스트
+필수 시크릿:
 
-### DB 연결 실패 시
-- `DATABASE_URL`에 `?sslmode=require` 포함 확인
-- Koyeb DB와 서비스가 동일 리전인지 확인
+- `TS_OAUTH_CLIENT_ID`
+- `TS_OAUTH_SECRET`
+- `MAC_STUDIO_HOST`
+- `MAC_STUDIO_USER`
+- `MAC_STUDIO_SSH_KEY`
+- `DEPLOY_PATH`
 
-### 슬립 후 첫 요청이 느린 경우
-- UptimeRobot이 정상 작동 중인지 확인 (Monitor → Status: Up)
-- 핑 간격이 5분 이하인지 확인
+설명:
+
+- `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`
+  - Tailscale Admin Console의 OAuth Client
+  - `auth_keys` writable scope 필요
+- `MAC_STUDIO_HOST`
+  - 운영 서버의 Tailscale hostname 또는 100.x IP
+- `MAC_STUDIO_USER`
+  - 운영 서버 로그인 사용자명
+- `MAC_STUDIO_SSH_KEY`
+  - GitHub Actions가 사용할 SSH private key
+- `DEPLOY_PATH`
+  - 운영 서버 내 배포 기준 경로
+
+참고:
+
+- 시크릿 이름은 현재 워크플로우 기준입니다.
+- 이름에 `MAC_STUDIO`가 들어가도 실제 대상은 같은 역할의 운영 서버면 됩니다.
+
+## Tailscale 설정
+
+GitHub Actions는 `tailscale/github-action@v4`를 사용합니다.
+
+필요 사항:
+
+- OAuth Client 생성
+- `auth_keys` writable scope 허용
+- `tag:ci` 사용 가능해야 함
+
+워크플로우는 현재 `tags: tag:ci`로 동작합니다.
+
+## 자동 시작
+
+운영 서버에서는 부팅/로그인 시 아래 절차가 자동 실행되도록 별도 startup script와 launchd 또는 동등한 프로세스 매니저를 구성할 수 있습니다.
+
+권장 순서:
+
+1. Docker Desktop 또는 Postgres 준비
+2. `yarn build:all`
+3. `pm2 startOrRestart ecosystem.config.js --only kis-trader-back`
+
+## 수동 배포/재기동 확인
+
+배포 후 상태 확인:
+
+```bash
+pm2 list
+curl http://localhost:8888/health
+```
+
+PM2 상세:
+
+```bash
+pm2 describe kis-trader-back
+pm2 logs kis-trader-back
+```
+
+## 로그 위치
+
+배포 스크립트 로그:
+
+- `${DEPLOY_PATH}/logs/deploy.log`
+
+PM2 앱 로그:
+
+- `PM2_LOG_DIR/pm2.out.log`
+- `PM2_LOG_DIR/pm2.error.log`
+
+기본적으로 `ecosystem.config.js`는 `PM2_LOG_DIR` 값을 우선 사용합니다.
+
+## 트러블슈팅
+
+### GitHub Actions에서 Tailscale 연결 실패
+
+확인:
+
+- `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` 값
+- OAuth Client 권한에 `auth_keys` writable scope 포함 여부
+- `tag:ci` 허용 여부
+- `MAC_STUDIO_HOST`가 tailnet에서 실제 reachable 한지
+
+### 배포는 됐는데 앱이 안 뜰 때
+
+확인:
+
+```bash
+pm2 list
+pm2 logs kis-trader-back --lines 200
+curl http://localhost:8888/health
+```
+
+### Prisma migration 실패
+
+확인:
+
+- `.env.prod`의 `DATABASE_URL`
+- 운영 서버에서 DB 접근 가능 여부
+
+### 운영 서버 부팅 후 자동 시작 실패
+
+확인:
+
+- startup script 로그
+- PM2 로그
+- `pm2 list`

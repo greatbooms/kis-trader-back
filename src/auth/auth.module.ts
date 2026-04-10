@@ -13,10 +13,16 @@ import { GqlAuthGuard } from './auth.guard';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('auth.jwtSecret'),
-        signOptions: { expiresIn: '7d' },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const jwtSecret = configService.get<string>('auth.jwtSecret');
+        if (!jwtSecret) {
+          throw new Error('JWT_SECRET must be configured');
+        }
+        return {
+          secret: jwtSecret,
+          signOptions: { expiresIn: '7d' },
+        };
+      },
     }),
   ],
   providers: [AuthService, AuthResolver, JwtStrategy, GqlAuthGuard],

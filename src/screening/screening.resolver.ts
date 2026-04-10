@@ -1,4 +1,5 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
+import { UseGuards } from '@nestjs/common';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
 import {
@@ -12,6 +13,7 @@ import {
   RunScreeningInput,
 } from './dto';
 import { PrismaService } from '../prisma.service';
+import { GqlAuthGuard } from '../auth/auth.guard';
 
 const SCREENING_SETTINGS_KEY = 'screening-countries';
 
@@ -25,6 +27,7 @@ const DEFAULT_COUNTRY_SETTINGS: Record<string, { label: string; enabled: boolean
 };
 
 @Resolver()
+@UseGuards(GqlAuthGuard)
 export class ScreeningResolver {
   constructor(
     private screeningService: ScreeningService,
@@ -131,6 +134,7 @@ export class ScreeningResolver {
   }
 
   @Mutation(() => Boolean)
+  @UseGuards(GqlAuthGuard)
   async runScreeningNow(
     @Args('input') input: RunScreeningInput,
   ): Promise<boolean> {
@@ -148,6 +152,7 @@ export class ScreeningResolver {
   }
 
   @Mutation(() => Boolean)
+  @UseGuards(GqlAuthGuard)
   async runDeepAnalysisNow(
     @Args('input') input: RunScreeningInput,
   ): Promise<boolean> {
@@ -162,6 +167,7 @@ export class ScreeningResolver {
   }
 
   @Query(() => ScreeningSettingsType, { name: 'screeningSettings' })
+  @UseGuards(GqlAuthGuard)
   async getScreeningSettings(): Promise<ScreeningSettingsType> {
     const saved = await this.prisma.appSetting.findUnique({
       where: { key: SCREENING_SETTINGS_KEY },
@@ -179,6 +185,7 @@ export class ScreeningResolver {
   }
 
   @Mutation(() => ScreeningSettingsType)
+  @UseGuards(GqlAuthGuard)
   async updateScreeningSettings(
     @Args('input') input: UpdateScreeningSettingsInput,
   ): Promise<ScreeningSettingsType> {

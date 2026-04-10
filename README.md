@@ -61,7 +61,7 @@ NestJS 백엔드와 React 프론트엔드가 하나의 레포에 통합된 풀�
 | Chart | Recharts 3 |
 | Auth | Passport + JWT (Cookie 기반) |
 | Notification | Slack Bolt 4 (Socket Mode) |
-| Deploy | Docker (Multi-stage build) |
+| Deploy | PM2 + GitHub Actions + Tailscale |
 
 ## 요구사항
 
@@ -85,10 +85,25 @@ cd client && yarn install && cd ..
 ### 2. 환경변수 설정
 
 ```bash
-cp .env.example .env
+cp .env.example .env.dev
+cp .env.example .env.prod
 ```
 
-`.env` 파일을 편집합니다:
+개발용과 운영용 환경파일을 각각 편집합니다.
+
+- `.env.dev`: 로컬 개발용
+- `.env.prod`: 운영 배포용
+
+핵심 차이:
+- `.env.dev`
+  - `PORT=10100`
+  - `CLIENT_PORT=10101`
+  - `TRADING_ENABLED=false`
+- `.env.prod`
+  - `PORT=8888`
+  - `TRADING_ENABLED=true`
+
+주요 변수:
 
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
@@ -104,8 +119,9 @@ cp .env.example .env
 | `ADMIN_USERNAME` | 관리자 아이디 | `admin` |
 | `ADMIN_PASSWORD` | 관리자 비밀번호 | (필수) |
 | `JWT_SECRET` | JWT 시크릿 키 (32자 이상) | (필수) |
-| `TRADING_INTERVAL_MS` | 매매 체크 간격 (ms) | `30000` |
+| `TRADING_ENABLED` | 실거래 활성화 여부 | `true` |
 | `PORT` | 서버 포트 | `3000` |
+| `CLIENT_PORT` | Vite 개발 서버 포트 | `5173` |
 | `SLACK_ENABLED` | Slack 활성화 | `false` |
 | `SLACK_BOT_TOKEN` | Slack Bot OAuth 토큰 | |
 | `SLACK_APP_TOKEN` | Slack App-Level 토큰 | |
@@ -138,16 +154,71 @@ yarn prisma migrate dev --name init
 
 ```bash
 # 개발 모드 (터미널 2개)
-yarn start:dev           # 백엔드 (port 3000)
-yarn client:dev          # 프론트엔드 (port 5173)
+yarn start:dev           # 백엔드 (port 10100, 실거래 차단)
+yarn client:dev          # 프론트엔드 (port 10101)
 
 # 프로덕션 빌드
 yarn build:all
-yarn start:prod          # http://localhost:3000
+yarn start:prod          # http://localhost:8888
 ```
 
-- GraphQL Playground: `http://localhost:3000/graphql`
-- 헬스체크: `http://localhost:3000/health`
+- 개발 GraphQL: `http://localhost:10100/graphql`
+- 개발 헬스체크: `http://localhost:10100/health`
+- 운영 GraphQL: `http://localhost:8888/graphql`
+- 운영 헬스체크: `http://localhost:8888/health`
+
+## 개발/운영 실행 구조
+
+### 개발 환경
+
+- `yarn start:dev`는 `.env.dev`를 읽습니다.
+- `TRADING_ENABLED=false`라서 실제 주문은 나가지 않습니다.
+- 수동 실행, 수동 매도, 승인 손절도 개발 환경에서는 막혀 있습니다.
+
+### 운영 환경
+
+- `yarn start:prod`는 `.env.prod`를 읽습니다.
+- 운영 서버는 `pm2`로 관리합니다.
+- 기본 운영 포트는 `8888`입니다.
+- 운영 환경에서는 `ADMIN_PASSWORD`, `JWT_SECRET`가 없으면 서버가 부팅되지 않습니다.
+- 운영 환경에서는 GraphQL Playground와 introspection이 비활성화됩니다.
+
+## PM2 로그 확인
+
+빠른 확인:
+
+```bash
+pm2 list
+pm2 logs kis-trader-back
+pm2 describe kis-trader-back
+```
+
+로그 파일 경로는 `ecosystem.config.js`의 `PM2_LOG_DIR` 설정을 따릅니다.
+
+## GitHub Actions 배포
+
+`main` 브랜치에 push하면 GitHub Actions가 self-hosted macOS 서버로 자동 배포합니다.
+
+배포 흐름:
+- GitHub Actions 실행
+- Tailscale OAuth로 tailnet 연결
+- 운영 서버에 SSH 접속
+- 소스 아카이브 업로드
+- 원격 `scripts/deploy.sh` 실행
+- `yarn install`, `yarn build:all`, `prisma migrate deploy`
+- `pm2 startOrRestart ecosystem.config.js --only kis-trader-back`
+- `/health` 헬스체크
+
+필수 GitHub Secrets:
+
+- `TS_OAUTH_CLIENT_ID`
+- `TS_OAUTH_SECRET`
+- `MAC_STUDIO_HOST`
+- `MAC_STUDIO_USER`
+- `MAC_STUDIO_SSH_KEY`
+- `DEPLOY_PATH`
+
+원격 서버 준비와 로그/자동 시작 구성은 [배포 가이드](docs/deployment-guide.md)를 참고하세요.
 
 ## 매매 전략
 
@@ -201,10 +272,10 @@ kis-trader-back/
 
 | 명령어 | 설명 |
 |--------|------|
-| `yarn start:dev` | 백엔드 개발 서버 (watch 모드) |
-| `yarn client:dev` | 프론트엔드 개발 서버 |
+| `yarn start:dev` | 백엔드 개발 서버 (10100, 실거래 차단) |
+| `yarn client:dev` | 프론트엔드 개발 서버 (10101) |
 | `yarn build:all` | 프론트엔드 + 백엔드 전체 빌드 |
-| `yarn start:prod` | 프로덕션 실행 |
+| `yarn start:prod` | 프로덕션 실행 (8888) |
 | `yarn client:codegen` | GraphQL 타입 코드 생성 |
 | `yarn test` | 테스트 실행 |
 | `yarn prisma:studio` | Prisma DB 관리 UI |
@@ -213,7 +284,7 @@ kis-trader-back/
 
 - [KIS API 키 발급 가이드](docs/kis-api-setup.md)
 - [보조 시장데이터 설정 가이드](docs/market-data-setup.md)
-- [배포 가이드](docs/deployment-guide.md) — Koyeb 무료 배포
+- [배포 가이드](docs/deployment-guide.md) — Mac Studio + GitHub Actions + Tailscale
 - [Slack 설정 가이드](docs/slack-setup-guide.md)
 
 ## 라이선스

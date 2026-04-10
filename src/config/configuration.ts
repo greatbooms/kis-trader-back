@@ -22,7 +22,7 @@ export default () => ({
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
     adminPassword: process.env.ADMIN_PASSWORD || '',
-    jwtSecret: process.env.JWT_SECRET || 'default-secret-change-me',
+    jwtSecret: process.env.JWT_SECRET || '',
   },
   slack: {
     botToken: process.env.SLACK_BOT_TOKEN || '',

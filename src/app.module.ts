@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -24,12 +24,19 @@ import { MarketDataModule } from './market-data/market-data.module';
       isGlobal: true,
       load: [configuration],
     }),
-    GraphQLModule.forRoot<ApolloDriverConfig>({
+    GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
-      playground: true,
-      introspection: true,
-      context: ({ req, res }) => ({ req, res }),
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+        return {
+          autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+          playground: !isProduction,
+          introspection: !isProduction,
+          context: ({ req, res }) => ({ req, res }),
+        };
+      },
     }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'client', 'dist'),
