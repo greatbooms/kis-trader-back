@@ -122,7 +122,9 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 하루 1회, 장중 실행 (국내 11시, 해외 장 시작 2시간 후)',
     '- 하락장에서도 분할매수를 이어가되, 시장/종목 리스크에 따라 매수금액만 조절',
     '- RSI < 30 과매도 구간에서는 매수금액 1.25배 증가',
+    '- RSI 60 이상 과열 구간에서는 단계적으로 매수금액 축소',
     '- 금리 급등 시 매수금액 20% 축소',
+    '- RSI 60~70: 15% 축소, 70~80: 40% 축소, 80 이상: 60% 축소',
     '',
     '【매수 방식】',
     '- T < 20: Buy1(현재가 지정가) + Buy2(현재가 아래 지정가) 두 건 분할',
@@ -349,11 +351,25 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       pushQuotaAdjustment(details, '금리 급등', 0.8);
     }
 
-    // 개선 C: RSI < 30 과매도시 1.25배
-    if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) {
-      adjustedQuota *= 1.25;
-      details.quotaAdjust_rsi = true;
-      pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} < 30`, 1.25);
+    // 개선 C: RSI 과매도/과열 구간별 조정
+    if (stockIndicators.rsi14 !== undefined) {
+      if (stockIndicators.rsi14 < 30) {
+        adjustedQuota *= 1.25;
+        details.quotaAdjust_rsi = true;
+        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} < 30`, 1.25);
+      } else if (stockIndicators.rsi14 >= 80) {
+        adjustedQuota *= 0.4;
+        details.quotaAdjust_rsi = true;
+        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 80`, 0.4);
+      } else if (stockIndicators.rsi14 >= 70) {
+        adjustedQuota *= 0.6;
+        details.quotaAdjust_rsi = true;
+        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 70`, 0.6);
+      } else if (stockIndicators.rsi14 >= 60) {
+        adjustedQuota *= 0.85;
+        details.quotaAdjust_rsi = true;
+        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 60`, 0.85);
+      }
     }
 
     if (hasNegativeConsensus(stockIndicators)) {

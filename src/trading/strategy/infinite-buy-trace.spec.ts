@@ -479,7 +479,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
   // RSI 과매도 + 금리 급등 동시 적용
   // ============================================================
   describe('adjustedQuota 조정: RSI 과매도 + 금리 급등', () => {
-    it('금리 급등 → ×0.5, RSI<30 → ×1.5 → 최종 ×0.75', async () => {
+    it('금리 급등 → ×0.8, RSI<30 → ×1.25 → 최종 ×1.0', async () => {
       const ctx = makeCtx({
         marketCondition: {
           referenceIndexAboveMA200: true,
@@ -496,12 +496,12 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      // perCycleQuota=$250 × 0.5 × 1.5 = $187.50
-      // buyQty = floor(187.50 / 50) = 3
+      // perCycleQuota=$250 × 0.8 × 1.25 = $250
+      // buyQty = floor(250 / 50) = 5
       const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(3);
+      expect(signals[0].quantity).toBe(5);
     });
   });
 

@@ -490,6 +490,75 @@ describe('InfiniteBuyStrategy', () => {
       expect(buySignal!.quantity).toBe(1);
     });
 
+    it('should reduce quota to 0.85x when RSI is between 60 and 70', async () => {
+      const ctx = createContext({
+        stockIndicators: { currentAboveMA200: true, rsi14: 65 },
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buySignal = signals.find((s) => s.side === 'BUY');
+
+      expect(buySignal).toBeDefined();
+      expect(buySignal!.quantity).toBe(1);
+      expect(details?.quotaAdjustments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ multiplier: 0.85 }),
+        ]),
+      );
+    });
+
+    it('should reduce quota to 0.6x when RSI is between 70 and 80', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 50000,
+          openPrice: 49800,
+          highPrice: 50200,
+          lowPrice: 49500,
+          volume: 1000000,
+        },
+        stockIndicators: { currentAboveMA200: true, rsi14: 75 },
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buySignal = signals.find((s) => s.side === 'BUY');
+
+      expect(buySignal).toBeDefined();
+      expect(buySignal!.quantity).toBe(1);
+      expect(details?.quotaAdjustments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ multiplier: 0.6 }),
+        ]),
+      );
+    });
+
+    it('should reduce quota to 0.4x when RSI is above 80', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 30000,
+          openPrice: 29800,
+          highPrice: 30200,
+          lowPrice: 29500,
+          volume: 1000000,
+        },
+        stockIndicators: { currentAboveMA200: true, rsi14: 85 },
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buySignal = signals.find((s) => s.side === 'BUY');
+
+      expect(buySignal).toBeDefined();
+      expect(buySignal!.quantity).toBe(1);
+      expect(details?.quotaAdjustments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ multiplier: 0.4 }),
+        ]),
+      );
+    });
+
     it('should limit quota to buyable amount', async () => {
       const ctx = createContext({ buyableAmount: 50000 });
 
