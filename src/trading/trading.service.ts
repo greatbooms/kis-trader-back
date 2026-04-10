@@ -110,6 +110,8 @@ export class TradingService {
       hasPosition: !!ctx.position,
       rsi14: ctx.stockIndicators.rsi14,
       ma200: ctx.stockIndicators.ma200,
+      buyableAmount: ctx.buyableAmount,
+      preCashCappedQuota: details?.preCashCappedQuota,
       adjustedQuota: details?.adjustedQuota,
       minimumExecutablePrice: details?.minimumExecutablePrice,
       perCycleQuota,
@@ -121,6 +123,89 @@ export class TradingService {
         : undefined,
       quotaAdjustments: details?.quotaAdjustments,
     };
+  }
+
+  private isActualCashShortageSkip(
+    ctx: StockStrategyContext,
+    skipReasons: string[],
+    details?: Record<string, any>,
+  ): boolean {
+    if (!this.isQuotaCarryEligible(skipReasons)) return false;
+    if (ctx.buyableAmount <= 0) return true;
+
+    const preCashCappedQuota = Number(details?.preCashCappedQuota ?? 0);
+    const adjustedQuota = Number(details?.adjustedQuota ?? 0);
+    const currentPrice = Number(ctx.price.currentPrice ?? 0);
+
+    return (
+      preCashCappedQuota > 0
+      && preCashCappedQuota > ctx.buyableAmount
+      && adjustedQuota > 0
+      && adjustedQuota < currentPrice
+    );
+  }
+
+  private async notifyInsufficientFundsIfNeeded(
+    ctx: StockStrategyContext,
+    reason: string,
+    skipReasons: string[],
+    details?: Record<string, any>,
+  ): Promise<void> {
+    if (!this.slackService?.isEnabled()) return;
+    if (!this.isActualCashShortageSkip(ctx, skipReasons, details)) return;
+
+    const todayStart = new Date(this.getTodayDate() + 'T00:00:00+09:00');
+    const todayEnd = new Date(this.getTodayDate() + 'T23:59:59+09:00');
+    const alreadySent = await this.prisma.watchStockExecutionLog.findFirst({
+      where: {
+        watchStockId: ctx.watchStock.id,
+        eventType: WatchStockExecutionEventType.SKIPPED,
+        message: { contains: '실예수금 부족 알림 전송' },
+        createdAt: { gte: todayStart, lte: todayEnd },
+      },
+    });
+    if (alreadySent) return;
+
+    const carryAmountToday = this.isQuotaCarryEligible(skipReasons) && ctx.watchStock.quota
+      ? Number(ctx.watchStock.quota) / ctx.watchStock.maxCycles
+      : undefined;
+    const accumulatedQuota = Number((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+    const remainingQuota = ctx.watchStock.quota
+      ? Math.max(0, Number(ctx.watchStock.quota) - Number(ctx.position?.totalInvested || 0))
+      : undefined;
+    const nextAccumulatedQuota = carryAmountToday !== undefined
+      ? Math.min(accumulatedQuota + carryAmountToday, remainingQuota ?? accumulatedQuota + carryAmountToday)
+      : undefined;
+
+    await this.slackService.sendInsufficientFundsAlert({
+      stockCode: ctx.watchStock.stockCode,
+      stockName: ctx.watchStock.stockName,
+      exchangeCode: ctx.watchStock.exchangeCode,
+      market: ctx.watchStock.market,
+      strategyName: ctx.watchStock.strategyName,
+      reason,
+      buyableAmount: ctx.buyableAmount,
+      plannedAmount: details?.preCashCappedQuota,
+      adjustedQuota: details?.adjustedQuota,
+      currentPrice: ctx.price.currentPrice,
+      minimumExecutablePrice: details?.minimumExecutablePrice,
+      carryAmountToday,
+      nextAccumulatedQuota,
+    });
+
+    await this.logWatchStockExecution(
+      ctx,
+      WatchStockExecutionEventType.SKIPPED,
+      `실예수금 부족 알림 전송 | ${reason}`,
+      {
+        buyableAmount: ctx.buyableAmount,
+        preCashCappedQuota: details?.preCashCappedQuota,
+        adjustedQuota: details?.adjustedQuota,
+        minimumExecutablePrice: details?.minimumExecutablePrice,
+        carryAmountToday,
+        nextAccumulatedQuota,
+      },
+    );
   }
 
   /** 종목별 전략 실행 */
@@ -167,6 +252,8 @@ export class TradingService {
               },
             });
           }
+
+          await this.notifyInsufficientFundsIfNeeded(ctx, reason, skipReasons, details);
           continue;
         }
 

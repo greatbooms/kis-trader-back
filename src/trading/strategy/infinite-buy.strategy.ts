@@ -427,6 +427,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       pushQuotaAdjustment(details, '수급 약세 (외인/기관/프로그램 동반 매도)', 0.7);
     }
 
+    details.preCashCappedQuota = adjustedQuota;
+
     // 개선 D: 가용자금 한도
     adjustedQuota = Math.min(adjustedQuota, ctx.buyableAmount);
 

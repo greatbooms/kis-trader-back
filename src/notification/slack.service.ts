@@ -7,6 +7,7 @@ import {
   TradeAlertContext,
   DailySummaryContext,
   FilterLogContext,
+  InsufficientFundsAlertContext,
   RiskAlertContext,
   StopLossApprovalRequest,
 } from './types/notification.types';
@@ -189,6 +190,51 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`Failed to send filter log: ${e.message}`);
+      this.handleSendError(e);
+    }
+  }
+
+  async sendInsufficientFundsAlert(ctx: InsufficientFundsAlertContext): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const plannedAmount = ctx.plannedAmount ?? ctx.adjustedQuota ?? 0;
+      const lines = [
+        `*전략:* ${ctx.strategyName || 'N/A'}`,
+        `*사유:* ${ctx.reason}`,
+        `*주문가능금액:* ${this.fmtMoney(ctx.buyableAmount, ctx.market)}`,
+        plannedAmount > 0 ? `*전략 계산금액:* ${this.fmtMoney(plannedAmount, ctx.market)}` : null,
+        ctx.adjustedQuota !== undefined ? `*현금 반영 후 금액:* ${this.fmtMoney(ctx.adjustedQuota, ctx.market)}` : null,
+        `*현재가:* ${this.fmtPrice(ctx.currentPrice, ctx.market)}`,
+        ctx.minimumExecutablePrice !== undefined
+          ? `*1주 매수 가능 기준가:* ${this.fmtPrice(ctx.minimumExecutablePrice, ctx.market)} 이하`
+          : null,
+        ctx.carryAmountToday !== undefined ? `*오늘 이월:* ${this.fmtMoney(ctx.carryAmountToday, ctx.market)}` : null,
+        ctx.nextAccumulatedQuota !== undefined
+          ? `*누적 예정 이월:* ${this.fmtMoney(ctx.nextAccumulatedQuota, ctx.market)}`
+          : null,
+      ].filter(Boolean).join('\n');
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:warning: *실예수금 부족 | ${ctx.exchangeCode}:${ctx.stockCode}* (${ctx.stockName})`,
+            },
+          },
+          { type: 'divider' },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: lines },
+          },
+        ],
+        text: `실예수금 부족 | ${ctx.exchangeCode}:${ctx.stockCode}`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send insufficient funds alert: ${e.message}`);
       this.handleSendError(e);
     }
   }

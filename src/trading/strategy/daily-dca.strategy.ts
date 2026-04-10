@@ -59,6 +59,7 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
     const { watchStock, price, position, riskState, stockIndicators } = ctx;
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
+    const details: Record<string, any> = {};
 
     // quota 미설정 → skip
     if (!watchStock.quota || watchStock.quota <= 0) {
@@ -177,7 +178,10 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
 
     // 누적 이월금 포함
     const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
-    const adjustedQuota = Math.min(perCycleQuota + accumulatedQuota, ctx.buyableAmount);
+    const preCashCappedQuota = perCycleQuota + accumulatedQuota;
+    const adjustedQuota = Math.min(preCashCappedQuota, ctx.buyableAmount);
+    details.preCashCappedQuota = preCashCappedQuota;
+    details.adjustedQuota = adjustedQuota;
 
     const buyQty = Math.floor(adjustedQuota / curPrice);
     if (buyQty > 0) {
@@ -192,13 +196,18 @@ export class DailyDcaStrategy implements PerStockTradingStrategy {
         orderDivision: '00',
       });
     } else {
-      skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)}`);
+      details.minimumExecutablePrice = adjustedQuota;
+      if (ctx.buyableAmount <= 0) {
+        skipReasons.push(`매수 수량 부족: 주문가능금액 ${ctx.buyableAmount.toFixed(0)}으로 1주 매수 불가`);
+      } else {
+        skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)}`);
+      }
     }
 
     this.logger.log(
       `[${watchStock.stockCode}] invested=${totalInvested.toFixed(0)}/${quota}, signals=${signals.length}`,
     );
 
-    return { signals, skipReasons };
+    return { signals, skipReasons, details };
   }
 }

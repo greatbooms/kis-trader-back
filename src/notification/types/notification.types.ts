@@ -51,6 +51,22 @@ export interface FilterLogContext {
   details: Record<string, any>;
 }
 
+export interface InsufficientFundsAlertContext {
+  stockCode: string;
+  stockName: string;
+  exchangeCode: string;
+  market: string;
+  strategyName?: string;
+  reason: string;
+  buyableAmount: number;
+  plannedAmount?: number;
+  adjustedQuota?: number;
+  currentPrice: number;
+  minimumExecutablePrice?: number;
+  carryAmountToday?: number;
+  nextAccumulatedQuota?: number;
+}
+
 export interface RiskAlertContext {
   market: string;
   riskType: 'MDD_LIQUIDATE' | 'MDD_BUY_BLOCK' | 'DAILY_PNL' | 'POSITION_LIMIT' | 'INVESTED_RATE';

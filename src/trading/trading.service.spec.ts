@@ -3,6 +3,7 @@ import { TradingService } from './trading.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
+import { SlackService } from '../notification/slack.service';
 
 describe('TradingService', () => {
   let service: TradingService;
@@ -43,6 +44,12 @@ describe('TradingService', () => {
     },
   };
 
+  const mockSlackService = {
+    isEnabled: jest.fn().mockReturnValue(true),
+    sendFilterLog: jest.fn(),
+    sendInsufficientFundsAlert: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +57,7 @@ describe('TradingService', () => {
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: SlackService, useValue: mockSlackService },
       ],
     }).compile();
 
@@ -58,6 +66,60 @@ describe('TradingService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    mockSlackService.isEnabled.mockReturnValue(true);
+  });
+
+  describe('executePerStockStrategy', () => {
+    it('should send one insufficient funds alert when actual buyable cash is lower than planned quota', async () => {
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['매수 수량 부족: 조정 할당금 100 < 현재가 200'],
+          details: {
+            preCashCappedQuota: 500,
+            adjustedQuota: 100,
+            minimumExecutablePrice: 100,
+          },
+        }),
+      };
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValueOnce(null);
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 0,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          price: { currentPrice: 200 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 100,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(mockSlackService.sendInsufficientFundsAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stockCode: 'TQQQ',
+          buyableAmount: 100,
+          plannedAmount: 500,
+          adjustedQuota: 100,
+          currentPrice: 200,
+        }),
+      );
+    });
   });
 
   describe('syncPositions', () => {
