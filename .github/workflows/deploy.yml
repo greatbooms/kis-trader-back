@@ -66,17 +66,19 @@ jobs:
           REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
+          ARCHIVE_PATH="${RUNNER_TEMP}/release.tar.gz"
+
           tar \
             --exclude=.git \
             --exclude=node_modules \
             --exclude=client/node_modules \
             --exclude=dist \
             --exclude=client/dist \
-            -czf release.tar.gz .
+            -czf "$ARCHIVE_PATH" .
 
           ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${DEPLOY_PATH}/scripts ${DEPLOY_PATH}/artifacts"
           scp -o ConnectTimeout=10 scripts/deploy.sh ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/scripts/deploy.sh
-          scp -o ConnectTimeout=10 release.tar.gz ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/artifacts/release.tar.gz
+          scp -o ConnectTimeout=10 "$ARCHIVE_PATH" ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/artifacts/release.tar.gz
 
       - name: 배포 실행
         env:
@@ -104,4 +106,4 @@ jobs:
         if: always()
         run: |
           rm -f ~/.ssh/deploy_key
-          rm -f release.tar.gz
+          rm -f "${RUNNER_TEMP}/release.tar.gz"
