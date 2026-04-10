@@ -230,6 +230,8 @@ export interface HolidayItem {
   date: string;
   name: string;
   isOpen: boolean;
+  exchangeCode?: string;
+  countryCode?: string;
 }
 
 /** 미체결 주문 */

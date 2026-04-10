@@ -188,8 +188,6 @@ export class TradingScheduler implements OnModuleInit {
     this.isOverseasRunning = true;
 
     try {
-      if (await this.isHoliday('OVERSEAS')) return;
-
       // 거래소별 그룹
       const watchStocks = await this.prisma.watchStock.findMany({
         where: { market: Market.OVERSEAS, isActive: true, NOT: { strategyName: null } },
@@ -204,6 +202,10 @@ export class TradingScheduler implements OnModuleInit {
 
       for (const [exchangeCode, stocks] of byExchange) {
         if (!this.isMarketOpen(exchangeCode)) continue;
+        if (await this.isExchangeHoliday(exchangeCode)) {
+          this.logger.log(`Skipping overseas exchange ${exchangeCode} because it is a holiday`);
+          continue;
+        }
         await this.executeMarket('OVERSEAS', exchangeCode, stocks);
       }
     } catch (e) {
@@ -234,7 +236,6 @@ export class TradingScheduler implements OnModuleInit {
     this.isOverseasOrderSyncRunning = true;
 
     try {
-      if (await this.isHoliday('OVERSEAS')) return;
       if (!await this.hasOpenOrders('OVERSEAS')) return;
       await this.syncMarketOrdersOnly('OVERSEAS');
     } catch (e) {
@@ -261,7 +262,6 @@ export class TradingScheduler implements OnModuleInit {
     if (this.isOverseasRunning || this.isOverseasOrderSyncRunning) return;
 
     try {
-      if (await this.isHoliday('OVERSEAS')) return;
       if (!await this.hasPortfolioState('OVERSEAS')) return;
       await this.syncMarketPortfolioOnly('OVERSEAS');
     } catch (e) {
@@ -797,10 +797,53 @@ export class TradingScheduler implements OnModuleInit {
     if (marketType === 'DOMESTIC') {
       const holiday = this.holidayCache.domestic.find((h) => h.date === todayStr);
       return holiday ? !holiday.isOpen : false;
-    } else {
-      const holiday = this.holidayCache.overseas.find((h) => h.date === todayStr);
-      return holiday ? !holiday.isOpen : false;
     }
+
+    const overseasHoliday = this.holidayCache.overseas.find((h) => h.date === todayStr);
+    return overseasHoliday ? !overseasHoliday.isOpen : false;
+  }
+
+  async isExchangeHoliday(exchangeCode: string): Promise<boolean> {
+    if (exchangeCode === 'KRX') {
+      return this.isHoliday('DOMESTIC');
+    }
+
+    const now = new Date();
+    const day = now.getDay();
+    if (day === 0 || day === 6) return true;
+
+    if (this.isPaper) return false;
+
+    const todayStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    await this.ensureHolidayCache(todayStr);
+
+    if (!this.holidayCache) return false;
+
+    const exactMatch = this.holidayCache.overseas.find(
+      (holiday) => holiday.date === todayStr && this.matchesHolidayExchange(holiday, exchangeCode),
+    );
+    if (!exactMatch) return false;
+    return !exactMatch.isOpen;
+  }
+
+  private matchesHolidayExchange(holiday: HolidayItem, exchangeCode: string): boolean {
+    if (holiday.exchangeCode) {
+      return holiday.exchangeCode === exchangeCode;
+    }
+
+    if (holiday.countryCode) {
+      const countryToExchange: Record<string, string[]> = {
+        US: ['NASD', 'NYSE', 'AMEX'],
+        HK: ['SEHK'],
+        CN: ['SHAA', 'SZAA'],
+        JP: ['TKSE'],
+        VN: ['HASE', 'VNSE'],
+      };
+
+      return countryToExchange[holiday.countryCode]?.includes(exchangeCode) ?? false;
+    }
+
+    return false;
   }
 
   private async ensureHolidayCache(todayStr: string): Promise<void> {
@@ -854,7 +897,7 @@ export class TradingScheduler implements OnModuleInit {
     }
 
     const market = watchStock.market as 'DOMESTIC' | 'OVERSEAS';
-    if (await this.isHoliday(market)) {
+    if (await this.isExchangeHoliday(watchStock.exchangeCode)) {
       return { success: false, message: '현재 휴장일이라 수동 실행할 수 없습니다.' };
     }
 

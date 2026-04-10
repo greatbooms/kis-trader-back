@@ -468,6 +468,8 @@ export class KisOverseasService {
       date: item.trad_dt,
       name: item.holi_nm || '',
       isOpen: item.opnd_yn === 'Y',
+      exchangeCode: item.ovrs_excg_cd || item.excg_cd || item.excd || undefined,
+      countryCode: item.natn_cd || item.cnty_cd || item.country_cd || undefined,
     }));
   }
 
