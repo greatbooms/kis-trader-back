@@ -296,8 +296,10 @@ export type Query = {
   dashboardSummary: DashboardSummaryType;
   marketRegime: MarketRegimeType;
   overseasQuote?: Maybe<StockPriceType>;
+  overseasQuoteHistory: Array<QuoteHistoryPointType>;
   positions: Array<PositionType>;
   quote?: Maybe<StockPriceType>;
+  quoteHistory: Array<QuoteHistoryPointType>;
   screeningDateSummaries: Array<ScreeningDateSummary>;
   screeningDates: Array<Scalars['String']['output']>;
   screeningSettings: ScreeningSettingsType;
@@ -329,12 +331,24 @@ export type QueryOverseasQuoteArgs = {
 };
 
 
+export type QueryOverseasQuoteHistoryArgs = {
+  input: OverseasQuoteInput;
+  months?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
 export type QueryPositionsArgs = {
   input?: InputMaybe<PositionsFilterInput>;
 };
 
 
 export type QueryQuoteArgs = {
+  stockCode: Scalars['String']['input'];
+};
+
+
+export type QueryQuoteHistoryArgs = {
+  months?: InputMaybe<Scalars['Int']['input']>;
   stockCode: Scalars['String']['input'];
 };
 
@@ -424,6 +438,16 @@ export type QueryWatchStockExecutionLogsArgs = {
 
 export type QueryWatchStocksArgs = {
   input?: InputMaybe<WatchStocksFilterInput>;
+};
+
+export type QuoteHistoryPointType = {
+  __typename?: 'QuoteHistoryPointType';
+  close: Scalars['Float']['output'];
+  date: Scalars['String']['output'];
+  high: Scalars['Float']['output'];
+  low: Scalars['Float']['output'];
+  open: Scalars['Float']['output'];
+  volume: Scalars['Int']['output'];
 };
 
 export type RefreshAccountStateResult = {
@@ -1020,12 +1044,28 @@ export type GetQuoteQueryVariables = Exact<{
 
 export type GetQuoteQuery = { __typename?: 'Query', quote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null } | null };
 
+export type GetQuoteHistoryQueryVariables = Exact<{
+  stockCode: Scalars['String']['input'];
+  months?: InputMaybe<Scalars['Int']['input']>;
+}>;
+
+
+export type GetQuoteHistoryQuery = { __typename?: 'Query', quoteHistory: Array<{ __typename?: 'QuoteHistoryPointType', date: string, close: number, open: number, high: number, low: number, volume: number }> };
+
 export type GetOverseasQuoteQueryVariables = Exact<{
   input: OverseasQuoteInput;
 }>;
 
 
 export type GetOverseasQuoteQuery = { __typename?: 'Query', overseasQuote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null } | null };
+
+export type GetOverseasQuoteHistoryQueryVariables = Exact<{
+  input: OverseasQuoteInput;
+  months?: InputMaybe<Scalars['Int']['input']>;
+}>;
+
+
+export type GetOverseasQuoteHistoryQuery = { __typename?: 'Query', overseasQuoteHistory: Array<{ __typename?: 'QuoteHistoryPointType', date: string, close: number, open: number, high: number, low: number, volume: number }> };
 
 export type GetAccountSummaryQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2303,6 +2343,54 @@ export function useGetQuoteSuspenseQuery(baseOptions?: ApolloReactHooks.SkipToke
 export type GetQuoteQueryHookResult = ReturnType<typeof useGetQuoteQuery>;
 export type GetQuoteLazyQueryHookResult = ReturnType<typeof useGetQuoteLazyQuery>;
 export type GetQuoteSuspenseQueryHookResult = ReturnType<typeof useGetQuoteSuspenseQuery>;
+export const GetQuoteHistoryDocument = gql`
+    query GetQuoteHistory($stockCode: String!, $months: Int) {
+  quoteHistory(stockCode: $stockCode, months: $months) {
+    date
+    close
+    open
+    high
+    low
+    volume
+  }
+}
+    `;
+
+/**
+ * __useGetQuoteHistoryQuery__
+ *
+ * To run a query within a React component, call `useGetQuoteHistoryQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetQuoteHistoryQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetQuoteHistoryQuery({
+ *   variables: {
+ *      stockCode: // value for 'stockCode'
+ *      months: // value for 'months'
+ *   },
+ * });
+ */
+export function useGetQuoteHistoryQuery(baseOptions: ApolloReactHooks.QueryHookOptions<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables> & ({ variables: GetQuoteHistoryQueryVariables; skip?: boolean; } | { skip: boolean; }) ) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useQuery<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>(GetQuoteHistoryDocument, options);
+      }
+export function useGetQuoteHistoryLazyQuery(baseOptions?: ApolloReactHooks.LazyQueryHookOptions<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>) {
+          const options = {...defaultOptions, ...baseOptions}
+          return ApolloReactHooks.useLazyQuery<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>(GetQuoteHistoryDocument, options);
+        }
+// @ts-ignore
+export function useGetQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>;
+export function useGetQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetQuoteHistoryQuery | undefined, GetQuoteHistoryQueryVariables>;
+export function useGetQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>) {
+          const options = baseOptions === ApolloReactHooks.skipToken ? baseOptions : {...defaultOptions, ...baseOptions}
+          return ApolloReactHooks.useSuspenseQuery<GetQuoteHistoryQuery, GetQuoteHistoryQueryVariables>(GetQuoteHistoryDocument, options);
+        }
+export type GetQuoteHistoryQueryHookResult = ReturnType<typeof useGetQuoteHistoryQuery>;
+export type GetQuoteHistoryLazyQueryHookResult = ReturnType<typeof useGetQuoteHistoryLazyQuery>;
+export type GetQuoteHistorySuspenseQueryHookResult = ReturnType<typeof useGetQuoteHistorySuspenseQuery>;
 export const GetOverseasQuoteDocument = gql`
     query GetOverseasQuote($input: OverseasQuoteInput!) {
   overseasQuote(input: $input) {
@@ -2351,6 +2439,54 @@ export function useGetOverseasQuoteSuspenseQuery(baseOptions?: ApolloReactHooks.
 export type GetOverseasQuoteQueryHookResult = ReturnType<typeof useGetOverseasQuoteQuery>;
 export type GetOverseasQuoteLazyQueryHookResult = ReturnType<typeof useGetOverseasQuoteLazyQuery>;
 export type GetOverseasQuoteSuspenseQueryHookResult = ReturnType<typeof useGetOverseasQuoteSuspenseQuery>;
+export const GetOverseasQuoteHistoryDocument = gql`
+    query GetOverseasQuoteHistory($input: OverseasQuoteInput!, $months: Int) {
+  overseasQuoteHistory(input: $input, months: $months) {
+    date
+    close
+    open
+    high
+    low
+    volume
+  }
+}
+    `;
+
+/**
+ * __useGetOverseasQuoteHistoryQuery__
+ *
+ * To run a query within a React component, call `useGetOverseasQuoteHistoryQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGetOverseasQuoteHistoryQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGetOverseasQuoteHistoryQuery({
+ *   variables: {
+ *      input: // value for 'input'
+ *      months: // value for 'months'
+ *   },
+ * });
+ */
+export function useGetOverseasQuoteHistoryQuery(baseOptions: ApolloReactHooks.QueryHookOptions<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables> & ({ variables: GetOverseasQuoteHistoryQueryVariables; skip?: boolean; } | { skip: boolean; }) ) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useQuery<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>(GetOverseasQuoteHistoryDocument, options);
+      }
+export function useGetOverseasQuoteHistoryLazyQuery(baseOptions?: ApolloReactHooks.LazyQueryHookOptions<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>) {
+          const options = {...defaultOptions, ...baseOptions}
+          return ApolloReactHooks.useLazyQuery<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>(GetOverseasQuoteHistoryDocument, options);
+        }
+// @ts-ignore
+export function useGetOverseasQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>;
+export function useGetOverseasQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>): ApolloReactHooks.UseSuspenseQueryResult<GetOverseasQuoteHistoryQuery | undefined, GetOverseasQuoteHistoryQueryVariables>;
+export function useGetOverseasQuoteHistorySuspenseQuery(baseOptions?: ApolloReactHooks.SkipToken | ApolloReactHooks.SuspenseQueryHookOptions<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>) {
+          const options = baseOptions === ApolloReactHooks.skipToken ? baseOptions : {...defaultOptions, ...baseOptions}
+          return ApolloReactHooks.useSuspenseQuery<GetOverseasQuoteHistoryQuery, GetOverseasQuoteHistoryQueryVariables>(GetOverseasQuoteHistoryDocument, options);
+        }
+export type GetOverseasQuoteHistoryQueryHookResult = ReturnType<typeof useGetOverseasQuoteHistoryQuery>;
+export type GetOverseasQuoteHistoryLazyQueryHookResult = ReturnType<typeof useGetOverseasQuoteHistoryLazyQuery>;
+export type GetOverseasQuoteHistorySuspenseQueryHookResult = ReturnType<typeof useGetOverseasQuoteHistorySuspenseQuery>;
 export const GetAccountSummaryDocument = gql`
     query GetAccountSummary {
   accountSummary {

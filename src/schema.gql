@@ -112,6 +112,15 @@ type StockPriceType {
   volume: Int
 }
 
+type QuoteHistoryPointType {
+  date: String!
+  close: Float!
+  open: Float!
+  high: Float!
+  low: Float!
+  volume: Int!
+}
+
 type DashboardSummaryType {
   totalProfitLoss: Float!
   totalTradeCount: Int!
@@ -435,7 +444,9 @@ type Query {
   trade(id: ID!): TradeRecordType
   positions(input: PositionsFilterInput): [PositionType!]!
   quote(stockCode: String!): StockPriceType
+  quoteHistory(stockCode: String!, months: Int): [QuoteHistoryPointType!]!
   overseasQuote(input: OverseasQuoteInput!): StockPriceType
+  overseasQuoteHistory(input: OverseasQuoteInput!, months: Int): [QuoteHistoryPointType!]!
   accountSummary: AccountSummaryType!
   dashboardSummary: DashboardSummaryType!
   watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!

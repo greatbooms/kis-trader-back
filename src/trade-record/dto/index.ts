@@ -1,6 +1,7 @@
 export { TradeRecordType } from './trade-record.object';
 export { PositionType } from './position.object';
 export { StockPriceType } from './stock-price.object';
+export { QuoteHistoryPointType } from './quote-history-point.object';
 export { DashboardSummaryType } from './dashboard-summary.object';
 export { AccountSummaryType } from './account-summary.object';
 export { CashBalanceType } from './cash-balance.object';

@@ -6,6 +6,7 @@ import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
 import { ManualSellInput } from './dto';
 import { BalanceItem } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
+import { DailyPrice } from '../kis/types/kis-api.types';
 
 @Injectable()
 export class TradeRecordService {
@@ -48,6 +49,22 @@ export class TradeRecordService {
 
   findOne(id: string) {
     return this.prisma.tradeRecord.findUnique({ where: { id } });
+  }
+
+  async getDomesticQuoteHistory(stockCode: string, months = 6): Promise<DailyPrice[]> {
+    const today = new Date();
+    const endDate = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const start = new Date(today);
+    start.setMonth(start.getMonth() - Math.max(1, months));
+    const startDate = start.toISOString().slice(0, 10).replace(/-/g, '');
+    const prices = await this.kisDomestic.getDailyPrices(stockCode, startDate, endDate);
+    return prices.reverse();
+  }
+
+  async getOverseasQuoteHistory(exchangeCode: string, stockCode: string, months = 6): Promise<DailyPrice[]> {
+    const estimatedTradingDays = Math.max(22, Math.ceil(months * 22));
+    const prices = await this.kisOverseas.getDailyPrices(exchangeCode, stockCode, estimatedTradingDays);
+    return prices.reverse();
   }
 
   /** 대시보드 요약 */
