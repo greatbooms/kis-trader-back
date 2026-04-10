@@ -145,7 +145,6 @@ export class SimulationScheduler implements OnModuleInit {
           if (market === Market.OVERSEAS) {
             const exchangeCode = COUNTRY_EXCHANGE_MAP[session.countryCode || ''] || 'NASD';
             if (!this.tradingScheduler.isMarketOpen(exchangeCode)) continue;
-            if (await this.tradingScheduler.isExchangeHoliday(exchangeCode)) continue;
           }
 
           await this.simulationService.updatePositionPrices(session.id);

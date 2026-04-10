@@ -330,8 +330,8 @@ export class KisDomesticService {
 
     return output.map((item: any) => ({
       date: item.bass_dt,
-      name: item.bzdy_yn === 'N' ? '휴장' : '개장',
-      isOpen: item.bzdy_yn === 'Y',
+      name: item.opnd_yn === 'Y' ? '개장' : '휴장',
+      isOpen: item.opnd_yn === 'Y',
     }));
   }
 
