@@ -33,6 +33,17 @@ function hasEventDrivenRisk(stockIndicators: StockStrategyContext['stockIndicato
     || (stockIndicators.recentSecForm8KCount30d ?? 0) >= 3;
 }
 
+function pushQuotaAdjustment(
+  details: Record<string, any>,
+  label: string,
+  multiplier: number,
+): void {
+  if (!Array.isArray(details.quotaAdjustments)) {
+    details.quotaAdjustments = [];
+  }
+  details.quotaAdjustments.push({ label, multiplier });
+}
+
 function getTargetProfitRate(T: number): number {
   if (T < 2) return 0.15;
   if (T < 4) return 0.14;
@@ -216,6 +227,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.T = T;
     details.avgPrice = avgPrice;
     details.holdQty = holdQty;
+    details.perCycleQuota = perCycleQuota;
 
     // 가격 반올림 함수
     const roundPrice = isOverseas
@@ -317,58 +329,86 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     // --- 1회 매수금액 ---
     const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
     let adjustedQuota = maxCyclesReached ? 0 : perCycleQuota + accumulatedQuota;
+    details.accumulatedQuota = accumulatedQuota;
+    details.baseQuota = adjustedQuota;
 
     if (indexBelowMA200) {
       adjustedQuota *= 0.75;
       details.quotaAdjust_indexTrend = true;
+      pushQuotaAdjustment(
+        details,
+        `${marketCondition.referenceIndexName ?? '지수'} MA200 하회`,
+        0.75,
+      );
     }
 
     // 개선 E: 금리 급등시 20% 축소
     if (marketCondition.interestRateRising) {
       adjustedQuota *= 0.8;
       details.quotaAdjust_interestRate = true;
+      pushQuotaAdjustment(details, '금리 급등', 0.8);
     }
 
     // 개선 C: RSI < 30 과매도시 1.25배
     if (stockIndicators.rsi14 !== undefined && stockIndicators.rsi14 < 30) {
       adjustedQuota *= 1.25;
       details.quotaAdjust_rsi = true;
+      pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} < 30`, 1.25);
     }
 
     if (hasNegativeConsensus(stockIndicators)) {
       adjustedQuota *= 0.7;
       details.quotaAdjust_consensus = true;
+      pushQuotaAdjustment(details, `부정적 컨센서스${stockIndicators.consensusRating ? ` (${stockIndicators.consensusRating})` : ''}`, 0.7);
     }
 
     if (hasEventDrivenRisk(stockIndicators)) {
       adjustedQuota *= 0.6;
       details.quotaAdjust_eventRisk = true;
+      pushQuotaAdjustment(
+        details,
+        `최근 공시 과다 (${stockIndicators.recentMaterialDisclosureCount30d ?? 0}건 / 8-K ${(stockIndicators.recentSecForm8KCount30d ?? 0)}건)`,
+        0.6,
+      );
     }
 
     // 융자잔고 10% 초과 시 quota 30% 감소 (레버리지 청산 위험)
     if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 10) {
       adjustedQuota *= 0.7;
       details.quotaAdjust_loanBalance = true;
+      pushQuotaAdjustment(details, `융자잔고 ${stockIndicators.loanBalanceRate.toFixed(1)}% > 10%`, 0.7);
     }
 
     if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) {
       adjustedQuota *= 1.15;
       details.quotaAdjust_dividend = true;
+      pushQuotaAdjustment(
+        details,
+        `배당안정성 ${stockIndicators.dividendYield?.toFixed(1)}% / ${stockIndicators.consecutiveDividendYears}년`,
+        1.15,
+      );
     }
 
     if ((stockIndicators.insiderOwnershipChangeRate ?? 0) > 0.05) {
       adjustedQuota *= 1.1;
       details.quotaAdjust_insider = true;
+      pushQuotaAdjustment(
+        details,
+        `내부자 지분 증가 ${(stockIndicators.insiderOwnershipChangeRate! * 100).toFixed(1)}bp`,
+        1.1,
+      );
     }
 
     if ((stockIndicators.volatility30d ?? 0) >= 45) {
-      adjustedQuota *= 0.7;
+      adjustedQuota *= 0.85;
       details.quotaAdjust_volatility = true;
+      pushQuotaAdjustment(details, `30일 변동성 ${stockIndicators.volatility30d!.toFixed(1)}% ≥ 45%`, 0.85);
     }
 
     if (hasStrongSellFlow(stockIndicators)) {
       adjustedQuota *= 0.7;
       details.quotaAdjust_flow = true;
+      pushQuotaAdjustment(details, '수급 약세 (외인/기관/프로그램 동반 매도)', 0.7);
     }
 
     // 개선 D: 가용자금 한도
@@ -400,7 +440,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         });
         buySignalCount++;
       } else {
-        skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)}`);
+        details.minimumExecutablePrice = adjustedQuota;
+        skipReasons.push(
+          `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 현재가 ${roundPrice(curPrice)} ` +
+          `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
+        );
       }
     } else if (hasPosition) {
       // --- 매수 시그널 ---
@@ -453,7 +497,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
         if (buySignalCount === 0) {
           const referencePrice = Math.min(buy1Price, buy2Price);
-          skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)}`);
+          details.minimumExecutablePrice = adjustedQuota;
+          skipReasons.push(
+            `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)} ` +
+            `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
+          );
         }
       } else if (T >= 20 && buyAllowed) {
         // T>=20: Buy2만 (현재가 아래 지정가)
@@ -473,7 +521,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           });
           buySignalCount++;
         } else {
-          skipReasons.push(`매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(buy2Price)}`);
+          details.minimumExecutablePrice = adjustedQuota;
+          skipReasons.push(
+            `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(buy2Price)} ` +
+            `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
+          );
         }
       }
 
@@ -523,6 +575,6 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       `[${watchStock.stockCode}] T=${T.toFixed(1)}, signals=${signals.length}, quota=${adjustedQuota.toFixed(0)}`,
     );
 
-    return { signals, skipReasons };
+    return { signals, skipReasons, details };
   }
 }

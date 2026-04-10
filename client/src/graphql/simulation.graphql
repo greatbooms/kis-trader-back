@@ -16,6 +16,9 @@ query GetSimulationSessions($input: SimulationSessionsFilterInput) {
     maxCycles
     stopLossRate
     strategyParams
+    lastExecutionStatus
+    lastExecutionDate
+    lastExecutionDetails
     portfolioValue
     startedAt
     stoppedAt
@@ -41,6 +44,9 @@ query GetSimulationSession($id: String!) {
     maxCycles
     stopLossRate
     strategyParams
+    lastExecutionStatus
+    lastExecutionDate
+    lastExecutionDetails
     portfolioValue
     startedAt
     stoppedAt

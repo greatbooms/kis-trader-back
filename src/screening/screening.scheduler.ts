@@ -9,6 +9,7 @@ import { kstTodayStr } from './utils/date.util';
 import { CountryConfig } from './types';
 
 const SCREENING_SETTINGS_KEY = 'screening-countries';
+const SCREENING_SCHEDULER_RUN_LOG_KEY = 'screening-scheduler-runs';
 
 const COUNTRY_EXCHANGE_MAP: CountryConfig[] = [
   { country: 'KR', exchanges: ['KRX'] },
@@ -20,6 +21,14 @@ const COUNTRY_EXCHANGE_MAP: CountryConfig[] = [
 ];
 
 type DeepAnalysisPayload = Parameters<SlackService['sendDeepAnalysisReport']>[1];
+type ScreeningSchedulerJobStatus = 'started' | 'success' | 'failed' | 'skipped';
+type ScreeningSchedulerJobKey =
+  | 'domestic-fast'
+  | 'overseas-us-fast'
+  | 'overseas-asia-fast'
+  | 'domestic-deep'
+  | 'overseas-us-deep'
+  | 'overseas-deep';
 
 @Injectable()
 export class ScreeningScheduler implements OnModuleInit {
@@ -35,81 +44,126 @@ export class ScreeningScheduler implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    // 1차 스크리닝: 국내 08:00 KST
+    // 1차 스크리닝: 국내 09:10 KST (장 시작 후)
     const domesticJob = new CronJob(
-      '0 8 * * 1-5',
+      '10 9 * * 1-5',
       () => this.runDomesticScreening(),
       null, false, 'Asia/Seoul',
     );
     this.schedulerRegistry.addCronJob('screening-domestic', domesticJob);
     domesticJob.start();
 
-    // 1차 스크리닝: 미국 22:30 KST
+    // 1차 스크리닝: 미국 00:10 KST (미국장 시작 40분 후)
     const usJob = new CronJob(
-      '30 22 * * 1-5',
-      () => this.runOverseasScreening(['NASD', 'NYSE', 'AMEX']),
+      '10 0 * * 2-6',
+      () => this.runOverseasScreening(['NASD', 'NYSE', 'AMEX'], 'overseas-us-fast'),
       null, false, 'Asia/Seoul',
     );
     this.schedulerRegistry.addCronJob('screening-overseas-us', usJob);
     usJob.start();
 
-    // 1차 스크리닝: 아시아 08:00 KST
+    // 1차 스크리닝: 아시아 10:50 KST (홍콩/중국 개장 20분 후)
     const asiaJob = new CronJob(
-      '0 8 * * 1-5',
-      () => this.runOverseasScreening(['TKSE', 'SEHK', 'SHAA', 'SZAA', 'HASE', 'VNSE']),
+      '50 10 * * 1-5',
+      () => this.runOverseasScreening(['TKSE', 'SEHK', 'SHAA', 'SZAA', 'HASE', 'VNSE'], 'overseas-asia-fast'),
       null, false, 'Asia/Seoul',
     );
     this.schedulerRegistry.addCronJob('screening-overseas-asia', asiaJob);
     asiaJob.start();
 
-    // 2차 딥 분석: 국내 09:30 KST
+    // 2차 딥 분석: 국내 09:40 KST
     const domesticDeepJob = new CronJob(
-      '30 9 * * 1-5',
+      '40 9 * * 1-5',
       () => this.runDomesticDeepAnalysis(),
       null, false, 'Asia/Seoul',
     );
     this.schedulerRegistry.addCronJob('screening-domestic-deep', domesticDeepJob);
     domesticDeepJob.start();
 
-    // 2차 딥 분석: 미국 00:00 KST
+    // 2차 딥 분석: 미국 00:50 KST
     const usDeepJob = new CronJob(
-      '0 0 * * 2-6',
-      () => this.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX']),
+      '50 0 * * 2-6',
+      () => this.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX'], 'overseas-us-deep'),
       null, false, 'Asia/Seoul',
     );
     this.schedulerRegistry.addCronJob('screening-overseas-us-deep', usDeepJob);
     usDeepJob.start();
 
-    this.logger.log('Screening scheduler registered (fast: domestic 08:00, US 22:30, Asia 08:00 / deep: domestic 09:30, US 00:00 KST)');
+    this.logger.log('Screening scheduler registered (fast: domestic 09:10, Asia 10:50, US 00:10 / deep: domestic 09:40, US 00:50 KST)');
   }
 
   async runDomesticScreening(): Promise<void> {
-    if (this.isFastRunning || this.isDeepRunning) return;
+    const jobKey: ScreeningSchedulerJobKey = 'domestic-fast';
+    const date = kstTodayStr();
+    if (this.isFastRunning || this.isDeepRunning) {
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        date,
+        message: '다른 스크리닝 작업이 실행 중입니다.',
+      });
+      return;
+    }
 
     const enabled = await this.getEnabledCountries();
     if (!enabled.has('KR')) {
       this.logger.log('KR screening disabled, skipping');
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        date,
+        message: 'KR 스크리닝이 비활성화되어 있습니다.',
+      });
       return;
     }
 
     this.isFastRunning = true;
+    await this.recordSchedulerRun(jobKey, { status: 'started', date });
     try {
-      const date = kstTodayStr();
       const scores = await this.screeningService.screenDomestic('FULL');
       if (scores.length > 0) {
         await this.screeningService.saveResults(date, scores);
         this.logger.log(`Domestic screening saved: ${scores.length} stocks (top: ${scores[0].stockName} ${scores[0].totalScore.toFixed(1)})`);
         await this.slackService.sendScreeningResult('DOMESTIC', date, scores);
+        await this.recordSchedulerRun(jobKey, {
+          status: 'success',
+          date,
+          count: scores.length,
+          message: `${scores[0].stockName} ${scores[0].totalScore.toFixed(1)}`,
+        });
+      } else {
+        await this.recordSchedulerRun(jobKey, {
+          status: 'success',
+          date,
+          count: 0,
+          message: '추천 종목이 없습니다.',
+        });
       }
     } catch (e) {
       this.logger.error(`Domestic screening error: ${e.message}`);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'failed',
+        date,
+        message: e.message,
+      });
     } finally {
       this.isFastRunning = false;
     }
   }
 
-  async runOverseasScreening(exchanges: string[]): Promise<void> {
-    if (this.isFastRunning || this.isDeepRunning) return;
+  async runOverseasScreening(
+    exchanges: string[],
+    jobKey?: ScreeningSchedulerJobKey,
+  ): Promise<void> {
+    const resolvedJobKey = jobKey ?? this.resolveFastJobKey(exchanges);
+    const date = kstTodayStr();
+    if (this.isFastRunning || this.isDeepRunning) {
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'skipped',
+        date,
+        exchanges,
+        message: '다른 스크리닝 작업이 실행 중입니다.',
+      });
+      return;
+    }
 
     const enabled = await this.getEnabledCountries();
     const filteredExchanges = exchanges.filter((ex) => {
@@ -119,12 +173,22 @@ export class ScreeningScheduler implements OnModuleInit {
 
     if (filteredExchanges.length === 0) {
       this.logger.log(`Overseas screening skipped (no enabled countries for exchanges: ${exchanges.join(', ')})`);
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'skipped',
+        date,
+        exchanges,
+        message: '활성화된 국가가 없습니다.',
+      });
       return;
     }
 
     this.isFastRunning = true;
+    await this.recordSchedulerRun(resolvedJobKey, {
+      status: 'started',
+      date,
+      exchanges: filteredExchanges,
+    });
     try {
-      const date = kstTodayStr();
       const allScores: Awaited<ReturnType<typeof this.screeningService.screenOverseas>> = [];
 
       for (const exchange of filteredExchanges) {
@@ -145,55 +209,201 @@ export class ScreeningScheduler implements OnModuleInit {
         await this.screeningService.saveResults(date, allScores);
         this.logger.log(`Overseas screening saved: ${allScores.length} stocks total`);
         await this.slackService.sendScreeningResult('OVERSEAS', date, allScores);
+        await this.recordSchedulerRun(resolvedJobKey, {
+          status: 'success',
+          date,
+          exchanges: filteredExchanges,
+          count: allScores.length,
+          message: `${allScores[0].stockName} ${allScores[0].totalScore.toFixed(1)}`,
+        });
+      } else {
+        await this.recordSchedulerRun(resolvedJobKey, {
+          status: 'success',
+          date,
+          exchanges: filteredExchanges,
+          count: 0,
+          message: '추천 종목이 없습니다.',
+        });
       }
     } catch (e) {
       this.logger.error(`Overseas screening error: ${e.message}`);
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'failed',
+        date,
+        exchanges: filteredExchanges,
+        message: e.message,
+      });
     } finally {
       this.isFastRunning = false;
     }
   }
 
   async runDomesticDeepAnalysis(): Promise<void> {
-    if (this.isFastRunning || this.isDeepRunning) return;
+    const jobKey: ScreeningSchedulerJobKey = 'domestic-deep';
+    if (this.isFastRunning || this.isDeepRunning) {
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        message: '다른 스크리닝 작업이 실행 중입니다.',
+      });
+      return;
+    }
 
     const enabled = await this.getEnabledCountries();
-    if (!enabled.has('KR')) return;
+    if (!enabled.has('KR')) {
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        message: 'KR 스크리닝이 비활성화되어 있습니다.',
+      });
+      return;
+    }
 
     this.isDeepRunning = true;
+    await this.recordSchedulerRun(jobKey, { status: 'started' });
     try {
       const date = await this.screeningService.getLatestRecommendationDate('DOMESTIC', ['KRX']);
-      if (!date) return;
+      if (!date) {
+        await this.recordSchedulerRun(jobKey, {
+          status: 'skipped',
+          message: '딥분석 대상 추천 결과가 없습니다.',
+        });
+        return;
+      }
       const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'DOMESTIC', ['KRX']);
       this.logger.log(`Domestic deep analysis saved: ${completed} stocks`);
       await this.sendTopDeepAnalysisReports(date, 'DOMESTIC', ['KRX']);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'success',
+        date,
+        exchanges: ['KRX'],
+        count: completed,
+      });
     } catch (e) {
       this.logger.error(`Domestic deep analysis error: ${e.message}`);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'failed',
+        message: e.message,
+      });
     } finally {
       this.isDeepRunning = false;
     }
   }
 
-  async runOverseasDeepAnalysis(exchanges: string[]): Promise<void> {
-    if (this.isFastRunning || this.isDeepRunning) return;
+  async runOverseasDeepAnalysis(
+    exchanges: string[],
+    jobKey?: ScreeningSchedulerJobKey,
+  ): Promise<void> {
+    const resolvedJobKey = jobKey ?? this.resolveDeepJobKey(exchanges);
+    if (this.isFastRunning || this.isDeepRunning) {
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'skipped',
+        exchanges,
+        message: '다른 스크리닝 작업이 실행 중입니다.',
+      });
+      return;
+    }
 
     const enabled = await this.getEnabledCountries();
     const filteredExchanges = exchanges.filter((ex) => {
       const country = COUNTRY_EXCHANGE_MAP.find((c) => c.exchanges.includes(ex));
       return country && enabled.has(country.country);
     });
-    if (filteredExchanges.length === 0) return;
+    if (filteredExchanges.length === 0) {
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'skipped',
+        exchanges,
+        message: '활성화된 국가가 없습니다.',
+      });
+      return;
+    }
 
     this.isDeepRunning = true;
+    await this.recordSchedulerRun(resolvedJobKey, {
+      status: 'started',
+      exchanges: filteredExchanges,
+    });
     try {
       const date = await this.screeningService.getLatestRecommendationDate('OVERSEAS', filteredExchanges);
-      if (!date) return;
+      if (!date) {
+        await this.recordSchedulerRun(resolvedJobKey, {
+          status: 'skipped',
+          exchanges: filteredExchanges,
+          message: '딥분석 대상 추천 결과가 없습니다.',
+        });
+        return;
+      }
       const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'OVERSEAS', filteredExchanges);
       this.logger.log(`Overseas deep analysis saved: ${completed} stocks`);
       await this.sendTopDeepAnalysisReports(date, 'OVERSEAS', filteredExchanges);
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'success',
+        date,
+        exchanges: filteredExchanges,
+        count: completed,
+      });
     } catch (e) {
       this.logger.error(`Overseas deep analysis error: ${e.message}`);
+      await this.recordSchedulerRun(resolvedJobKey, {
+        status: 'failed',
+        exchanges: filteredExchanges,
+        message: e.message,
+      });
     } finally {
       this.isDeepRunning = false;
+    }
+  }
+
+  private resolveFastJobKey(exchanges: string[]): ScreeningSchedulerJobKey {
+    const normalized = [...new Set(exchanges)].sort().join(',');
+    return normalized === 'AMEX,NASD,NYSE' ? 'overseas-us-fast' : 'overseas-asia-fast';
+  }
+
+  private resolveDeepJobKey(exchanges: string[]): ScreeningSchedulerJobKey {
+    const normalized = [...new Set(exchanges)].sort().join(',');
+    return normalized === 'AMEX,NASD,NYSE' ? 'overseas-us-deep' : 'overseas-deep';
+  }
+
+  private async recordSchedulerRun(
+    jobKey: ScreeningSchedulerJobKey,
+    entry: {
+      status: ScreeningSchedulerJobStatus;
+      date?: string;
+      exchanges?: string[];
+      count?: number;
+      message?: string;
+    },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      const saved = await this.prisma.appSetting.findUnique({
+        where: { key: SCREENING_SCHEDULER_RUN_LOG_KEY },
+      });
+      const current = (saved?.value as Record<string, any>) ?? {};
+
+      await this.prisma.appSetting.upsert({
+        where: { key: SCREENING_SCHEDULER_RUN_LOG_KEY },
+        update: {
+          value: {
+            ...current,
+            [jobKey]: {
+              ...current[jobKey],
+              ...entry,
+              updatedAt: now,
+            },
+          } as any,
+        },
+        create: {
+          key: SCREENING_SCHEDULER_RUN_LOG_KEY,
+          value: {
+            [jobKey]: {
+              ...entry,
+              updatedAt: now,
+            },
+          } as any,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Failed to persist screening scheduler run for ${jobKey}: ${e.message}`);
     }
   }
 

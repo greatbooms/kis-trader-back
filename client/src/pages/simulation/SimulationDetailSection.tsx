@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   useGetSimulationSessionQuery,
   useGetAvailableStrategiesQuery,
@@ -41,6 +41,21 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
   const [maxCycles, setMaxCycles] = useState('')
   const [error, setError] = useState('')
   const [isEditing, setIsEditing] = useState(false)
+
+  const lastExecutionDetails = useMemo(() => {
+    if (!session?.lastExecutionDetails) return null
+    try {
+      return JSON.parse(session.lastExecutionDetails) as {
+        carryAmountToday?: number
+        nextAccumulatedQuota?: number
+        adjustedQuota?: number
+        minimumExecutablePrice?: number
+        quotaAdjustments?: Array<{ label?: string; multiplier?: number }>
+      }
+    } catch {
+      return null
+    }
+  }, [session?.lastExecutionDetails])
 
   useEffect(() => {
     if (!session) return
@@ -253,6 +268,32 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
               )}
             </div>
           </div>
+
+          {session.lastExecutionStatus && (
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 space-y-1.5">
+              <div className="text-sm font-medium text-foreground">최근 평가</div>
+              <div className="text-sm text-foreground">{session.lastExecutionStatus}</div>
+              {session.lastExecutionDate && (
+                <div className="text-xs text-muted-foreground">{session.lastExecutionDate}</div>
+              )}
+              {lastExecutionDetails && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {typeof lastExecutionDetails.carryAmountToday === 'number' && (
+                    <span>오늘 이월 {formatCurrency(lastExecutionDetails.carryAmountToday, session.market, primaryExchangeCode)}</span>
+                  )}
+                  {typeof lastExecutionDetails.nextAccumulatedQuota === 'number' && (
+                    <span>누적 {formatCurrency(lastExecutionDetails.nextAccumulatedQuota, session.market, primaryExchangeCode)}</span>
+                  )}
+                  {typeof lastExecutionDetails.adjustedQuota === 'number' && (
+                    <span>조정 할당금 {formatCurrency(lastExecutionDetails.adjustedQuota, session.market, primaryExchangeCode)}</span>
+                  )}
+                  {typeof lastExecutionDetails.minimumExecutablePrice === 'number' && (
+                    <span>1주 가능 기준가 {formatCurrency(lastExecutionDetails.minimumExecutablePrice, session.market, primaryExchangeCode)}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

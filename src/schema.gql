@@ -232,6 +232,9 @@ type SimulationSessionType {
   stopLossRate: Float!
   maxPortfolioRate: Float!
   strategyParams: String
+  lastExecutionStatus: String
+  lastExecutionDate: String
+  lastExecutionDetails: String
 
   """포지션 평가금 합계"""
   portfolioValue: Float

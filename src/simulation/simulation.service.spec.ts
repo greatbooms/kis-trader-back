@@ -272,10 +272,11 @@ describe('SimulationService', () => {
       expect(mockPrisma.simulationSession.update).toHaveBeenCalledWith({
         where: { id: 'session-1' },
         data: {
-          strategyParams: {
+          strategyParams: expect.objectContaining({
             accumulatedQuota: 2500,
             lastAccumulatedDate: expect.any(String),
-          },
+            lastExecutionStatus: expect.stringContaining('오늘 이월 2500'),
+          }),
         },
       });
     });
@@ -313,15 +314,10 @@ describe('SimulationService', () => {
 
       await service.executeSimulationTick('session-2');
 
-      expect(mockPrisma.simulationSession.update).not.toHaveBeenCalledWith({
-        where: { id: 'session-2' },
-        data: {
-          strategyParams: {
-            accumulatedQuota: expect.any(Number),
-            lastAccumulatedDate: expect.any(String),
-          },
-        },
-      });
+      const accumulatedQuotaUpdate = mockPrisma.simulationSession.update.mock.calls.find(
+        ([arg]: any[]) => arg?.where?.id === 'session-2' && arg?.data?.strategyParams?.accumulatedQuota !== undefined,
+      );
+      expect(accumulatedQuotaUpdate).toBeUndefined();
     });
   });
 

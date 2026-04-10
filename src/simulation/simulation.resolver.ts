@@ -187,6 +187,11 @@ export class SimulationResolver {
       stopLossRate: Number(session.stopLossRate),
       maxPortfolioRate: Number(session.maxPortfolioRate),
       strategyParams: session.strategyParams ? JSON.stringify(session.strategyParams) : undefined,
+      lastExecutionStatus: session.strategyParams?.lastExecutionStatus,
+      lastExecutionDate: session.strategyParams?.lastExecutionDate,
+      lastExecutionDetails: session.strategyParams?.lastExecutionDetails
+        ? JSON.stringify(session.strategyParams.lastExecutionDetails)
+        : undefined,
       portfolioValue,
       startedAt: session.startedAt,
       stoppedAt: session.stoppedAt || undefined,

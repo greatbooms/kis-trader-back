@@ -51,6 +51,73 @@ export class TradingService {
     });
   }
 
+  private buildSkipExecutionMessage(
+    strategyName: string,
+    ctx: StockStrategyContext,
+    skipReasons: string[],
+    details?: Record<string, any>,
+  ): string {
+    if (skipReasons.length === 0) return '시그널 없음';
+
+    if (
+      ['infinite-buy', 'daily-dca'].includes(strategyName)
+      && this.isQuotaCarryEligible(skipReasons)
+      && ctx.watchStock.quota
+    ) {
+      const perCycleQuota = Number(ctx.watchStock.quota) / ctx.watchStock.maxCycles;
+      const accumulatedQuota = Number((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+      const nextAccumulated = accumulatedQuota + perCycleQuota;
+      const adjustedQuota = Number(details?.adjustedQuota || 0);
+      const minimumExecutablePrice = Number(details?.minimumExecutablePrice || adjustedQuota || 0);
+      const adjustments = Array.isArray(details?.quotaAdjustments)
+        ? details.quotaAdjustments
+          .map((item: { label?: string; multiplier?: number }) =>
+            item?.label ? `${item.label}${item.multiplier ? ` (${item.multiplier}x)` : ''}` : null)
+          .filter(Boolean)
+          .join(', ')
+        : '';
+
+      return [
+        skipReasons[0],
+        `오늘 이월 ${perCycleQuota.toFixed(0)}`,
+        `누적 예정 ${nextAccumulated.toFixed(0)}`,
+        adjustedQuota > 0 ? `조정 할당금 ${adjustedQuota.toFixed(0)}` : null,
+        minimumExecutablePrice > 0 ? `${minimumExecutablePrice.toFixed(0)} 이하에서 1주 가능` : null,
+        adjustments ? `감산/가산: ${adjustments}` : null,
+      ].filter(Boolean).join(' | ');
+    }
+
+    return skipReasons.join('; ');
+  }
+
+  private buildSkipExecutionDetails(
+    ctx: StockStrategyContext,
+    skipReasons: string[],
+    details?: Record<string, any>,
+  ): Record<string, any> {
+    const perCycleQuota = ctx.watchStock.quota ? Number(ctx.watchStock.quota) / ctx.watchStock.maxCycles : undefined;
+    const accumulatedQuota = Number((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+
+    return {
+      skipReasons,
+      marketCondition: ctx.marketCondition.referenceIndexName,
+      referenceIndexAboveMa200: ctx.marketCondition.referenceIndexAboveMA200,
+      alreadyExecutedToday: ctx.alreadyExecutedToday,
+      hasPosition: !!ctx.position,
+      rsi14: ctx.stockIndicators.rsi14,
+      ma200: ctx.stockIndicators.ma200,
+      adjustedQuota: details?.adjustedQuota,
+      minimumExecutablePrice: details?.minimumExecutablePrice,
+      perCycleQuota,
+      accumulatedQuota,
+      carryAmountToday: this.isQuotaCarryEligible(skipReasons) ? perCycleQuota : undefined,
+      nextAccumulatedQuota: this.isQuotaCarryEligible(skipReasons) && perCycleQuota !== undefined
+        ? accumulatedQuota + perCycleQuota
+        : undefined,
+      quotaAdjustments: details?.quotaAdjustments,
+    };
+  }
+
   /** 종목별 전략 실행 */
   async executePerStockStrategy(
     strategy: PerStockTradingStrategy,
@@ -61,7 +128,7 @@ export class TradingService {
 
     for (const ctx of contexts) {
       try {
-        const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+        const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
 
         if (signals.length === 0) {
           if (this.isQuotaCarryEligible(skipReasons)) {
@@ -72,17 +139,14 @@ export class TradingService {
             continue;
           }
 
-          const reason = skipReasons.length > 0 ? skipReasons.join('; ') : '시그널 없음';
+          const reason = this.buildSkipExecutionMessage(strategy.name, ctx, skipReasons, details);
 
-          await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SKIPPED, reason, {
-            skipReasons,
-            marketCondition: ctx.marketCondition.referenceIndexName,
-            referenceIndexAboveMa200: ctx.marketCondition.referenceIndexAboveMA200,
-            alreadyExecutedToday: ctx.alreadyExecutedToday,
-            hasPosition: !!ctx.position,
-            rsi14: ctx.stockIndicators.rsi14,
-            ma200: ctx.stockIndicators.ma200,
-          });
+          await this.logWatchStockExecution(
+            ctx,
+            WatchStockExecutionEventType.SKIPPED,
+            reason,
+            this.buildSkipExecutionDetails(ctx, skipReasons, details),
+          );
 
           // Send filter skip log to Slack
           if (this.slackService?.isEnabled()) {

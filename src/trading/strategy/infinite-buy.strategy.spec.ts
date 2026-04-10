@@ -281,7 +281,7 @@ describe('InfiniteBuyStrategy', () => {
       // buyQty = floor(100000 / 200000) = 0
       expect(signals).toHaveLength(0);
       expect(skipReasons).toContain(
-        '매수 수량 부족: 조정 할당금 2500 < 현재가 200000',
+        '매수 수량 부족: 조정 할당금 2500 < 현재가 200000 (1주 매수 가능 기준가 2500 이하)',
       );
     });
   });

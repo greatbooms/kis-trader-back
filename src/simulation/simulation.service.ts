@@ -11,6 +11,7 @@ import {
   StockFundamentals,
   RiskState,
   MarketRegimeLabel,
+  TradingSignal,
   InfiniteBuyStrategyParams,
   MomentumBreakoutStrategyParams,
   GridMeanReversionStrategyParams,
@@ -174,6 +175,8 @@ export class SimulationService {
         });
       }
 
+      const params = (session.strategyParams as Record<string, any>) || {};
+
       const watchStockConfig: WatchStockConfig = {
         id: session.id,
         market: session.market as 'DOMESTIC' | 'OVERSEAS',
@@ -186,7 +189,7 @@ export class SimulationService {
         maxCycles: session.maxCycles,
         stopLossRate: Number(session.stopLossRate),
         maxPortfolioRate: Number(session.maxPortfolioRate),
-        strategyParams: session.strategyParams as Record<string, any> | undefined,
+        strategyParams: params,
       };
 
       let fundamentals: StockFundamentals | undefined;
@@ -219,10 +222,15 @@ export class SimulationService {
         riskState,
       };
 
-      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+      const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
       const hasSecondTargetSignal = signals.some((signal) => signal.metadata?.phase === 'take-profit-2');
+      const routineAlreadyExecutedSkip = this.isRoutineAlreadyExecutedSkip(skipReasons);
+      let evaluationStatus: string | undefined;
+      let evaluationDetails: Record<string, any> | undefined;
 
-      if (signals.length === 0 && !this.isRoutineAlreadyExecutedSkip(skipReasons)) {
+      if (signals.length === 0 && !routineAlreadyExecutedSkip) {
+        evaluationStatus = this.buildSimulationSkipMessage(session, skipReasons, details);
+        evaluationDetails = this.buildSimulationSkipDetails(session, skipReasons, details);
         this.logger.debug(
           `[SIM] ${session.stockCode} no signal | price=${price.currentPrice}` +
           ` ma20=${stockIndicators.ma20 ?? 'N/A'} ma60=${stockIndicators.ma60 ?? 'N/A'}` +
@@ -231,6 +239,16 @@ export class SimulationService {
           ` cash=${Number(session.currentCash)}` +
           ` reason=${skipReasons.join('; ') || 'strategy conditions not met'}`,
         );
+      } else if (signals.length > 0) {
+        evaluationStatus = this.buildSimulationSignalMessage(signals);
+        evaluationDetails = {
+          signals: signals.map((signal) => ({
+            side: signal.side,
+            quantity: signal.quantity,
+            price: signal.price,
+            reason: signal.reason,
+          })),
+        };
       }
 
       for (const signal of signals) {
@@ -263,8 +281,9 @@ export class SimulationService {
         }
       }
 
+      let strategyParamsUpdated = false;
+
       if (['infinite-buy', 'daily-dca'].includes(session.strategyName) && !todayTrade) {
-        const params = (session.strategyParams as Record<string, any>) || {};
         const hasBuySignal = signals.some((s) => s.side === 'BUY');
         const perCycleQuota = Number(session.quota) / session.maxCycles;
         const shouldCarryQuota = skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
@@ -273,8 +292,17 @@ export class SimulationService {
           if (params.accumulatedQuota) {
             await this.prisma.simulationSession.update({
               where: { id: session.id },
-              data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
+              data: {
+                strategyParams: this.mergeSimulationStrategyParams(
+                  params,
+                  { accumulatedQuota: 0, lastAccumulatedDate: today },
+                  evaluationStatus,
+                  today,
+                  evaluationDetails,
+                ),
+              },
             });
+            strategyParamsUpdated = true;
           }
         } else if (
           shouldCarryQuota
@@ -284,15 +312,41 @@ export class SimulationService {
           && !(session.strategyName === 'infinite-buy' && (hasSecondTargetSignal || this.hasActiveInfiniteBuySecondTarget(params as Record<string, any>)))
         ) {
           const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
+          evaluationStatus = this.buildSimulationSkipMessage(session, skipReasons, details, newAccumulated);
+          evaluationDetails = this.buildSimulationSkipDetails(session, skipReasons, details, newAccumulated);
           await this.prisma.simulationSession.update({
             where: { id: session.id },
-            data: { strategyParams: { ...params, accumulatedQuota: newAccumulated, lastAccumulatedDate: today } },
+            data: {
+              strategyParams: this.mergeSimulationStrategyParams(
+                params,
+                { accumulatedQuota: newAccumulated, lastAccumulatedDate: today },
+                evaluationStatus,
+                today,
+                evaluationDetails,
+              ),
+            },
           });
+          strategyParamsUpdated = true;
           this.logger.log(
             `[${session.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} ` +
             `(reason: ${skipReasons.join('; ') || 'insufficient quantity'})`,
           );
         }
+      }
+
+      if (evaluationStatus && !routineAlreadyExecutedSkip && !strategyParamsUpdated) {
+        await this.prisma.simulationSession.update({
+          where: { id: session.id },
+          data: {
+            strategyParams: this.mergeSimulationStrategyParams(
+              params,
+              {},
+              evaluationStatus,
+              today,
+              evaluationDetails,
+            ),
+          },
+        });
       }
     } catch (e) {
       this.logger.error(`Simulation tick error for ${session.stockCode}: ${e.message}`);
@@ -386,6 +440,96 @@ export class SimulationService {
 
   private isRoutineAlreadyExecutedSkip(skipReasons: string[]): boolean {
     return skipReasons.length > 0 && skipReasons.every((reason) => reason.startsWith('오늘 이미 실행됨'));
+  }
+
+  private isQuotaCarryEligible(skipReasons: string[]): boolean {
+    return skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
+  }
+
+  private mergeSimulationStrategyParams(
+    params: Record<string, any>,
+    patch: Record<string, any>,
+    lastExecutionStatus?: string,
+    today?: string,
+    lastExecutionDetails?: Record<string, any>,
+  ): Record<string, any> {
+    return {
+      ...params,
+      ...patch,
+      ...(lastExecutionStatus
+        ? {
+            lastExecutionStatus,
+            lastExecutionDate: today,
+            lastExecutionDetails,
+          }
+        : {}),
+    };
+  }
+
+  private buildSimulationSignalMessage(signals: TradingSignal[]): string {
+    const preview = signals
+      .slice(0, 2)
+      .map((signal) => `${signal.side} ${signal.quantity}주${signal.price ? ` @ ${signal.price}` : ''}`)
+      .join(', ');
+    return preview ? `${signals.length}개 시그널 생성 | ${preview}` : `${signals.length}개 시그널 생성`;
+  }
+
+  private buildSimulationSkipMessage(
+    session: { strategyName: string; quota: Prisma.Decimal | number; maxCycles: number; strategyParams: Prisma.JsonValue | null },
+    skipReasons: string[],
+    details?: Record<string, any>,
+    nextAccumulatedQuota?: number,
+  ): string {
+    if (skipReasons.length === 0) return '시그널 없음';
+
+    if (['infinite-buy', 'daily-dca'].includes(session.strategyName) && this.isQuotaCarryEligible(skipReasons)) {
+      const perCycleQuota = Number(session.quota) / session.maxCycles;
+      const accumulatedQuota = Number((session.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+      const adjustedQuota = Number(details?.adjustedQuota || 0);
+      const minimumExecutablePrice = Number(details?.minimumExecutablePrice || adjustedQuota || 0);
+      const adjustments = Array.isArray(details?.quotaAdjustments)
+        ? details.quotaAdjustments
+          .map((item: { label?: string; multiplier?: number }) =>
+            item?.label ? `${item.label}${item.multiplier ? ` (${item.multiplier}x)` : ''}` : null)
+          .filter(Boolean)
+          .join(', ')
+        : '';
+
+      return [
+        skipReasons[0],
+        `오늘 이월 ${perCycleQuota.toFixed(0)}`,
+        `누적 ${Number(nextAccumulatedQuota ?? accumulatedQuota + perCycleQuota).toFixed(0)}`,
+        adjustedQuota > 0 ? `조정 할당금 ${adjustedQuota.toFixed(0)}` : null,
+        minimumExecutablePrice > 0 ? `${minimumExecutablePrice.toFixed(0)} 이하에서 1주 가능` : null,
+        adjustments ? `감산/가산: ${adjustments}` : null,
+      ].filter(Boolean).join(' | ');
+    }
+
+    return skipReasons.join('; ');
+  }
+
+  private buildSimulationSkipDetails(
+    session: { quota: Prisma.Decimal | number; maxCycles: number; strategyParams: Prisma.JsonValue | null },
+    skipReasons: string[],
+    details?: Record<string, any>,
+    nextAccumulatedQuota?: number,
+  ): Record<string, any> {
+    const perCycleQuota = Number(session.quota) / session.maxCycles;
+    const accumulatedQuota = Number((session.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+
+    return {
+      skipReasons,
+      adjustedQuota: details?.adjustedQuota,
+      minimumExecutablePrice: details?.minimumExecutablePrice,
+      baseQuota: details?.baseQuota,
+      perCycleQuota,
+      accumulatedQuota,
+      carryAmountToday: this.isQuotaCarryEligible(skipReasons) ? perCycleQuota : undefined,
+      nextAccumulatedQuota: this.isQuotaCarryEligible(skipReasons)
+        ? Number(nextAccumulatedQuota ?? accumulatedQuota + perCycleQuota)
+        : undefined,
+      quotaAdjustments: details?.quotaAdjustments,
+    };
   }
 
   private getPersistedSessionCycle(cycle: number): number {
@@ -688,7 +832,7 @@ export class SimulationService {
     if (stockIndicators.loanBalanceRate !== undefined && stockIndicators.loanBalanceRate > 10) adjustedQuota *= 0.7;
     if ((stockIndicators.dividendYield ?? 0) >= 2 && (stockIndicators.consecutiveDividendYears ?? 0) >= 5) adjustedQuota *= 1.15;
     if ((stockIndicators.insiderOwnershipChangeRate ?? 0) > 0.05) adjustedQuota *= 1.1;
-    if ((stockIndicators.volatility30d ?? 0) >= 45) adjustedQuota *= 0.7;
+    if ((stockIndicators.volatility30d ?? 0) >= 45) adjustedQuota *= 0.85;
     if (this.hasStrongSellFlow(stockIndicators.foreignNetBuy, stockIndicators.institutionNetBuy, stockIndicators.programTradeDirection)) {
       adjustedQuota *= 0.7;
     }
@@ -1239,6 +1383,9 @@ export class SimulationService {
       accumulatedQuota: _accumulatedQuota,
       lastAccumulatedDate: _lastAccumulatedDate,
       secondaryExitPlan: _secondaryExitPlan,
+      lastExecutionStatus: _lastExecutionStatus,
+      lastExecutionDate: _lastExecutionDate,
+      lastExecutionDetails: _lastExecutionDetails,
       ...resettableStrategyParams
     } = strategyParams;
 

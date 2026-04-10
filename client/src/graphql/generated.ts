@@ -525,6 +525,9 @@ export type SimulationSessionType = {
   description?: Maybe<Scalars['String']['output']>;
   exchangeCode: Scalars['String']['output'];
   id: Scalars['ID']['output'];
+  lastExecutionDate?: Maybe<Scalars['String']['output']>;
+  lastExecutionDetails?: Maybe<Scalars['String']['output']>;
+  lastExecutionStatus?: Maybe<Scalars['String']['output']>;
   market: Market;
   maxCycles: Scalars['Float']['output'];
   maxPortfolioRate: Scalars['Float']['output'];
@@ -896,14 +899,14 @@ export type GetSimulationSessionsQueryVariables = Exact<{
 }>;
 
 
-export type GetSimulationSessionsQuery = { __typename?: 'Query', simulationSessions: Array<{ __typename?: 'SimulationSessionType', id: string, name: string, description?: string | null, market: Market, exchangeCode: string, stockCode: string, stockName: string, countryCode?: string | null, strategyName: string, status: SimulationStatus, currentCash: number, quota: number, cycle: number, maxCycles: number, stopLossRate: number, strategyParams?: string | null, portfolioValue?: number | null, startedAt: any, stoppedAt?: any | null, createdAt: any }> };
+export type GetSimulationSessionsQuery = { __typename?: 'Query', simulationSessions: Array<{ __typename?: 'SimulationSessionType', id: string, name: string, description?: string | null, market: Market, exchangeCode: string, stockCode: string, stockName: string, countryCode?: string | null, strategyName: string, status: SimulationStatus, currentCash: number, quota: number, cycle: number, maxCycles: number, stopLossRate: number, strategyParams?: string | null, lastExecutionStatus?: string | null, lastExecutionDate?: string | null, lastExecutionDetails?: string | null, portfolioValue?: number | null, startedAt: any, stoppedAt?: any | null, createdAt: any }> };
 
 export type GetSimulationSessionQueryVariables = Exact<{
   id: Scalars['String']['input'];
 }>;
 
 
-export type GetSimulationSessionQuery = { __typename?: 'Query', simulationSession?: { __typename?: 'SimulationSessionType', id: string, name: string, description?: string | null, market: Market, exchangeCode: string, stockCode: string, stockName: string, countryCode?: string | null, strategyName: string, status: SimulationStatus, currentCash: number, quota: number, cycle: number, maxCycles: number, stopLossRate: number, strategyParams?: string | null, portfolioValue?: number | null, startedAt: any, stoppedAt?: any | null, createdAt: any } | null };
+export type GetSimulationSessionQuery = { __typename?: 'Query', simulationSession?: { __typename?: 'SimulationSessionType', id: string, name: string, description?: string | null, market: Market, exchangeCode: string, stockCode: string, stockName: string, countryCode?: string | null, strategyName: string, status: SimulationStatus, currentCash: number, quota: number, cycle: number, maxCycles: number, stopLossRate: number, strategyParams?: string | null, lastExecutionStatus?: string | null, lastExecutionDate?: string | null, lastExecutionDetails?: string | null, portfolioValue?: number | null, startedAt: any, stoppedAt?: any | null, createdAt: any } | null };
 
 export type GetSimulationPositionsQueryVariables = Exact<{
   sessionId: Scalars['String']['input'];
@@ -1499,6 +1502,9 @@ export const GetSimulationSessionsDocument = gql`
     maxCycles
     stopLossRate
     strategyParams
+    lastExecutionStatus
+    lastExecutionDate
+    lastExecutionDetails
     portfolioValue
     startedAt
     stoppedAt
@@ -1560,6 +1566,9 @@ export const GetSimulationSessionDocument = gql`
     maxCycles
     stopLossRate
     strategyParams
+    lastExecutionStatus
+    lastExecutionDate
+    lastExecutionDetails
     portfolioValue
     startedAt
     stoppedAt

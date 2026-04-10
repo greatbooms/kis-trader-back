@@ -56,6 +56,15 @@ export class SimulationSessionType {
   @Field({ nullable: true })
   strategyParams?: string;
 
+  @Field({ nullable: true })
+  lastExecutionStatus?: string;
+
+  @Field({ nullable: true })
+  lastExecutionDate?: string;
+
+  @Field({ nullable: true })
+  lastExecutionDetails?: string;
+
   @Field(() => Float, { nullable: true, description: '포지션 평가금 합계' })
   portfolioValue?: number;
 
