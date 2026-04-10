@@ -23,6 +23,10 @@ export default () => ({
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
     adminPassword: process.env.ADMIN_PASSWORD || '',
     jwtSecret: process.env.JWT_SECRET || '',
+    cookieSecure:
+      process.env.AUTH_COOKIE_SECURE === undefined
+        ? undefined
+        : process.env.AUTH_COOKIE_SECURE === 'true',
   },
   slack: {
     botToken: process.env.SLACK_BOT_TOKEN || '',

@@ -107,7 +107,7 @@ function AccountSummaryCard() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <Card>
             <CardContent className="pt-5 pb-4">
               <div className="flex items-center gap-2 mb-2">
@@ -294,70 +294,60 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
         ) : positions.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">보유 포지션이 없습니다</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-border">
-                <TableHead>종목</TableHead>
-                <TableHead>시장</TableHead>
-                <TableHead className="text-right">수량</TableHead>
-                <TableHead className="text-right">평균가</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
-                <TableHead className="text-right">투자금</TableHead>
-                <TableHead className="text-right">손익</TableHead>
-                <TableHead className="text-right">수익률</TableHead>
-                <TableHead className="text-center">매도</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="space-y-3 md:hidden">
               {positions.map((pos) => (
-                <TableRow key={pos.id}>
-                  <TableCell>
-                    <div className="font-medium">{pos.stockName}</div>
-                    <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
-                  </TableCell>
-                  <TableCell>
+                <div key={pos.id} className="rounded-lg border border-border p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{pos.stockName}</div>
+                      <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
+                    </div>
                     <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
                       {pos.exchangeCode ? (EXCHANGE_LABELS[pos.exchangeCode] ?? pos.exchangeCode) : (pos.market === 'DOMESTIC' ? '한국' : '해외')}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
-                  <TableCell className={`text-right font-medium ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
-                    {formatCurrency(pos.profitLoss, pos.market)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>{formatPercent(pos.profitRate)}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center">
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <MetricItem label="수량" value={formatNumber(pos.quantity)} />
+                    <MetricItem label="평균가" value={formatCurrency(pos.avgPrice, pos.market)} />
+                    <MetricItem label="현재가" value={formatCurrency(pos.currentPrice, pos.market)} />
+                    <MetricItem label="투자금" value={formatCurrency(pos.totalInvested, pos.market)} />
+                    <MetricItem
+                      label="손익"
+                      value={formatCurrency(pos.profitLoss, pos.market)}
+                      valueClassName={pos.profitLoss >= 0 ? 'text-success font-medium' : 'text-danger font-medium'}
+                    />
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">수익률</div>
+                      <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>{formatPercent(pos.profitRate)}</Badge>
+                    </div>
+                  </div>
+                  <div>
                     {sellTarget === pos.id ? (
-                      <div className="flex flex-col items-center gap-1.5">
-                        <div className="flex items-center gap-1">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
                           <Input
                             type="number"
                             min={1}
                             max={pos.quantity}
                             value={sellQty}
                             onChange={(e) => { setSellQty(e.target.value); setSellStep('input') }}
-                            className="w-20 h-7 text-sm text-center"
+                            className="h-9 text-sm"
                           />
-                          <Button variant="outline" size="sm" className="h-7 px-1.5 text-xs" onClick={() => setSellQty(String(pos.quantity))}>
+                          <Button variant="outline" size="sm" onClick={() => setSellQty(String(pos.quantity))}>
                             전량
                           </Button>
                         </div>
-                        <span className="text-xs text-muted-foreground">최대 {formatNumber(pos.quantity)}주</span>
-                        <div className="flex gap-1">
+                        <div className="flex gap-2">
                           <Button
                             variant={sellStep === 'confirm' ? 'danger' : 'default'}
                             size="sm"
-                            className="h-7 text-xs"
                             disabled={sellLoading}
                             onClick={() => handleSell(pos)}
                           >
                             {sellStep === 'confirm' ? '확인' : '매도'}
                           </Button>
-                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={closeSellPanel}>
+                          <Button variant="outline" size="sm" onClick={closeSellPanel}>
                             취소
                           </Button>
                         </div>
@@ -367,11 +357,92 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
                         매도
                       </Button>
                     )}
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border">
+                    <TableHead>종목</TableHead>
+                    <TableHead>시장</TableHead>
+                    <TableHead className="text-right">수량</TableHead>
+                    <TableHead className="text-right">평균가</TableHead>
+                    <TableHead className="text-right">현재가</TableHead>
+                    <TableHead className="text-right">투자금</TableHead>
+                    <TableHead className="text-right">손익</TableHead>
+                    <TableHead className="text-right">수익률</TableHead>
+                    <TableHead className="text-center">매도</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {positions.map((pos) => (
+                    <TableRow key={pos.id}>
+                      <TableCell>
+                        <div className="font-medium">{pos.stockName}</div>
+                        <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
+                          {pos.exchangeCode ? (EXCHANGE_LABELS[pos.exchangeCode] ?? pos.exchangeCode) : (pos.market === 'DOMESTIC' ? '한국' : '해외')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
+                      <TableCell className={`text-right font-medium ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+                        {formatCurrency(pos.profitLoss, pos.market)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>{formatPercent(pos.profitRate)}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {sellTarget === pos.id ? (
+                          <div className="flex flex-col items-center gap-1.5">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                min={1}
+                                max={pos.quantity}
+                                value={sellQty}
+                                onChange={(e) => { setSellQty(e.target.value); setSellStep('input') }}
+                                className="w-20 h-7 text-sm text-center"
+                              />
+                              <Button variant="outline" size="sm" className="h-7 px-1.5 text-xs" onClick={() => setSellQty(String(pos.quantity))}>
+                                전량
+                              </Button>
+                            </div>
+                            <span className="text-xs text-muted-foreground">최대 {formatNumber(pos.quantity)}주</span>
+                            <div className="flex gap-1">
+                              <Button
+                                variant={sellStep === 'confirm' ? 'danger' : 'default'}
+                                size="sm"
+                                className="h-7 text-xs"
+                                disabled={sellLoading}
+                                onClick={() => handleSell(pos)}
+                              >
+                                {sellStep === 'confirm' ? '확인' : '매도'}
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={closeSellPanel}>
+                                취소
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => openSellPanel(pos.id, pos.quantity)}>
+                            매도
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -408,9 +479,9 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <CardTitle>매매 기록</CardTitle>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {([null, 'BUY', 'SELL'] as const).map((s) => (
                 <Button key={s ?? 'all'} variant={sideFilter === s ? 'default' : 'outline'} size="sm" onClick={() => { setSideFilter(s); setPage(0) }}>
                   {s === null ? '전체' : s === 'BUY' ? '매수' : '매도'}
@@ -418,19 +489,19 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <Input
               type="date"
               value={dateFrom}
               onChange={(e) => { setDateFrom(e.target.value); setPage(0) }}
-              className="w-40"
+              className="w-full sm:w-40"
             />
             <span className="text-sm text-muted-foreground">~</span>
             <Input
               type="date"
               value={dateTo}
               onChange={(e) => { setDateTo(e.target.value); setPage(0) }}
-              className="w-40"
+              className="w-full sm:w-40"
             />
             {(dateFrom || dateTo) && (
               <Button variant="outline" size="sm" onClick={() => { setDateFrom(weekAgo); setDateTo(today); setPage(0) }}>
@@ -447,61 +518,95 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
           <p className="text-sm text-muted-foreground text-center py-8">매매 기록이 없습니다</p>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow className="border-b border-border">
-                  <TableHead>일시</TableHead>
-                  <TableHead>종목</TableHead>
-                  <TableHead>구분</TableHead>
-                  <TableHead className="text-right">수량</TableHead>
-                  <TableHead className="text-right">가격</TableHead>
-                  <TableHead>상태</TableHead>
-                  <TableHead>전략</TableHead>
-                  <TableHead>사유</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trades.map((trade) => (
-                  <TableRow
+            <div className="space-y-3 md:hidden">
+              {trades.map((trade) => {
+                const info = getTradeRecordDisplayInfo(trade)
+                return (
+                  <div
                     key={trade.id}
-                    className={trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : undefined}
+                    className={`rounded-lg border border-border p-4 space-y-3 ${trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : ''}`}
                   >
-                    <TableCell className="py-2 text-xs">{formatDate(trade.createdAt)}</TableCell>
-                    <TableCell className="py-2">
-                      <div className="font-medium">{trade.stockName}</div>
-                      <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>
-                        {trade.side === 'BUY' ? '매수' : '매도'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-2 text-right">
-                      <div>{formatNumber(trade.quantity)}</div>
-                      {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
-                        <div className="text-xs text-muted-foreground">체결 {formatNumber(trade.executedQty ?? 0)}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-2 text-right">{formatCurrency(trade.executedPrice ?? trade.price, trade.market)}</TableCell>
-                    <TableCell className="py-2">
-                      {(() => {
-                        const info = getTradeRecordDisplayInfo(trade)
-                        return (
-                          <div className="flex flex-col gap-1">
-                            <Badge variant={info.variant}>{info.label}</Badge>
-                            {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
-                          </div>
-                        )
-                      })()}
-                    </TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[260px]">
-                      <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
-                    </TableCell>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium">{trade.stockName}</div>
+                        <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>
+                          {trade.side === 'BUY' ? '매수' : '매도'}
+                        </Badge>
+                        <Badge variant={info.variant}>{info.label}</Badge>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <MetricItem label="수량" value={formatNumber(trade.quantity)} />
+                      <MetricItem label="가격" value={formatCurrency(trade.executedPrice ?? trade.price, trade.market)} />
+                      <MetricItem label="전략" value={trade.strategyName ?? '-'} />
+                      <MetricItem label="상세" value={info.detail ?? '-'} />
+                    </div>
+                    <div className="text-xs text-muted-foreground">{trade.reason ?? '-'}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border">
+                    <TableHead>일시</TableHead>
+                    <TableHead>종목</TableHead>
+                    <TableHead>구분</TableHead>
+                    <TableHead className="text-right">수량</TableHead>
+                    <TableHead className="text-right">가격</TableHead>
+                    <TableHead>상태</TableHead>
+                    <TableHead>전략</TableHead>
+                    <TableHead>사유</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {trades.map((trade) => (
+                    <TableRow
+                      key={trade.id}
+                      className={trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : undefined}
+                    >
+                      <TableCell className="py-2 text-xs">{formatDate(trade.createdAt)}</TableCell>
+                      <TableCell className="py-2">
+                        <div className="font-medium">{trade.stockName}</div>
+                        <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>
+                          {trade.side === 'BUY' ? '매수' : '매도'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2 text-right">
+                        <div>{formatNumber(trade.quantity)}</div>
+                        {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
+                          <div className="text-xs text-muted-foreground">체결 {formatNumber(trade.executedQty ?? 0)}</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-2 text-right">{formatCurrency(trade.executedPrice ?? trade.price, trade.market)}</TableCell>
+                      <TableCell className="py-2">
+                        {(() => {
+                          const info = getTradeRecordDisplayInfo(trade)
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <Badge variant={info.variant}>{info.label}</Badge>
+                              {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
+                            </div>
+                          )
+                        })()}
+                      </TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground max-w-[260px]">
+                        <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             <div className="flex justify-between items-center mt-4">
               <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>
                 이전
@@ -515,5 +620,22 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function MetricItem({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string
+  value: string
+  valueClassName?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={valueClassName}>{value}</div>
+    </div>
   )
 }

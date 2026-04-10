@@ -53,7 +53,7 @@ export function WatchlistPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-foreground">관심종목</h2>
           <p className="text-sm text-muted-foreground mt-1">관심종목을 관리하고 매매 전략을 설정하세요</p>
@@ -228,9 +228,9 @@ function AddWatchStockModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-md mx-4 p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold text-foreground">종목 추가</h3>
           <button
@@ -446,13 +446,13 @@ function WatchStockRow({
 }) {
   return (
     <div
-      className="flex items-center justify-between rounded-lg border border-border/50 p-3 hover:border-primary-200 transition-colors cursor-pointer"
+      className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:border-primary-200 cursor-pointer sm:flex-row sm:items-center sm:justify-between"
       onClick={onOpenDetail}
     >
-      <div className="flex items-center gap-4 flex-1">
+      <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center sm:gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">{stock.stockName}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium break-words">{stock.stockName}</span>
             <span className="text-xs text-muted-foreground">{stock.stockCode}</span>
             <Badge variant={stock.market === 'DOMESTIC' ? 'default' : 'info'}>
               {stock.exchangeCode ? (EXCHANGE_LABELS[stock.exchangeCode] ?? stock.exchangeCode) : (stock.market === 'DOMESTIC' ? '국내' : '해외')}
@@ -461,14 +461,14 @@ function WatchStockRow({
               {stock.isActive ? '활성' : '비활성'}
             </Badge>
           </div>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {stock.strategyName && <span>전략: {strategies.find((s) => s.name === stock.strategyName)?.displayName ?? stock.strategyName}</span>}
             {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
             {stock.strategyName === 'infinite-buy' && <span>사이클: {stock.cycle}/{stock.maxCycles}</span>}
             <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>
           </div>
           {stock.lastExecutionStatus && (
-            <div className="flex items-center gap-2 mt-1.5">
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <Badge variant={stock.lastExecutionStatus.includes('시그널 생성') ? 'success' : 'outline'} className="text-[11px]">
                 {stock.lastExecutionStatus}
               </Badge>
@@ -479,11 +479,11 @@ function WatchStockRow({
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex w-full items-center justify-end gap-1 sm:w-auto sm:flex-none">
         <Button
           size="sm"
           variant={stock.isActive ? 'default' : 'outline'}
-          className={`h-8 px-3 text-xs gap-1 ${stock.isActive ? 'bg-success hover:bg-success/80' : ''}`}
+          className={`h-8 px-3 text-xs gap-1 sm:flex-none ${stock.isActive ? 'bg-success hover:bg-success/80' : ''}`}
           onClick={(e) => {
             e.stopPropagation()
             void onToggleActive()
@@ -495,7 +495,7 @@ function WatchStockRow({
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8"
+          className="h-8 w-8 shrink-0"
           onClick={(e) => {
             e.stopPropagation()
             onEdit()
@@ -506,7 +506,7 @@ function WatchStockRow({
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8 text-danger"
+          className="h-8 w-8 shrink-0 text-danger"
           onClick={(e) => {
             e.stopPropagation()
             onDelete()

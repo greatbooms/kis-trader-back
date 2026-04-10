@@ -7,20 +7,27 @@ import { cn } from '@/lib/utils'
 
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Sidebar
         collapsed={sidebarCollapsed}
+        mobileOpen={mobileMenuOpen}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
-      <Header sidebarCollapsed={sidebarCollapsed} />
+      <Header
+        sidebarCollapsed={sidebarCollapsed}
+        mobileMenuOpen={mobileMenuOpen}
+        onToggleMobileMenu={() => setMobileMenuOpen((value) => !value)}
+      />
       <main
         className={cn(
           'pt-14 flex-1 transition-all duration-300',
           sidebarCollapsed
-            ? 'ml-(--width-sidebar-collapsed)'
-            : 'ml-(--width-sidebar)'
+            ? 'md:ml-(--width-sidebar-collapsed)'
+            : 'md:ml-(--width-sidebar)'
         )}
       >
         <div className="p-page">

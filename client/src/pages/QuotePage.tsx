@@ -48,11 +48,11 @@ export function QuotePage() {
 
       <Card>
         <CardContent className="pt-5">
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Select
               value={country}
               onChange={(e) => { setCountry(e.target.value); setSearchParams(null) }}
-              className="w-32 shrink-0"
+              className="w-full sm:w-32 shrink-0"
             >
               {COUNTRY_OPTIONS.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
@@ -191,18 +191,18 @@ function QuoteCard({
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
                 <CardTitle className="text-xl">{quote.stockName}</CardTitle>
                 <span className="text-sm text-muted-foreground">{quote.stockCode}</span>
                 {exchangeLabel && <Badge variant="info">{exchangeLabel}</Badge>}
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left md:text-right">
               <p className="text-3xl font-bold">{formatCurrency(quote.currentPrice, market)}</p>
               {quote.openPrice != null && (
-                <div className={`flex items-center justify-end gap-1 mt-1 ${isUp ? 'text-success' : 'text-danger'}`}>
+                <div className={`flex items-center gap-1 mt-1 md:justify-end ${isUp ? 'text-success' : 'text-danger'}`}>
                   {isUp ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                   <span className="text-sm font-medium">
                     {isUp ? '+' : ''}{formatCurrency(changeFromOpen, market)} ({isUp ? '+' : ''}{changeRate.toFixed(2)}%)

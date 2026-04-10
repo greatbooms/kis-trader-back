@@ -38,7 +38,7 @@ export function SimulationTradesTable({ sessionId }: SimulationTradesTableProps)
               <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </Tooltip>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button size="sm" variant={filter === 'ALL' ? 'default' : 'outline'} onClick={() => {
               setFilter('ALL')
               setOffset(0)
@@ -67,53 +67,85 @@ export function SimulationTradesTable({ sessionId }: SimulationTradesTableProps)
           <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">거래 내역이 없습니다</div>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow className="border-b border-border">
-                  <TableHead>일시</TableHead>
-                  <TableHead>종목</TableHead>
-                  <TableHead>구분</TableHead>
-                  <TableHead>상태</TableHead>
-                  <TableHead className="text-right">수량</TableHead>
-                  <TableHead className="text-right">가격</TableHead>
-                  <TableHead className="text-right">금액</TableHead>
-                  <TableHead>사유</TableHead>
-                  <TableHead>실패 사유</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trades.map((trade) => (
-                  <TableRow key={trade.id} className={trade.tradeStatus === 'FAILED' ? 'bg-red-50/60' : undefined}>
-                    <TableCell className="py-2 whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
-                    <TableCell className="py-2">
+            <div className="space-y-3 md:hidden">
+              {trades.map((trade) => (
+                <div key={trade.id} className={`rounded-lg border border-border p-4 space-y-3 ${trade.tradeStatus === 'FAILED' ? 'bg-red-50/60' : ''}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
                       <div className="font-medium">{trade.stockName}</div>
                       <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
-                    </TableCell>
-                    <TableCell className="py-2">
+                      <div className="mt-1 text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
                       <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
                         {trade.side === 'BUY' ? '매수' : '매도'}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="py-2">
                       <Badge variant={trade.tradeStatus === 'EXECUTED' ? 'success' : 'danger'}>
                         {trade.tradeStatus === 'EXECUTED' ? '체결' : '실패'}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="py-2 text-right">{formatNumber(trade.quantity)}</TableCell>
-                    <TableCell className="py-2 text-right">{formatCurrency(trade.price, trade.market)}</TableCell>
-                    <TableCell className="py-2 text-right">
-                      {trade.tradeStatus === 'FAILED' ? '-' : formatCurrency(trade.totalAmount, trade.market)}
-                    </TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[200px] truncate">
-                      {trade.reason ?? '-'}
-                    </TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[160px] truncate">
-                      {trade.failReason ?? '-'}
-                    </TableCell>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <MetricItem label="수량" value={formatNumber(trade.quantity)} />
+                    <MetricItem label="가격" value={formatCurrency(trade.price, trade.market)} />
+                    <MetricItem label="금액" value={trade.tradeStatus === 'FAILED' ? '-' : formatCurrency(trade.totalAmount, trade.market)} />
+                    <MetricItem label="사유" value={trade.reason ?? '-'} />
+                  </div>
+                  {trade.failReason && (
+                    <div className="text-xs text-danger">{trade.failReason}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border">
+                    <TableHead>일시</TableHead>
+                    <TableHead>종목</TableHead>
+                    <TableHead>구분</TableHead>
+                    <TableHead>상태</TableHead>
+                    <TableHead className="text-right">수량</TableHead>
+                    <TableHead className="text-right">가격</TableHead>
+                    <TableHead className="text-right">금액</TableHead>
+                    <TableHead>사유</TableHead>
+                    <TableHead>실패 사유</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {trades.map((trade) => (
+                    <TableRow key={trade.id} className={trade.tradeStatus === 'FAILED' ? 'bg-red-50/60' : undefined}>
+                      <TableCell className="py-2 whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
+                      <TableCell className="py-2">
+                        <div className="font-medium">{trade.stockName}</div>
+                        <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
+                          {trade.side === 'BUY' ? '매수' : '매도'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Badge variant={trade.tradeStatus === 'EXECUTED' ? 'success' : 'danger'}>
+                          {trade.tradeStatus === 'EXECUTED' ? '체결' : '실패'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2 text-right">{formatNumber(trade.quantity)}</TableCell>
+                      <TableCell className="py-2 text-right">{formatCurrency(trade.price, trade.market)}</TableCell>
+                      <TableCell className="py-2 text-right">
+                        {trade.tradeStatus === 'FAILED' ? '-' : formatCurrency(trade.totalAmount, trade.market)}
+                      </TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground max-w-[200px] truncate">
+                        {trade.reason ?? '-'}
+                      </TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground max-w-[160px] truncate">
+                        {trade.failReason ?? '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             <div className="flex items-center justify-between mt-4">
               <Button
                 size="sm"
@@ -139,5 +171,20 @@ export function SimulationTradesTable({ sessionId }: SimulationTradesTableProps)
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function MetricItem({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div>{value}</div>
+    </div>
   )
 }

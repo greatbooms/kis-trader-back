@@ -5,10 +5,10 @@ export function Footer({ sidebarCollapsed }: { sidebarCollapsed: boolean }) {
   return (
     <footer
       className={cn(
-        'border-t border-border py-4 px-6 transition-all duration-300 text-xs text-muted-foreground',
+        'border-t border-border py-4 px-4 sm:px-6 transition-all duration-300 text-xs text-muted-foreground',
         sidebarCollapsed
-          ? 'ml-(--width-sidebar-collapsed)'
-          : 'ml-(--width-sidebar)'
+          ? 'md:ml-(--width-sidebar-collapsed)'
+          : 'md:ml-(--width-sidebar)'
       )}
     >
       <div className="flex flex-col sm:flex-row items-center justify-between gap-2">

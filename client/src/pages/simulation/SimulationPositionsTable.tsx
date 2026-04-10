@@ -30,43 +30,91 @@ export function SimulationPositionsTable({ sessionId }: SimulationPositionsTable
         ) : positions.length === 0 ? (
           <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">보유 중인 포지션이 없습니다</div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-border">
-                <TableHead>종목</TableHead>
-                <TableHead className="text-right">수량</TableHead>
-                <TableHead className="text-right">평균가</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
-                <TableHead className="text-right">투자금액</TableHead>
-                <TableHead className="text-right">손익</TableHead>
-                <TableHead className="text-right">수익률</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="space-y-3 md:hidden">
               {positions.map((pos) => (
-                <TableRow key={pos.id}>
-                  <TableCell>
+                <div key={pos.id} className="rounded-lg border border-border p-4 space-y-3">
+                  <div>
                     <div className="font-medium">{pos.stockName}</div>
                     <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
-                  </TableCell>
-                  <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
-                  <TableCell className={`text-right font-medium ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
-                    {formatCurrency(pos.profitLoss, pos.market)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>
-                      {formatPercent(pos.profitRate)}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <MetricItem label="수량" value={formatNumber(pos.quantity)} />
+                    <MetricItem label="평균가" value={formatCurrency(pos.avgPrice, pos.market)} />
+                    <MetricItem label="현재가" value={formatCurrency(pos.currentPrice, pos.market)} />
+                    <MetricItem label="투자금" value={formatCurrency(pos.totalInvested, pos.market)} />
+                    <MetricItem
+                      label="손익"
+                      value={formatCurrency(pos.profitLoss, pos.market)}
+                      valueClassName={pos.profitLoss >= 0 ? 'text-success font-medium' : 'text-danger font-medium'}
+                    />
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">수익률</div>
+                      <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>
+                        {formatPercent(pos.profitRate)}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border">
+                    <TableHead>종목</TableHead>
+                    <TableHead className="text-right">수량</TableHead>
+                    <TableHead className="text-right">평균가</TableHead>
+                    <TableHead className="text-right">현재가</TableHead>
+                    <TableHead className="text-right">투자금액</TableHead>
+                    <TableHead className="text-right">손익</TableHead>
+                    <TableHead className="text-right">수익률</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {positions.map((pos) => (
+                    <TableRow key={pos.id}>
+                      <TableCell>
+                        <div className="font-medium">{pos.stockName}</div>
+                        <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
+                      </TableCell>
+                      <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
+                      <TableCell className={`text-right font-medium ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+                        {formatCurrency(pos.profitLoss, pos.market)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>
+                          {formatPercent(pos.profitRate)}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function MetricItem({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string
+  value: string
+  valueClassName?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={valueClassName}>{value}</div>
+    </div>
   )
 }

@@ -1,28 +1,35 @@
-import { Bell, LogOut, User } from 'lucide-react'
+import { Bell, LogOut, Menu, User, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import type { HeaderProps } from '@/components/types'
 
-export function Header({ sidebarCollapsed }: HeaderProps) {
+export function Header({ sidebarCollapsed, mobileMenuOpen, onToggleMobileMenu }: HeaderProps) {
   const { logout } = useAuth()
 
   return (
     <header
       className={cn(
-        'fixed top-0 right-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 transition-all duration-300',
+        'fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-4 sm:px-6 transition-all duration-300',
         sidebarCollapsed
-          ? 'left-(--width-sidebar-collapsed)'
-          : 'left-(--width-sidebar)'
+          ? 'md:left-(--width-sidebar-collapsed)'
+          : 'md:left-(--width-sidebar)'
       )}
     >
       <div className="flex items-center gap-2">
-        <h1 className="text-base font-semibold text-foreground">
+        <button
+          onClick={onToggleMobileMenu}
+          className="flex md:hidden h-9 w-9 items-center justify-center rounded-lg hover:bg-primary-50 text-muted-foreground transition-colors cursor-pointer"
+          aria-label="메뉴 열기"
+        >
+          {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
+        <h1 className="text-sm sm:text-base font-semibold text-foreground">
           KIS Auto Trader
         </h1>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button className="relative flex h-9 w-9 items-center justify-center rounded-lg hover:bg-primary-50 text-muted-foreground transition-colors cursor-pointer">
+      <div className="flex items-center gap-1 sm:gap-3">
+        <button className="relative hidden sm:flex h-9 w-9 items-center justify-center rounded-lg hover:bg-primary-50 text-muted-foreground transition-colors cursor-pointer">
           <Bell size={18} />
         </button>
         <button className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-100 text-primary-600 hover:bg-primary-200 transition-colors cursor-pointer">

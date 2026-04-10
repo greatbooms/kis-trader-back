@@ -39,7 +39,7 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-foreground">시뮬레이션</h2>
           <p className="text-sm text-muted-foreground mt-1">가상 매매로 전략을 테스트하세요</p>
@@ -49,7 +49,7 @@ export function SimulationListSection({ onSelect }: { onSelect: (id: string) => 
         </Button>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         {([null, 'RUNNING', 'PAUSED', 'COMPLETED'] as const).map((s) => (
           <Button
             key={s ?? 'all'}
@@ -206,10 +206,10 @@ function CreateSimulationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-card border border-border rounded-xl shadow-lg w-full max-w-lg mx-4 p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold text-foreground">새 시뮬레이션</h3>
           <button

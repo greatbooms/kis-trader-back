@@ -248,11 +248,11 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
 
           {error && <p className="text-sm text-danger">{error}</p>}
 
-          <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
               현재 현금 {formatCurrency(session.currentCash, session.market, primaryExchangeCode)}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
                 {triggering ? '실행중...' : '지금 1회 실행'}
               </Button>

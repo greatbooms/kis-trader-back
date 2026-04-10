@@ -51,8 +51,8 @@ export function SimulationControls({
   const statusInfo = statusConfig[status] ?? { label: status, variant: 'outline' as const }
 
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -62,9 +62,9 @@ export function SimulationControls({
         >
           <ArrowLeft size={16} />
         </Button>
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold text-foreground">{stockName}</span>
-          <span className="text-sm text-muted-foreground">{sessionName}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="text-base sm:text-lg font-semibold text-foreground break-words">{stockName}</span>
+          <span className="text-sm text-muted-foreground break-words">{sessionName}</span>
         </div>
         <Badge variant={statusInfo.variant} className="text-sm px-3 py-1">
           {statusInfo.label}
@@ -83,7 +83,7 @@ export function SimulationControls({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {(status === 'CREATED' || status === 'PAUSED') && (
           <Button size="sm" onClick={() => handleUpdateStatus('RUNNING')}>
             <Play size={14} /> {status === 'CREATED' ? '시작' : '재개'}

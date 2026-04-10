@@ -66,6 +66,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+@media (max-width: 767px) {
+  :root {
+    --spacing-page: 1rem;
+    --spacing-section: 1.25rem;
+    --spacing-card: 1rem;
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

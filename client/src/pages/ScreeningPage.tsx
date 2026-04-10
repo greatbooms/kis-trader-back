@@ -287,11 +287,11 @@ function DateListView({
 
   return (
     <>
-      <div className="flex flex-wrap gap-3 items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Select
           value={selectedDate || ''}
           onChange={(event) => setSelectedDate(event.target.value || null)}
-          className="w-48"
+          className="w-full sm:w-48"
         >
           <option value="">전체 날짜</option>
           {summaries.map((item) => (
@@ -448,13 +448,13 @@ function StockDetailView({
         <Button variant={tab === 'etf' ? 'default' : 'outline'} size="sm" onClick={() => { setTab('etf'); setExpandedId(null) }}>
           ETF ({etfRecs.length})
         </Button>
-        <Select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="w-40">
+        <Select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="w-full sm:w-40">
           <option value="total">총점순</option>
           <option value="dividend">배당 순</option>
           <option value="safety">안전마진 순</option>
           <option value="risk">저리스크 순</option>
         </Select>
-        <Select value={factorFilter} onChange={(event) => setFactorFilter(event.target.value as typeof factorFilter)} className="w-40">
+        <Select value={factorFilter} onChange={(event) => setFactorFilter(event.target.value as typeof factorFilter)} className="w-full sm:w-40">
           <option value="all">전체</option>
           <option value="income">배당 중심</option>
           <option value="safe">안전 중심</option>
@@ -539,15 +539,15 @@ function RecommendationCard({
     <Card className="overflow-hidden">
       <button className="w-full text-left cursor-pointer" onClick={onToggle}>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-lg font-bold text-muted-foreground w-8">#{rec.rank}</span>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="text-lg font-bold text-muted-foreground w-8 shrink-0">#{rec.rank}</span>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <CardTitle className="text-base">{rec.stockName}</CardTitle>
                   <span className="text-xs text-muted-foreground">{rec.stockCode}</span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-1">
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
                   <Badge variant="outline" className="text-xs">
                     {EXCHANGE_LABELS[rec.exchangeCode] || rec.exchangeCode}
                   </Badge>
@@ -558,8 +558,8 @@ function RecommendationCard({
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              <div className="text-right">
+            <div className="flex items-center justify-between gap-4 md:justify-end">
+              <div className="text-left md:text-right">
                 <div className="flex items-center gap-1 justify-end">
                   <span className={`text-xl font-bold ${scoreColor(rec.totalScore)}`}>{rec.totalScore.toFixed(1)}</span>
                   <Tooltip text="멀티팩터 100점 만점 점수입니다. 기술, 가치, 성장, 수익성, 리스크, 수급, 배당, 컨센서스를 종합합니다.">
@@ -586,7 +586,7 @@ function RecommendationCard({
       </button>
 
       <CardContent className="pt-0 pb-3">
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           <ScoreBar icon={<Brain className="h-3.5 w-3.5" />} label="기술" score={rec.technicalScore} max={40} tooltip="기술적 분석 호환 점수" />
           <ScoreBar icon={<BarChart3 className="h-3.5 w-3.5" />} label="펀더" score={rec.fundamentalScore} max={30} tooltip="가치/성장/수익성/배당/컨센서스 집계" />
           <ScoreBar icon={<Zap className="h-3.5 w-3.5" />} label="모멘텀" score={rec.momentumScore} max={30} tooltip="모멘텀/수급 집계" />
@@ -620,7 +620,7 @@ function RecommendationCard({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
                 {factorEntries(rec.factorScores).map(([key, value]) => (
                   <div key={key} className="rounded-lg bg-muted/50 px-3 py-2">
                     <div className="text-[11px] uppercase tracking-wide">
@@ -650,7 +650,7 @@ function RecommendationCard({
           )}
 
           <div className="rounded-xl border border-border bg-background p-4 space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-muted-foreground" />
                 <p className="text-sm font-medium">딥 분석 패널</p>

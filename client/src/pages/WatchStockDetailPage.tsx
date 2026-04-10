@@ -217,7 +217,7 @@ export function WatchStockDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
@@ -227,9 +227,9 @@ export function WatchStockDetailPage() {
           >
             <ArrowLeft size={16} />
           </Button>
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">{stock.stockName}</h2>
-            <p className="text-sm text-muted-foreground mt-1">
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold text-foreground break-words">{stock.stockName}</h2>
+            <p className="text-sm text-muted-foreground mt-1 break-all">
               {stock.stockCode} · {EXCHANGE_LABELS[stock.exchangeCode] ?? stock.exchangeCode}
             </p>
           </div>
@@ -337,7 +337,7 @@ export function WatchStockDetailPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">투자금</CardTitle></CardHeader>
           <CardContent className="text-xl font-semibold">
@@ -371,31 +371,49 @@ export function WatchStockDetailPage() {
           ) : (logsData?.watchStockExecutionLogs ?? []).length === 0 ? (
             <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">저장된 실행 로그가 없습니다</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>일시</TableHead>
-                  <TableHead>구분</TableHead>
-                  <TableHead>메시지</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              <div className="space-y-3 md:hidden">
                 {logsData?.watchStockExecutionLogs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="whitespace-nowrap">{formatDate(log.createdAt)}</TableCell>
-                    <TableCell>
+                  <div key={log.id} className="rounded-lg border border-border p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</div>
                       <Badge variant={eventVariant(log.eventType)}>{eventLabel(log.eventType)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">{log.message}</div>
-                      {log.details && (
-                        <div className="mt-1 text-xs text-muted-foreground break-all">{log.details}</div>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                    <div className="font-medium">{log.message}</div>
+                    {log.details && (
+                      <div className="text-xs text-muted-foreground break-all">{log.details}</div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>일시</TableHead>
+                      <TableHead>구분</TableHead>
+                      <TableHead>메시지</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logsData?.watchStockExecutionLogs.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="whitespace-nowrap">{formatDate(log.createdAt)}</TableCell>
+                        <TableCell>
+                          <Badge variant={eventVariant(log.eventType)}>{eventLabel(log.eventType)}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{log.message}</div>
+                          {log.details && (
+                            <div className="mt-1 text-xs text-muted-foreground break-all">{log.details}</div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -410,53 +428,86 @@ export function WatchStockDetailPage() {
           ) : actualTrades.length === 0 ? (
             <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">체결된 실제 매매가 없습니다</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>일시</TableHead>
-                  <TableHead>구분</TableHead>
-                  <TableHead>상태</TableHead>
-                  <TableHead className="text-right">수량</TableHead>
-                  <TableHead className="text-right">가격</TableHead>
-                  <TableHead>사유</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {actualTrades.map((trade) => (
-                  <TableRow key={trade.id}>
-                    <TableCell className="whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
-                    <TableCell>
-                      <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
-                        {trade.side === 'BUY' ? '매수' : '매도'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {(() => {
-                        const info = getTradeRecordDisplayInfo(trade)
-                        return (
-                          <div className="flex flex-col gap-1">
-                            <Badge variant={info.variant}>{info.label}</Badge>
-                            {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
-                          </div>
-                        )
-                      })()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div>{formatNumber(trade.executedQty ?? trade.quantity)}</div>
-                      {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
-                        <div className="text-xs text-muted-foreground">주문 {formatNumber(trade.quantity)}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {formatCurrency(trade.executedPrice ?? trade.price, trade.market, trade.exchangeCode)}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <>
+              <div className="space-y-3 md:hidden">
+                {actualTrades.map((trade) => {
+                  const info = getTradeRecordDisplayInfo(trade)
+                  return (
+                    <div key={trade.id} className="rounded-lg border border-border p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
+                        <div className="flex gap-2">
+                          <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
+                            {trade.side === 'BUY' ? '매수' : '매도'}
+                          </Badge>
+                          <Badge variant={info.variant}>{info.label}</Badge>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-xs text-muted-foreground">수량</div>
+                          <div>{formatNumber(trade.executedQty ?? trade.quantity)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-muted-foreground">가격</div>
+                          <div>{formatCurrency(trade.executedPrice ?? trade.price, trade.market, trade.exchangeCode)}</div>
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">{trade.reason ?? '-'}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>일시</TableHead>
+                      <TableHead>구분</TableHead>
+                      <TableHead>상태</TableHead>
+                      <TableHead className="text-right">수량</TableHead>
+                      <TableHead className="text-right">가격</TableHead>
+                      <TableHead>사유</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {actualTrades.map((trade) => (
+                      <TableRow key={trade.id}>
+                        <TableCell className="whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
+                        <TableCell>
+                          <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
+                            {trade.side === 'BUY' ? '매수' : '매도'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            const info = getTradeRecordDisplayInfo(trade)
+                            return (
+                              <div className="flex flex-col gap-1">
+                                <Badge variant={info.variant}>{info.label}</Badge>
+                                {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
+                              </div>
+                            )
+                          })()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div>{formatNumber(trade.executedQty ?? trade.quantity)}</div>
+                          {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
+                            <div className="text-xs text-muted-foreground">주문 {formatNumber(trade.quantity)}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(trade.executedPrice ?? trade.price, trade.market, trade.exchangeCode)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
