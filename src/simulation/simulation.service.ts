@@ -287,6 +287,7 @@ export class SimulationService {
         const hasBuySignal = signals.some((s) => s.side === 'BUY');
         const perCycleQuota = Number(session.quota) / session.maxCycles;
         const shouldCarryQuota = skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
+        const remainingQuota = Math.max(0, Number(session.quota) - Number(pos?.totalInvested || 0));
 
         if (hasBuySignal) {
           if (params.accumulatedQuota) {
@@ -308,10 +309,11 @@ export class SimulationService {
           shouldCarryQuota
           && !hasBuySignal
           && perCycleQuota > 0
+          && remainingQuota > 0
           && params.lastAccumulatedDate !== today
           && !(session.strategyName === 'infinite-buy' && (hasSecondTargetSignal || this.hasActiveInfiniteBuySecondTarget(params as Record<string, any>)))
         ) {
-          const newAccumulated = (params.accumulatedQuota || 0) + perCycleQuota;
+          const newAccumulated = Math.min((params.accumulatedQuota || 0) + perCycleQuota, remainingQuota);
           evaluationStatus = this.buildSimulationSkipMessage(session, skipReasons, details, newAccumulated);
           evaluationDetails = this.buildSimulationSkipDetails(session, skipReasons, details, newAccumulated);
           await this.prisma.simulationSession.update({
@@ -516,6 +518,9 @@ export class SimulationService {
   ): Record<string, any> {
     const perCycleQuota = Number(session.quota) / session.maxCycles;
     const accumulatedQuota = Number((session.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+    const remainingQuota = Number.isFinite(details?.remainingQuota)
+      ? Number(details?.remainingQuota)
+      : undefined;
 
     return {
       skipReasons,
@@ -524,9 +529,10 @@ export class SimulationService {
       baseQuota: details?.baseQuota,
       perCycleQuota,
       accumulatedQuota,
+      remainingQuota,
       carryAmountToday: this.isQuotaCarryEligible(skipReasons) ? perCycleQuota : undefined,
       nextAccumulatedQuota: this.isQuotaCarryEligible(skipReasons)
-        ? Number(nextAccumulatedQuota ?? accumulatedQuota + perCycleQuota)
+        ? Number(nextAccumulatedQuota ?? Math.min(accumulatedQuota + perCycleQuota, remainingQuota ?? accumulatedQuota + perCycleQuota))
         : undefined,
       quotaAdjustments: details?.quotaAdjustments,
     };

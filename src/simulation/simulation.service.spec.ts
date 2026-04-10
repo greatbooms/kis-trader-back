@@ -319,6 +319,60 @@ describe('SimulationService', () => {
       );
       expect(accumulatedQuotaUpdate).toBeUndefined();
     });
+
+    it('should cap accumulated quota at remaining quota', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-3',
+        status: 'RUNNING',
+        strategyName: 'infinite-buy',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quota: 100000,
+        maxCycles: 40,
+        currentCash: 100000,
+        strategyParams: {
+          accumulatedQuota: 95000,
+        },
+      });
+      mockPrisma.simulationPosition.findMany.mockResolvedValue([
+        {
+          stockCode: '005930',
+          quantity: 1,
+          avgPrice: 5000,
+          currentPrice: 5000,
+          totalInvested: 98000,
+        },
+      ]);
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 10,
+            overseas: { basis: 'beforeClose', offsetHours: 1 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['매수 수량 부족: 주문가능금액 0으로 1주 매수 불가'],
+        }),
+      });
+      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
+
+      await service.executeSimulationTick('session-3');
+
+      expect(mockPrisma.simulationSession.update).toHaveBeenCalledWith({
+        where: { id: 'session-3' },
+        data: {
+          strategyParams: expect.objectContaining({
+            accumulatedQuota: 2000,
+            lastAccumulatedDate: expect.any(String),
+          }),
+        },
+      });
+    });
   });
 
   describe('manual trigger', () => {

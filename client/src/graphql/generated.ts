@@ -154,6 +154,7 @@ export type Mutation = {
   manualSell: ManualSellResult;
   refreshAccountState: RefreshAccountStateResult;
   resetSimulation: SimulationSessionType;
+  resetWatchStockCarry: ManualTriggerResult;
   runDeepAnalysisNow: Scalars['Boolean']['output'];
   runScreeningNow: Scalars['Boolean']['output'];
   setStrategyAllocation: StrategyAllocationType;
@@ -198,6 +199,11 @@ export type MutationManualSellArgs = {
 
 export type MutationResetSimulationArgs = {
   id: Scalars['String']['input'];
+};
+
+
+export type MutationResetWatchStockCarryArgs = {
+  id: Scalars['ID']['input'];
 };
 
 
@@ -1104,6 +1110,13 @@ export type TriggerWatchStockNowMutationVariables = Exact<{
 
 
 export type TriggerWatchStockNowMutation = { __typename?: 'Mutation', triggerWatchStockNow: { __typename?: 'ManualTriggerResult', success: boolean, message: string } };
+
+export type ResetWatchStockCarryMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type ResetWatchStockCarryMutation = { __typename?: 'Mutation', resetWatchStockCarry: { __typename?: 'ManualTriggerResult', success: boolean, message: string } };
 
 
 export const LoginDocument = gql`
@@ -2927,3 +2940,34 @@ export function useTriggerWatchStockNowMutation(baseOptions?: ApolloReactHooks.M
         return ApolloReactHooks.useMutation<TriggerWatchStockNowMutation, TriggerWatchStockNowMutationVariables>(TriggerWatchStockNowDocument, options);
       }
 export type TriggerWatchStockNowMutationHookResult = ReturnType<typeof useTriggerWatchStockNowMutation>;
+export const ResetWatchStockCarryDocument = gql`
+    mutation ResetWatchStockCarry($id: ID!) {
+  resetWatchStockCarry(id: $id) {
+    success
+    message
+  }
+}
+    `;
+
+/**
+ * __useResetWatchStockCarryMutation__
+ *
+ * To run a mutation, you first call `useResetWatchStockCarryMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useResetWatchStockCarryMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [resetWatchStockCarryMutation, { data, loading, error }] = useResetWatchStockCarryMutation({
+ *   variables: {
+ *      id: // value for 'id'
+ *   },
+ * });
+ */
+export function useResetWatchStockCarryMutation(baseOptions?: ApolloReactHooks.MutationHookOptions<ResetWatchStockCarryMutation, ResetWatchStockCarryMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useMutation<ResetWatchStockCarryMutation, ResetWatchStockCarryMutationVariables>(ResetWatchStockCarryDocument, options);
+      }
+export type ResetWatchStockCarryMutationHookResult = ReturnType<typeof useResetWatchStockCarryMutation>;

@@ -86,6 +86,14 @@ describe('InfiniteBuyStrategy', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(0);
     });
+
+    it('should mark zero buyable cash as insufficient quantity for carry-over', async () => {
+      const ctx = createContext({ buyableAmount: 0 });
+      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+      expect(skipReasons[0]).toContain('매수 수량 부족:');
+      expect(skipReasons[0]).toContain('주문가능금액 0');
+    });
   });
 
   describe('market condition filters', () => {

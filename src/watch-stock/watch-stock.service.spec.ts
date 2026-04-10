@@ -15,6 +15,9 @@ describe('WatchStockService', () => {
       delete: jest.fn(),
       count: jest.fn().mockResolvedValue(0),
     },
+    position: {
+      findUnique: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -162,6 +165,20 @@ describe('WatchStockService', () => {
   });
 
   describe('update', () => {
+    beforeEach(() => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: '1',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        strategyName: 'infinite-buy',
+        quota: 4000000,
+        maxCycles: 40,
+        strategyParams: null,
+      });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+    });
+
     it('should update specified fields only', async () => {
       mockPrisma.watchStock.update.mockResolvedValue({
         id: '1',
@@ -195,6 +212,60 @@ describe('WatchStockService', () => {
       expect(callArgs.data).toEqual({ stockName: 'NewName' });
       expect(callArgs.data.quota).toBeUndefined();
     });
+
+    it('should rebase infinite-buy cycle and accumulated quota when quota changes', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: '1',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        strategyName: 'infinite-buy',
+        quota: 4000000,
+        maxCycles: 40,
+        strategyParams: {
+          accumulatedQuota: 200000,
+          lastAccumulatedDate: '2026-04-10',
+        },
+      });
+      mockPrisma.position.findUnique.mockResolvedValue({
+        totalInvested: 1000000,
+      });
+      mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', { quota: 8000000 });
+
+      const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+      expect(Number(callArgs.data.quota)).toBe(8000000);
+      expect(callArgs.data.cycle).toBe(5);
+      expect(callArgs.data.strategyParams).toEqual({
+        accumulatedQuota: 400000,
+        lastAccumulatedDate: '2026-04-10',
+      });
+    });
+
+    it('should not rebase non-infinite-buy quota updates', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: '1',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        strategyName: 'trend-following',
+        quota: 4000000,
+        maxCycles: 40,
+        strategyParams: {
+          accumulatedQuota: 200000,
+        },
+      });
+      mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', { quota: 8000000 });
+
+      const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+      expect(Number(callArgs.data.quota)).toBe(8000000);
+      expect(callArgs.data.cycle).toBeUndefined();
+      expect(callArgs.data.strategyParams).toBeUndefined();
+      expect(mockPrisma.position.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   describe('delete', () => {
@@ -205,6 +276,30 @@ describe('WatchStockService', () => {
 
       expect(mockPrisma.watchStock.delete).toHaveBeenCalledWith({
         where: { id: '1' },
+      });
+    });
+  });
+
+  describe('resetAccumulatedQuota', () => {
+    it('should clear accumulated quota fields for infinite-buy', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        strategyName: 'infinite-buy',
+        strategyParams: {
+          accumulatedQuota: 5000,
+          lastAccumulatedDate: '2026-04-10',
+          secondaryExitPlan: { secondTargetPrice: 100 },
+        },
+      });
+
+      await service.resetAccumulatedQuota('1');
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith({
+        where: { id: '1' },
+        data: {
+          strategyParams: {
+            secondaryExitPlan: { secondTargetPrice: 100 },
+          },
+        },
       });
     });
   });

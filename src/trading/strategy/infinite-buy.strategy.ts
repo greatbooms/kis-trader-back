@@ -419,6 +419,13 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const riskBuyBlocked = Boolean(riskState?.buyBlocked || mddCheck?.buyBlocked);
     const buyAllowed = adjustedQuota > 0 && !riskBuyBlocked;
 
+    if (!buyAllowed && !maxCyclesReached && !riskBuyBlocked && ctx.buyableAmount <= 0) {
+      details.minimumExecutablePrice = 0;
+      skipReasons.push(
+        `매수 수량 부족: 주문가능금액 ${ctx.buyableAmount.toFixed(0)}으로 1주 매수 불가`,
+      );
+    }
+
     let buySignalCount = 0;
 
     if (!hasPosition && buyAllowed) {

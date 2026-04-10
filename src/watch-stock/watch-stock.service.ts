@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { InfiniteBuyStrategyParams } from '../trading/types';
 
 const MAX_TOTAL_ACTIVE_WATCH_STOCKS = 30;
 const DUPLICATE_WATCH_STOCK_MESSAGE = '이미 등록된 관심종목입니다.';
@@ -142,6 +143,103 @@ export class WatchStockService {
     return !!error && typeof error === 'object' && 'code' in error && error.code === 'P2002';
   }
 
+  private toStrategyParams(value: Prisma.JsonValue | Record<string, any> | null | undefined): Record<string, any> {
+    if (!value || Array.isArray(value) || typeof value !== 'object') {
+      return {};
+    }
+    return { ...(value as Record<string, any>) };
+  }
+
+  private roundQuota(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
+  private async buildInfiniteBuyRebasedUpdate(
+    current: {
+      market: Market;
+      exchangeCode: string;
+      stockCode: string;
+      strategyName: string | null;
+      quota: Prisma.Decimal | null;
+      maxCycles: number;
+      strategyParams: Prisma.JsonValue | null;
+    },
+    data: {
+      strategyName?: string;
+      quota?: number;
+      cycle?: number;
+      maxCycles?: number;
+      strategyParams?: Record<string, any>;
+    },
+  ): Promise<{ cycle?: number; strategyParams?: Record<string, any> }> {
+    const effectiveStrategyName = data.strategyName ?? current.strategyName;
+    if (effectiveStrategyName !== 'infinite-buy') {
+      return {};
+    }
+
+    const currentQuota = Number(current.quota ?? 0);
+    const nextQuota = data.quota !== undefined ? Number(data.quota) : currentQuota;
+    const nextMaxCycles = data.maxCycles !== undefined ? data.maxCycles : current.maxCycles;
+    const quotaChanged = data.quota !== undefined && nextQuota !== currentQuota;
+    const maxCyclesChanged = data.maxCycles !== undefined && nextMaxCycles !== current.maxCycles;
+
+    if (!quotaChanged && !maxCyclesChanged) {
+      return {};
+    }
+
+    const mergedParams = {
+      ...this.toStrategyParams(current.strategyParams),
+      ...(data.strategyParams ?? {}),
+    } as InfiniteBuyStrategyParams;
+
+    const update: { cycle?: number; strategyParams?: Record<string, any> } = {};
+    const nextPerCycleQuota = nextQuota > 0 && nextMaxCycles > 0 ? nextQuota / nextMaxCycles : 0;
+    const currentPerCycleQuota =
+      currentQuota > 0 && current.maxCycles > 0 ? currentQuota / current.maxCycles : 0;
+
+    const position = await this.prisma.position.findUnique({
+      where: {
+        market_exchangeCode_stockCode: {
+          market: current.market,
+          exchangeCode: current.exchangeCode,
+          stockCode: current.stockCode,
+        },
+      },
+      select: { totalInvested: true },
+    });
+
+    const totalInvested = Number(position?.totalInvested ?? 0);
+    update.cycle =
+      nextPerCycleQuota > 0 && totalInvested > 0
+        ? Math.max(0, Math.floor(totalInvested / nextPerCycleQuota))
+        : 0;
+
+    let strategyParamsChanged = data.strategyParams !== undefined;
+    const currentAccumulatedQuota = Number(mergedParams.accumulatedQuota || 0);
+    if (currentAccumulatedQuota > 0 && currentPerCycleQuota > 0 && nextPerCycleQuota > 0) {
+      const carriedCycles = currentAccumulatedQuota / currentPerCycleQuota;
+      const rebasedAccumulatedQuota = this.roundQuota(carriedCycles * nextPerCycleQuota);
+      if (rebasedAccumulatedQuota > 0) {
+        mergedParams.accumulatedQuota = rebasedAccumulatedQuota;
+      } else {
+        delete mergedParams.accumulatedQuota;
+      }
+      strategyParamsChanged = true;
+    }
+
+    if (strategyParamsChanged) {
+      update.strategyParams = mergedParams;
+    }
+
+    this.logger.log(
+      `[${current.stockCode}] Rebased infinite-buy state after quota update: ` +
+      `quota ${currentQuota} -> ${nextQuota}, maxCycles ${current.maxCycles} -> ${nextMaxCycles}, ` +
+      `cycle=${update.cycle}, accumulatedQuota=${update.strategyParams?.accumulatedQuota ?? mergedParams.accumulatedQuota ?? 0}`,
+    );
+
+    return update;
+  }
+
   async create(data: {
     market: Market;
     exchangeCode: string;
@@ -181,7 +279,7 @@ export class WatchStockService {
     }
   }
 
-  update(
+  async update(
     id: string,
     data: {
       exchangeCode?: string;
@@ -196,6 +294,23 @@ export class WatchStockService {
       strategyParams?: Record<string, any>;
     },
   ) {
+    const current = await this.prisma.watchStock.findUnique({
+      where: { id },
+      select: {
+        market: true,
+        exchangeCode: true,
+        stockCode: true,
+        strategyName: true,
+        quota: true,
+        maxCycles: true,
+        strategyParams: true,
+      },
+    });
+
+    if (!current) {
+      throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+    }
+
     const updateData: any = {};
     if (data.exchangeCode !== undefined) updateData.exchangeCode = data.exchangeCode;
     if (data.stockName !== undefined) updateData.stockName = data.stockName;
@@ -208,7 +323,39 @@ export class WatchStockService {
     if (data.maxPortfolioRate !== undefined) updateData.maxPortfolioRate = new Prisma.Decimal(data.maxPortfolioRate);
     if (data.strategyParams !== undefined) updateData.strategyParams = data.strategyParams;
 
+    const rebasedUpdate = await this.buildInfiniteBuyRebasedUpdate(current, data);
+    if (rebasedUpdate.cycle !== undefined) updateData.cycle = rebasedUpdate.cycle;
+    if (rebasedUpdate.strategyParams !== undefined) updateData.strategyParams = rebasedUpdate.strategyParams;
+
     return this.prisma.watchStock.update({ where: { id }, data: updateData });
+  }
+
+  async resetAccumulatedQuota(id: string) {
+    const current = await this.prisma.watchStock.findUnique({
+      where: { id },
+      select: {
+        strategyName: true,
+        strategyParams: true,
+      },
+    });
+
+    if (!current) {
+      throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+    }
+
+    if (!['infinite-buy', 'daily-dca'].includes(current.strategyName || '')) {
+      throw new BadRequestException('이월금 리셋은 분할매수 전략에서만 지원됩니다.');
+    }
+
+    const params = this.toStrategyParams(current.strategyParams);
+    const { accumulatedQuota: _accumulatedQuota, lastAccumulatedDate: _lastAccumulatedDate, ...rest } = params;
+
+    await this.prisma.watchStock.update({
+      where: { id },
+      data: {
+        strategyParams: rest,
+      },
+    });
   }
 
   delete(id: string) {

@@ -109,3 +109,10 @@ mutation TriggerWatchStockNow($id: ID!) {
     message
   }
 }
+
+mutation ResetWatchStockCarry($id: ID!) {
+  resetWatchStockCarry(id: $id) {
+    success
+    message
+  }
+}

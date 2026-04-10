@@ -66,7 +66,8 @@ export class TradingService {
     ) {
       const perCycleQuota = Number(ctx.watchStock.quota) / ctx.watchStock.maxCycles;
       const accumulatedQuota = Number((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
-      const nextAccumulated = accumulatedQuota + perCycleQuota;
+      const remainingQuota = Math.max(0, Number(ctx.watchStock.quota) - Number(ctx.position?.totalInvested || 0));
+      const nextAccumulated = Math.min(accumulatedQuota + perCycleQuota, remainingQuota);
       const adjustedQuota = Number(details?.adjustedQuota || 0);
       const minimumExecutablePrice = Number(details?.minimumExecutablePrice || adjustedQuota || 0);
       const adjustments = Array.isArray(details?.quotaAdjustments)
@@ -97,6 +98,9 @@ export class TradingService {
   ): Record<string, any> {
     const perCycleQuota = ctx.watchStock.quota ? Number(ctx.watchStock.quota) / ctx.watchStock.maxCycles : undefined;
     const accumulatedQuota = Number((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.accumulatedQuota || 0);
+    const remainingQuota = ctx.watchStock.quota
+      ? Math.max(0, Number(ctx.watchStock.quota) - Number(ctx.position?.totalInvested || 0))
+      : undefined;
 
     return {
       skipReasons,
@@ -110,9 +114,10 @@ export class TradingService {
       minimumExecutablePrice: details?.minimumExecutablePrice,
       perCycleQuota,
       accumulatedQuota,
+      remainingQuota,
       carryAmountToday: this.isQuotaCarryEligible(skipReasons) ? perCycleQuota : undefined,
       nextAccumulatedQuota: this.isQuotaCarryEligible(skipReasons) && perCycleQuota !== undefined
-        ? accumulatedQuota + perCycleQuota
+        ? Math.min(accumulatedQuota + perCycleQuota, remainingQuota ?? accumulatedQuota + perCycleQuota)
         : undefined,
       quotaAdjustments: details?.quotaAdjustments,
     };
@@ -769,7 +774,10 @@ export class TradingService {
       const perCycleQuota = Number(ws.quota) / ws.maxCycles;
       if (perCycleQuota <= 0) continue;
 
-      const newAccumulated = (updatedParams.accumulatedQuota || 0) + perCycleQuota;
+      const remainingQuota = Math.max(0, Number(ws.quota) - Number(ctx.position?.totalInvested || 0));
+      if (remainingQuota <= 0) continue;
+
+      const newAccumulated = Math.min((updatedParams.accumulatedQuota || 0) + perCycleQuota, remainingQuota);
       await this.prisma.watchStock.update({
         where: { id: ws.id },
         data: {

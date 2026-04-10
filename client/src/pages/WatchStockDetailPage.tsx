@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   useGetWatchStockQuery,
   useGetWatchStockExecutionLogsQuery,
+  useResetWatchStockCarryMutation,
   useGetTradesQuery,
   useTriggerWatchStockNowMutation,
   useUpdateWatchStockMutation,
@@ -62,6 +63,7 @@ export function WatchStockDetailPage() {
   const { data: strategiesData } = useGetAvailableStrategiesQuery()
   const [updateWatchStock, { loading: saving }] = useUpdateWatchStockMutation()
   const [triggerWatchStockNow, { loading: triggering }] = useTriggerWatchStockNowMutation()
+  const [resetWatchStockCarry, { loading: resettingCarry }] = useResetWatchStockCarryMutation()
 
   const stock = data?.watchStock
   const strategies = strategiesData?.availableStrategies ?? []
@@ -69,6 +71,15 @@ export function WatchStockDetailPage() {
     ? strategies.find((strategy) => strategy.name === stock.strategyName)?.displayName ?? stock.strategyName
     : undefined
   const supportsCycles = stock?.strategyName === 'infinite-buy'
+  const strategyParams = useMemo(() => {
+    if (!stock?.strategyParams) return null
+    try {
+      return JSON.parse(stock.strategyParams) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }, [stock?.strategyParams])
+  const accumulatedQuota = Number(strategyParams?.accumulatedQuota || 0)
 
   const [isEditing, setIsEditing] = useState(false)
   const [isActive, setIsActive] = useState(true)
@@ -186,6 +197,23 @@ export function WatchStockDetailPage() {
     }
   }
 
+  const handleResetCarry = async () => {
+    if (!stock) return
+
+    try {
+      const result = await resetWatchStockCarry({
+        variables: { id: stock.id },
+      })
+      alert(result.data?.resetWatchStockCarry.message || '이월 금액을 초기화했습니다.')
+      await Promise.all([
+        refetch(),
+        id ? logsRefetch() : Promise.resolve(),
+      ])
+    } catch (e: unknown) {
+      alert(getMutationErrorMessage(e, '이월 금액 초기화 중 오류가 발생했습니다'))
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -214,6 +242,11 @@ export function WatchStockDetailPage() {
           {stock.isActive && stock.strategyName && (
             <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
               {triggering ? '실행중...' : '전략 수동 실행'}
+            </Button>
+          )}
+          {stock.isActive && ['infinite-buy', 'daily-dca'].includes(stock.strategyName ?? '') && accumulatedQuota > 0 && (
+            <Button variant="outline" onClick={handleResetCarry} disabled={resettingCarry}>
+              {resettingCarry ? '초기화중...' : `이월금 초기화 (${formatCurrency(accumulatedQuota, stock.market)})`}
             </Button>
           )}
         </div>

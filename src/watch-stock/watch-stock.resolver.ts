@@ -227,4 +227,13 @@ export class WatchStockResolver {
   async triggerWatchStockNow(@Args('id', { type: () => ID }) id: string): Promise<ManualTriggerResult> {
     return this.tradingScheduler.triggerWatchStockNow(id);
   }
+
+  @Mutation(() => ManualTriggerResult)
+  async resetWatchStockCarry(@Args('id', { type: () => ID }) id: string): Promise<ManualTriggerResult> {
+    await this.watchStockService.resetAccumulatedQuota(id);
+    return {
+      success: true,
+      message: '이월 금액을 초기화했습니다.',
+    };
+  }
 }
