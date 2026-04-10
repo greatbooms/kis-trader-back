@@ -6,8 +6,8 @@
   "scripts": {
     "build": "nest build",
     "start": "nest start",
-    "start:dev": "export $(grep -s '^PORT=' .env) 2>/dev/null; lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; nest start --watch",
-    "start:prod": "export $(grep -s '^PORT=' .env) 2>/dev/null; lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; node dist/main",
+    "start:dev": "set -a; source .env.dev; set +a; lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; node -r dotenv/config node_modules/@nestjs/cli/bin/nest.js start --watch dotenv_config_path=.env.dev",
+    "start:prod": "set -a; source .env.prod; set +a; lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; node -r dotenv/config dist/main dotenv_config_path=.env.prod",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -19,7 +19,7 @@
     "prisma:studio": "prisma studio",
     "client:install": "cd client && yarn install",
     "client:build": "cd client && yarn build",
-    "client:dev": "export $(grep -sE '^(PORT|CLIENT_PORT)=' .env) 2>/dev/null; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && yarn dev",
+    "client:dev": "set -a; source .env.dev; set +a; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && CLIENT_PORT=$CLIENT_PORT PORT=$PORT yarn dev",
     "client:codegen": "cd client && yarn codegen",
     "build:all": "yarn client:build && yarn build"
   },

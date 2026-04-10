@@ -28,6 +28,7 @@ import { OrderSyncService } from './order-sync.service';
 export class TradingScheduler implements OnModuleInit {
   private readonly logger = new Logger(TradingScheduler.name);
   private readonly isPaper: boolean;
+  private readonly tradingEnabled: boolean;
   private isDomesticRunning = false;
   private isOverseasRunning = false;
   private isDomesticOrderSyncRunning = false;
@@ -55,9 +56,15 @@ export class TradingScheduler implements OnModuleInit {
     @Optional() private slackCommandsService?: SlackCommandsService,
   ) {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
+    this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
   }
 
   onModuleInit() {
+    if (!this.tradingEnabled) {
+      this.logger.warn('Live trading disabled by TRADING_ENABLED=false; trading cron jobs will not be registered');
+      return;
+    }
+
     // 국내 시장: 매 1분, 09:00-15:29 KST
     const krJob = new CronJob('*/1 9-14 * * 1-5', () => this.executeDomestic(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-domestic', krJob);
@@ -817,6 +824,10 @@ export class TradingScheduler implements OnModuleInit {
   }
 
   async triggerWatchStockNow(watchStockId: string): Promise<{ success: boolean; message: string }> {
+    if (!this.tradingEnabled) {
+      return { success: false, message: '현재 환경에서는 실거래가 비활성화되어 수동 실행할 수 없습니다.' };
+    }
+
     const watchStock = await this.prisma.watchStock.findUnique({
       where: { id: watchStockId },
     });

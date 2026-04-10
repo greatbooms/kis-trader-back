@@ -16,7 +16,9 @@ export default () => ({
   fred: {
     apiKey: process.env.FRED_API_KEY || '',
   },
-  trading: {},
+  trading: {
+    enabled: process.env.TRADING_ENABLED !== 'false',
+  },
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
     adminPassword: process.env.ADMIN_PASSWORD || '',

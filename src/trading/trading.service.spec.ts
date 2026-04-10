@@ -4,6 +4,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('TradingService', () => {
   let service: TradingService;
@@ -50,6 +51,13 @@ describe('TradingService', () => {
     sendInsufficientFundsAlert: jest.fn(),
   };
 
+  const mockConfigService = {
+    get: jest.fn((key: string) => {
+      if (key === 'trading.enabled') return true;
+      return undefined;
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -57,6 +65,7 @@ describe('TradingService', () => {
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: ConfigService, useValue: mockConfigService },
         { provide: SlackService, useValue: mockSlackService },
       ],
     }).compile();

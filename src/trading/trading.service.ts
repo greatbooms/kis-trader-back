@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
@@ -18,13 +19,17 @@ import { SlackService } from '../notification/slack.service';
 @Injectable()
 export class TradingService {
   private readonly logger = new Logger(TradingService.name);
+  private readonly tradingEnabled: boolean;
 
   constructor(
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private prisma: PrismaService,
+    private configService: ConfigService,
     @Optional() private slackService?: SlackService,
-  ) {}
+  ) {
+    this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
+  }
 
   private async logWatchStockExecution(
     ctx: StockStrategyContext | undefined,
@@ -213,6 +218,11 @@ export class TradingService {
     strategy: PerStockTradingStrategy,
     contexts: StockStrategyContext[],
   ): Promise<void> {
+    if (!this.tradingEnabled) {
+      this.logger.warn(`Skipping live trading strategy execution because TRADING_ENABLED=false (${strategy.name})`);
+      return;
+    }
+
     const skipQuotaAccumulationIds = new Set<string>();
     const quotaCarryEligibleIds = new Set<string>();
 
@@ -324,6 +334,11 @@ export class TradingService {
 
   /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
   async executeApprovedStopLoss(approvalId: string): Promise<void> {
+    if (!this.tradingEnabled) {
+      this.logger.warn(`Skipping approved stop-loss execution because TRADING_ENABLED=false (${approvalId})`);
+      return;
+    }
+
     const approval = await this.prisma.stopLossApproval.findUnique({
       where: { id: approvalId },
       include: { tradeRecord: true },

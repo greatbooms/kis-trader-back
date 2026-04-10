@@ -3,6 +3,7 @@ import { TradeRecordService } from './trade-record.service';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('TradeRecordService', () => {
   let service: TradeRecordService;
@@ -43,6 +44,13 @@ describe('TradeRecordService', () => {
     orderSell: jest.fn(),
   };
 
+  const mockConfigService = {
+    get: jest.fn((key: string) => {
+      if (key === 'trading.enabled') return true;
+      return undefined;
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +58,7 @@ describe('TradeRecordService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
@@ -12,12 +13,16 @@ import { DailyPrice } from '../kis/types/kis-api.types';
 export class TradeRecordService {
   private readonly logger = new Logger(TradeRecordService.name);
   private readonly accountStatusCacheKey = 'account_status_cache';
+  private readonly tradingEnabled: boolean;
 
   constructor(
     private prisma: PrismaService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
+  }
 
   findAll(options?: {
     market?: Market;
@@ -324,6 +329,10 @@ export class TradeRecordService {
 
   /** 수동 매도 */
   async manualSell(input: ManualSellInput): Promise<{ success: boolean; message?: string; orderNo?: string }> {
+    if (!this.tradingEnabled) {
+      return { success: false, message: '현재 환경에서는 실거래가 비활성화되어 수동 매도를 실행할 수 없습니다.' };
+    }
+
     const position = await this.prisma.position.findFirst({
       where: { stockCode: input.stockCode, market: input.market as Market },
     });
