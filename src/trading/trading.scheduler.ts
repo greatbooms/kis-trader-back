@@ -77,6 +77,15 @@ export class TradingScheduler implements OnModuleInit {
     krOrderSyncCloseJob.start();
     this.logger.log('Trading domestic order sync cron registered: every 10s 09:00-15:29 KST');
 
+    const krPortfolioSyncJob = new CronJob('*/10 9-14 * * 1-5', () => this.syncDomesticPortfolioState(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-domestic-portfolio-sync', krPortfolioSyncJob);
+    krPortfolioSyncJob.start();
+
+    const krPortfolioSyncCloseJob = new CronJob('0,10,20 15 * * 1-5', () => this.syncDomesticPortfolioState(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-domestic-portfolio-sync-close', krPortfolioSyncCloseJob);
+    krPortfolioSyncCloseJob.start();
+    this.logger.log('Trading domestic portfolio sync cron registered: every 10min 09:00-15:20 KST');
+
     // 해외 시장 (아시아): 매 1분, 09:00-16:59 KST (일본/베트남 09:00~, 홍콩/중국 10:30~17:00)
     const asiaJob = new CronJob('*/1 9-16 * * 1-5', () => this.executeOverseas(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-asia', asiaJob);
@@ -105,6 +114,19 @@ export class TradingScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-order-sync', usMorningOrderSyncJob);
     usMorningOrderSyncJob.start();
     this.logger.log('Trading overseas order sync cron registered: every 15s during overseas sessions');
+
+    const asiaPortfolioSyncJob = new CronJob('*/10 9-16 * * 1-5', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-asia-portfolio-sync', asiaPortfolioSyncJob);
+    asiaPortfolioSyncJob.start();
+
+    const usNightPortfolioSyncJob = new CronJob('*/10 23 * * 1-5', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-us-night-portfolio-sync', usNightPortfolioSyncJob);
+    usNightPortfolioSyncJob.start();
+
+    const usMorningPortfolioSyncJob = new CronJob('*/10 0-5 * * 2-6', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('trading-overseas-us-morning-portfolio-sync', usMorningPortfolioSyncJob);
+    usMorningPortfolioSyncJob.start();
+    this.logger.log('Trading overseas portfolio sync cron registered: every 10min during overseas sessions');
 
     // 시장 상태 판별 (각 시장 장전)
     const regimeKrJob = new CronJob('50 8 * * 1-5', () => this.detectRegime('DOMESTIC', 'KRX'), null, false, 'Asia/Seoul');
@@ -191,7 +213,7 @@ export class TradingScheduler implements OnModuleInit {
 
     try {
       if (await this.isHoliday('DOMESTIC')) return;
-      if (!await this.hasTradingState('DOMESTIC')) return;
+      if (!await this.hasOpenOrders('DOMESTIC')) return;
       await this.syncMarketOrdersOnly('DOMESTIC');
     } catch (e) {
       this.logger.error(`Domestic order sync error: ${e.message}`);
@@ -206,12 +228,37 @@ export class TradingScheduler implements OnModuleInit {
 
     try {
       if (await this.isHoliday('OVERSEAS')) return;
-      if (!await this.hasTradingState('OVERSEAS')) return;
+      if (!await this.hasOpenOrders('OVERSEAS')) return;
       await this.syncMarketOrdersOnly('OVERSEAS');
     } catch (e) {
       this.logger.error(`Overseas order sync error: ${e.message}`);
     } finally {
       this.isOverseasOrderSyncRunning = false;
+    }
+  }
+
+  private async syncDomesticPortfolioState(): Promise<void> {
+    if (!this.isMarketOpen('KRX')) return;
+    if (this.isDomesticRunning || this.isDomesticOrderSyncRunning) return;
+
+    try {
+      if (await this.isHoliday('DOMESTIC')) return;
+      if (!await this.hasPortfolioState('DOMESTIC')) return;
+      await this.syncMarketPortfolioOnly('DOMESTIC');
+    } catch (e) {
+      this.logger.error(`Domestic portfolio sync error: ${e.message}`);
+    }
+  }
+
+  private async syncOverseasPortfolioState(): Promise<void> {
+    if (this.isOverseasRunning || this.isOverseasOrderSyncRunning) return;
+
+    try {
+      if (await this.isHoliday('OVERSEAS')) return;
+      if (!await this.hasPortfolioState('OVERSEAS')) return;
+      await this.syncMarketPortfolioOnly('OVERSEAS');
+    } catch (e) {
+      this.logger.error(`Overseas portfolio sync error: ${e.message}`);
     }
   }
 
@@ -260,12 +307,6 @@ export class TradingScheduler implements OnModuleInit {
     }
 
     const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
-
-    // 잔고 동기화
-    const balance = market === 'DOMESTIC'
-      ? await this.kisDomestic.getBalance()
-      : await this.kisOverseas.getBalance();
-    await this.tradingService.syncPositions(market, balance);
 
     const positions = await this.prisma.position.findMany({
       where: { market: market as Market },
@@ -544,11 +585,7 @@ export class TradingScheduler implements OnModuleInit {
   }
 
   private async syncMarketOrdersOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    const balance = market === 'DOMESTIC'
-      ? await this.kisDomestic.getBalance()
-      : await this.kisOverseas.getBalance();
-
-    await this.tradingService.syncPositions(market, balance);
+    await this.syncMarketPortfolioOnly(market);
 
     const positions = await this.prisma.position.findMany({
       where: { market: market as Market },
@@ -560,7 +597,15 @@ export class TradingScheduler implements OnModuleInit {
     );
   }
 
-  private async hasTradingState(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
+  private async syncMarketPortfolioOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
+    const balance = market === 'DOMESTIC'
+      ? await this.kisDomestic.getBalance()
+      : await this.kisOverseas.getBalance();
+
+    await this.tradingService.syncPositions(market, balance);
+  }
+
+  private async hasPortfolioState(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
     const [activeWatchStocks, positions, openOrders] = await Promise.all([
       this.prisma.watchStock.count({
         where: {
@@ -582,6 +627,18 @@ export class TradingScheduler implements OnModuleInit {
     ]);
 
     return activeWatchStocks > 0 || positions > 0 || openOrders > 0;
+  }
+
+  private async hasOpenOrders(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
+    const openOrders = await this.prisma.tradeRecord.count({
+      where: {
+        market: market as Market,
+        status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
+        orderNo: { not: null },
+      },
+    });
+
+    return openOrders > 0;
   }
 
   // ========== 타이밍 판단 ==========

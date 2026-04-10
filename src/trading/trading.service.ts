@@ -278,6 +278,8 @@ export class TradingService {
 
   /** 주문 실행 */
   private async executeSignal(signal: TradingSignal, strategyName?: string, ctx?: StockStrategyContext): Promise<void> {
+    await this.refreshMarketPositionsBeforeOrder(signal.market as 'DOMESTIC' | 'OVERSEAS');
+
     // OrderType 결정
     let orderType: OrderType;
     if (signal.orderDivision === '34') {
@@ -508,6 +510,17 @@ export class TradingService {
         record.id,
       );
       this.logger.error(`Order exception: ${e.message}`);
+    }
+  }
+
+  private async refreshMarketPositionsBeforeOrder(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
+    try {
+      const balance = market === 'DOMESTIC'
+        ? await this.kisDomestic.getBalance()
+        : await this.kisOverseas.getBalance();
+      await this.syncPositions(market, balance);
+    } catch (e) {
+      this.logger.warn(`Failed to refresh ${market} positions before order: ${e.message}`);
     }
   }
 
