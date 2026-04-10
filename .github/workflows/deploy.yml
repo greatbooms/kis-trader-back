@@ -1,0 +1,107 @@
+name: 메인 배포
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Tailscale 연결
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+
+      - name: SSH 설정
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.MAC_STUDIO_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<EOF
+          Host ${{ secrets.MAC_STUDIO_HOST }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            IdentityFile ~/.ssh/deploy_key
+          EOF
+
+      - name: Tailscale 연결 확인
+        run: |
+          echo "Runner Tailscale IPv4:"
+          tailscale ip -4 || true
+          echo "Tailscale status:"
+          tailscale status || true
+
+          echo "Mac Studio 연결 대기..."
+          for i in $(seq 1 30); do
+            if tailscale ping --timeout=2s ${{ secrets.MAC_STUDIO_HOST }} >/dev/null 2>&1; then
+              echo "Tailscale ping 성공"
+              exit 0
+            fi
+            if nc -zvw3 ${{ secrets.MAC_STUDIO_HOST }} 22 >/dev/null 2>&1; then
+              echo "SSH 포트 연결 성공"
+              exit 0
+            fi
+            echo "대기 중... ($i/30)"
+            sleep 2
+          done
+
+          echo "Mac Studio에 연결하지 못했습니다."
+          exit 1
+
+      - name: 원격 배포 스크립트 업로드
+        env:
+          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
+          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=client/node_modules \
+            --exclude=dist \
+            --exclude=client/dist \
+            -czf release.tar.gz .
+
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${DEPLOY_PATH}/scripts ${DEPLOY_PATH}/artifacts"
+          scp -o ConnectTimeout=10 scripts/deploy.sh ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/scripts/deploy.sh
+          scp -o ConnectTimeout=10 release.tar.gz ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/artifacts/release.tar.gz
+
+      - name: 배포 실행
+        env:
+          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
+          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
+            "export DEPLOY_DIR=${DEPLOY_PATH} \
+             APP_NAME=kis-trader-back \
+             SOURCE_ARCHIVE=${DEPLOY_PATH}/artifacts/release.tar.gz && \
+             /bin/bash ${DEPLOY_PATH}/scripts/deploy.sh"
+
+      - name: 헬스체크
+        env:
+          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
+          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          sleep 5
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
+            "set -a; source ${DEPLOY_PATH}/.env.prod 2>/dev/null; set +a; curl -sf --max-time 10 http://localhost:\${PORT:-8888}/health > /dev/null && echo 'Health check passed'"
+
+      - name: SSH 키 정리
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -f release.tar.gz
