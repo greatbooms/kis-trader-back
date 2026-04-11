@@ -278,7 +278,7 @@ describe('InfiniteBuyStrategy', () => {
       expect(buys).toHaveLength(2);
       expect(buys[0].reason).toContain('Buy1');
       expect(buys[1].reason).toContain('Buy2');
-      expect(buys[0].quantity).toBe(1);
+      expect(buys[0].quantity).toBe(2);
       expect(buys[1].quantity).toBe(1);
     });
 
@@ -424,7 +424,7 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('buy with position (T >= 20)', () => {
-    it('should generate only buy2 when T >= 20', async () => {
+    it('should keep immediate buy enabled when T >= 20', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -439,8 +439,7 @@ describe('InfiniteBuyStrategy', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter((s) => s.side === 'BUY');
 
-      // Only Buy2 should exist
-      expect(buys.every((b) => b.reason?.includes('Buy2'))).toBe(true);
+      expect(buys.some((b) => b.reason?.includes('Buy1'))).toBe(true);
     });
 
     it('should lower the take-profit target when T >= 20', async () => {
@@ -466,7 +465,7 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('quota adjustments', () => {
-    it('should reduce quota when interest rate is rising', async () => {
+    it('should ignore interest-rate macro signals in the simplified mode', async () => {
       const ctx = createContext({
         marketCondition: {
           referenceIndexAboveMA200: true,
@@ -476,9 +475,9 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
-      const buySignal = signals.find((s) => s.side === 'BUY');
-      expect(buySignal).toBeDefined();
-      expect(buySignal!.quantity).toBe(1);
+      const buys = signals.filter((s) => s.side === 'BUY');
+      expect(buys).toHaveLength(1);
+      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(1);
     });
 
     it('should increase quota 1.25x when RSI < 30 (oversold)', async () => {
@@ -575,81 +574,7 @@ describe('InfiniteBuyStrategy', () => {
       }
     });
 
-    it('should reduce buy amount on negative consensus instead of blocking entry', async () => {
-      const ctx = createContext({
-        price: {
-          stockCode: '005930',
-          stockName: 'Samsung',
-          currentPrice: 50000,
-          openPrice: 49800,
-          highPrice: 50200,
-          lowPrice: 49500,
-          volume: 1000000,
-        },
-        stockIndicators: {
-          currentAboveMA200: true,
-          rsi14: 50,
-          consensusRating: 'SELL',
-        },
-      });
-
-      const { signals } = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(1);
-    });
-
-    it('should reduce buy amount when recent disclosure risk is elevated', async () => {
-      const ctx = createContext({
-        price: {
-          stockCode: '005930',
-          stockName: 'Samsung',
-          currentPrice: 50000,
-          openPrice: 49800,
-          highPrice: 50200,
-          lowPrice: 49500,
-          volume: 1000000,
-        },
-        stockIndicators: {
-          currentAboveMA200: true,
-          rsi14: 50,
-          recentMaterialDisclosureCount30d: 2,
-        },
-      });
-
-      const { signals } = await strategy.evaluateStock(ctx);
-      expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(1);
-    });
-
-    it('should increase initial buy amount for stable dividend stocks', async () => {
-      const ctx = createContext({
-        price: {
-          stockCode: '005930',
-          stockName: 'Samsung',
-          currentPrice: 35000,
-          openPrice: 34800,
-          highPrice: 35200,
-          lowPrice: 34500,
-          volume: 1000000,
-        },
-        stockIndicators: {
-          currentAboveMA200: true,
-          rsi14: 50,
-          dividendYield: 2.5,
-          consecutiveDividendYears: 7,
-        },
-      });
-
-      const { signals } = await strategy.evaluateStock(ctx);
-      const buys = signals.filter((signal) => signal.side === 'BUY');
-      expect(buys).toHaveLength(2);
-      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(2);
-      expect(buys[0].reason).toContain('배당안정성+');
-    });
-
-    it('should reduce buy amount when volatility and sell flow are both adverse', async () => {
+    it('should reduce buy amount when volatility is elevated', async () => {
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -664,16 +589,13 @@ describe('InfiniteBuyStrategy', () => {
           currentAboveMA200: true,
           rsi14: 50,
           volatility30d: 48,
-          foreignNetBuy: false,
-          institutionNetBuy: false,
-          programTradeDirection: 'SELL',
         },
       });
 
       const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter((signal) => signal.side === 'BUY');
       expect(buys).toHaveLength(2);
-      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(2);
+      expect(buys.reduce((sum, signal) => sum + signal.quantity, 0)).toBe(3);
     });
 
   });

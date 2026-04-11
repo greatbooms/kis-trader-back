@@ -1089,7 +1089,7 @@ export class ScreeningService {
         cycle: 1,
         maxCycles: 40,
         quota,
-        stopLossRate: 0.3,
+        stopLossRate: 0.5,
         maxPortfolioRate: 0.15,
       },
       price,

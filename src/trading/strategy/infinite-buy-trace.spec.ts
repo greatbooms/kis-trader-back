@@ -5,9 +5,9 @@
  * perCycleQuota = $10,000 / 40 = $250
  *
  * 개선된 Buy 로직:
- *   Buy1 = 현재가 (즉시 체결)
- *   Buy2 = 현재가 × (1 - dipRate) (현재가 아래 지정가)
- *   dipRate: T<10 → 1%, T<20 → 2%, T>=20 → 3%
+ *   Buy1 = 현재가 (즉시 체결) 70%
+ *   Buy2 = 현재가 × (1 - dipRate) (현재가 아래 지정가) 30%
+ *   dipRate: ATR% 기반 50%, 범위 0.5%~1.5%, 기본 1%
  */
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
 import {
@@ -84,13 +84,10 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(5000 / perCycleQuota).toBe(20);
     });
 
-    it('dipRate: T<10 → 1%, T<20 → 2%, T>=20 → 3%', () => {
-      // T=5 → 1%
+    it('기본 dipRate는 1%이고 ATR 기반 범위는 0.5%~1.5%다', () => {
       expect(0.01).toBe(0.01);
-      // T=15 → 2%
-      expect(0.02).toBe(0.02);
-      // T=25 → 3%
-      expect(0.03).toBe(0.03);
+      expect(0.005).toBe(0.005);
+      expect(0.015).toBe(0.015);
     });
 
     it('1차 목표가는 T가 높을수록 점진적으로 낮아진다', () => {
@@ -114,18 +111,17 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
 
-      // 첫 매수도 T=0 기준 Buy1 + Buy2 분할
-      // halfQuota = $125
-      // Buy1 = floor(125 / 50.00) = 2주
-      // Buy2 = floor(125 / 49.50) = 2주
+      // 첫 매수도 Buy1 + Buy2 분할
+      // buy1Quota = $175 → floor(175 / 50.00) = 3주
+      // buy2Quota = $75 → floor(75 / 49.50) = 1주
       expect(signals).toHaveLength(2);
       expect(signals[0].side).toBe('BUY');
-      expect(signals[0].quantity).toBe(2);
+      expect(signals[0].quantity).toBe(3);
       expect(signals[0].price).toBe(50);
       expect(signals[0].orderDivision).toBe('00');
       expect(signals[0].reason).toContain('Buy1');
       expect(signals[1].side).toBe('BUY');
-      expect(signals[1].quantity).toBe(2);
+      expect(signals[1].quantity).toBe(1);
       expect(signals[1].price).toBe(49.5);
       expect(signals[1].orderDivision).toBe('00');
       expect(signals[1].reason).toContain('Buy2');
@@ -156,14 +152,14 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
 
-      // T=1.0 (<10) → dipRate=1%
-      // adjustedQuota=$250, halfQuota=$125
+      // T=1.0 → dipRate=1%
+      // adjustedQuota=$250, buy1Quota=$175, buy2Quota=$75
       //
       // Buy1Price = round(48.50) = $48.50
-      // Buy1Qty = floor(125 / 48.50) = 2
+      // Buy1Qty = floor(175 / 48.50) = 3
       //
       // Buy2Price = round(48.50 * 0.99) = round(48.015) = $48.02
-      // Buy2Qty = floor(125 / 48.02) = 2
+      // Buy2Qty = floor(75 / 48.02) = 1
       //
       // T=1.0 → 1차 목표수익률 +15%
       // TargetPrice = 50.00 * 1.15 = $57.50
@@ -178,14 +174,14 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       const buy1 = buys.find(s => s.reason.includes('Buy1'));
       expect(buy1).toBeDefined();
       expect(buy1!.price).toBe(48.50);
-      expect(buy1!.quantity).toBe(2);
+      expect(buy1!.quantity).toBe(3);
 
       // Buy2: 현재가 -1% 지정가 (더 떨어져야 체결)
       const buy2 = buys.find(s => s.reason.includes('Buy2'));
       expect(buy2).toBeDefined();
       expect(buy2!.price).toBe(48.02);
       expect(buy2!.price!).toBeLessThan(48.50); // 반드시 현재가보다 낮음
-      expect(buy2!.quantity).toBe(2);
+      expect(buy2!.quantity).toBe(1);
 
       const takeProfit = sells[0];
       expect(takeProfit.reason).toContain('Take profit 1');
@@ -313,14 +309,14 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       const buy2_1 = signals1.find(s => s.reason.includes('Buy2'));
-      expect(buy2_1!.reason).toContain('dip=1%');
+      expect(buy2_1!.reason).toContain('dip=1.00%');
       // Buy2 = 46 * 0.99 = $45.54
       expect(buy2_1!.price).toBe(45.54);
 
       const takeProfit1 = signals1.find(s => s.reason.includes('Take profit 1'));
       expect(takeProfit1!.reason).toContain('+11.0%');
 
-      // T=10.0 (>= 10, < 20): dipRate=2%
+      // T=10.0: dipRate는 기본 1%
       const ctx2 = makeCtx({
         price: {
           stockCode: 'TQQQ', stockName: 'TQQQ',
@@ -337,9 +333,9 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const buy2_2 = signals2.find(s => s.reason.includes('Buy2'));
-      expect(buy2_2!.reason).toContain('dip=2%');
-      // Buy2 = 46 * 0.98 = $45.08
-      expect(buy2_2!.price).toBe(45.08);
+      expect(buy2_2!.reason).toContain('dip=1.00%');
+      // Buy2 = 46 * 0.99 = $45.54
+      expect(buy2_2!.price).toBe(45.54);
 
       const takeProfit2 = signals2.find(s => s.reason.includes('Take profit 1'));
       expect(takeProfit2!.reason).toContain('+10.0%');
@@ -347,10 +343,10 @@ describe('무한매수법 — 실전 데이터 추적', () => {
   });
 
   // ============================================================
-  // T=20 경계: Buy1+Buy2 → Buy2만 전환, dipRate=3%
+  // T=20 경계: 여전히 Buy1+Buy2 유지
   // ============================================================
   describe('T=20 경계: Buy 방식 전환', () => {
-    it('T=19.9 → Buy1+Buy2, T=20.0 → Buy2만', async () => {
+    it('T=19.9 → Buy1+Buy2, T=20.0 → 여전히 Buy1+Buy2', async () => {
       const perCycleQuota = 250;
 
       // T=19.9 (<20): Buy1 + Buy2
@@ -373,7 +369,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buys1.some(s => s.reason.includes('Buy1'))).toBe(true);
       expect(buys1.some(s => s.reason.includes('Buy2'))).toBe(true);
 
-      // T=20.0: Buy2만, dipRate=3%
+      // T=20.0: 여전히 Buy1 + Buy2
       const ctx2 = makeCtx({
         price: {
           stockCode: 'TQQQ', stockName: 'TQQQ',
@@ -390,20 +386,20 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const buys2 = signals2.filter(s => s.side === 'BUY');
-      expect(buys2.every(s => s.reason.includes('Buy2'))).toBe(true);
-      expect(buys2.some(s => s.reason.includes('Buy1'))).toBe(false);
+      expect(buys2.some(s => s.reason.includes('Buy1'))).toBe(true);
+      expect(buys2.some(s => s.reason.includes('Buy2'))).toBe(true);
 
-      // Buy2 = 42 * 0.97 = $40.74, dipRate=3%
-      expect(buys2[0].price).toBe(40.74);
-      expect(buys2[0].reason).toContain('dip=3%');
+      const buy2 = buys2.find(s => s.reason.includes('Buy2'));
+      expect(buy2!.price).toBe(41.58);
+      expect(buy2!.reason).toContain('dip=1.00%');
     });
   });
 
   // ============================================================
-  // T=30: dipRate=3%, 더 보수적 매수
+  // T=30: 기본 1% 할인 지정가 유지
   // ============================================================
   describe('T=30: 보수적 매수', () => {
-    it('Buy2 = 현재가 × 0.97 (3% 아래)', async () => {
+    it('Buy2 = 현재가 × 0.99 (1% 아래)', async () => {
       const perCycleQuota = 250;
       const ctx = makeCtx({
         price: {
@@ -421,8 +417,8 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
-      // Buy2 = 38 * 0.97 = $36.86
-      expect(buy2!.price).toBe(36.86);
+      // Buy2 = 38 * 0.99 = $37.62
+      expect(buy2!.price).toBe(37.62);
       expect(buy2!.price!).toBeLessThan(38.00);
 
       // T=30이면 1차 목표수익률 +7.2%, 40 * 1.072 = 42.88
@@ -483,16 +479,11 @@ describe('무한매수법 — 실전 데이터 추적', () => {
   });
 
   // ============================================================
-  // RSI 과매도 + 금리 급등 동시 적용
+  // RSI 과매도 조정
   // ============================================================
-  describe('adjustedQuota 조정: RSI 과매도 + 금리 급등', () => {
-    it('금리 급등 → ×0.8, RSI<30 → ×1.25 → 최종 ×1.0', async () => {
+  describe('adjustedQuota 조정: RSI 과매도', () => {
+    it('RSI<30 → ×1.25 가산이 적용된다', async () => {
       const ctx = makeCtx({
-        marketCondition: {
-          referenceIndexAboveMA200: true,
-          referenceIndexName: 'S&P500',
-          interestRateRising: true,
-        },
         stockIndicators: {
           currentAboveMA200: true,
           rsi14: 25,
@@ -503,13 +494,13 @@ describe('무한매수법 — 실전 데이터 추적', () => {
         },
       });
 
-      // perCycleQuota=$250 × 0.8 × 1.25 = $250
-      // Buy1 = floor(125 / 50) = 2, Buy2 = floor(125 / 49.5) = 2
+      // perCycleQuota=$250 × 1.25 = $312.5
+      // Buy1 = floor(218.75 / 50) = 4, Buy2 = floor(93.75 / 49.5) = 1
       const { signals } = await strategy.evaluateStock(ctx);
       const buys = signals.filter((signal) => signal.side === 'BUY');
       expect(buys).toHaveLength(2);
-      expect(buys[0].quantity).toBe(2);
-      expect(buys[1].quantity).toBe(2);
+      expect(buys[0].quantity).toBe(4);
+      expect(buys[1].quantity).toBe(1);
     });
   });
 

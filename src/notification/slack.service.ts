@@ -10,6 +10,7 @@ import {
   InsufficientFundsAlertContext,
   RiskAlertContext,
   StopLossApprovalRequest,
+  StopLossAlertContext,
 } from './types/notification.types';
 
 @Injectable()
@@ -19,12 +20,15 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   private connected = false;
   private reconnecting = false;
   private destroyed = false;
+  private socketHooksAttached = false;
   private readonly enabled: boolean;
   private readonly channel: string;
   private readonly botToken: string;
   private readonly appToken: string;
   private static readonly MAX_RECONNECT_ATTEMPTS = 5;
   private static readonly BASE_DELAY_MS = 3_000;
+  private static readonly CLIENT_PING_TIMEOUT_MS = 15_000;
+  private static readonly SERVER_PING_TIMEOUT_MS = 45_000;
 
   constructor(private configService: ConfigService) {
     this.enabled = this.configService.get<boolean>('slack.enabled')!;
@@ -58,13 +62,54 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       socketMode: true,
       logLevel: LogLevel.WARN,
     });
+    this.configureSocketModeClient();
 
     // WebSocket 에러가 프로세스를 죽이지 않도록
     this.app.error(async (error) => {
       this.logger.error(`Slack app error: ${error.message}`);
       this.connected = false;
-      this.scheduleReconnect();
     });
+  }
+
+  private configureSocketModeClient(): void {
+    const socketClient = (this.app as any)?.receiver?.client;
+    if (!socketClient || this.socketHooksAttached) return;
+
+    if (typeof socketClient.clientPingTimeoutMS === 'number') {
+      socketClient.clientPingTimeoutMS = SlackService.CLIENT_PING_TIMEOUT_MS;
+    }
+    if (typeof socketClient.serverPingTimeoutMS === 'number') {
+      socketClient.serverPingTimeoutMS = SlackService.SERVER_PING_TIMEOUT_MS;
+    }
+
+    socketClient.on('connecting', () => {
+      this.connected = false;
+      this.logger.debug('Slack Socket Mode connecting');
+    });
+
+    socketClient.on('connected', () => {
+      this.connected = true;
+      this.reconnecting = false;
+      this.logger.log('Slack Socket Mode connected');
+    });
+
+    socketClient.on('reconnecting', () => {
+      this.connected = false;
+      this.reconnecting = true;
+      this.logger.warn('Slack Socket Mode reconnecting');
+    });
+
+    socketClient.on('disconnected', () => {
+      this.connected = false;
+      this.logger.warn('Slack Socket Mode disconnected');
+    });
+
+    socketClient.on('error', (error: Error) => {
+      this.connected = false;
+      this.logger.error(`Slack Socket Mode client error: ${error.message}`);
+    });
+
+    this.socketHooksAttached = true;
   }
 
   private async connect(): Promise<boolean> {
@@ -78,7 +123,6 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
       await app.start();
       this.connected = true;
-      this.logger.log('Slack Socket Mode connected');
       return true;
     } catch (e) {
       this.logger.error(`Slack Socket Mode failed to connect: ${e.message}`);
@@ -250,7 +294,6 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     const msg = e.message?.toLowerCase() ?? '';
     if (msg.includes('disconnect') || msg.includes('socket') || msg.includes('websocket') || msg.includes('not connected')) {
       this.connected = false;
-      this.scheduleReconnect();
     }
   }
 
@@ -463,6 +506,52 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Failed to send stop-loss approval: ${e.message}`);
       this.handleSendError(e);
       return null;
+    }
+  }
+
+  /** 손절 알림 메시지 전송 (승인 버튼 없음) */
+  async sendStopLossAlert(req: StopLossAlertContext): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const exchange = req.exchangeCode;
+      const lossPercent = (req.lossRate * 100).toFixed(1);
+      const blocks: KnownBlock[] = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:rotating_light: *손절 알림 | ${exchange}:${req.stockCode}* (${req.stockName})`,
+          },
+        },
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: [
+              `*현재가:* ${this.fmtPrice(req.currentPrice, req.market)}`,
+              `*평균단가:* ${this.fmtPrice(req.avgPrice, req.market)}`,
+              `*손실률:* -${lossPercent}%`,
+              `*보유 수량:* ${req.quantity}주`,
+              `*전략:* ${req.strategyName || 'N/A'}`,
+            ].join('\n'),
+          },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '사이트 포트폴리오 페이지에서 현재 상태를 확인하고 수동 매도할 수 있습니다.' }],
+        },
+      ];
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks,
+        text: `손절 알림 | ${exchange}:${req.stockCode} | -${lossPercent}%`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send stop-loss alert: ${e.message}`);
+      this.handleSendError(e);
     }
   }
 

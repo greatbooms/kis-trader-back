@@ -397,125 +397,60 @@ export class TradingService {
       orderType = OrderType.MARKET;
     }
 
-    // 손절 시그널 → 승인 요청 플로우
-    if (this.isStopLossSignal(signal) && this.slackService?.isEnabled()) {
-      const record = await this.prisma.tradeRecord.create({
-        data: {
-          market: signal.market as Market,
-          exchangeCode: signal.exchangeCode,
-          stockCode: signal.stockCode,
-          stockName: signal.stockCode,
-          side: signal.side as Side,
-          orderType,
-          quantity: signal.quantity,
-          price: new Prisma.Decimal(signal.price || 0),
-          status: OrderStatus.AWAITING_APPROVAL,
-          strategyName: strategyName || 'unknown',
-          reason: signal.reason,
-        },
-      });
-
+    // 손절 시그널 → Slack 알림만 전송하고, 실제 청산은 관리자가 수동 매도
+    if (this.isStopLossSignal(signal)) {
       const avgPrice = ctx?.position?.avgPrice || Number(signal.price);
       const currentPrice = ctx?.price?.currentPrice || Number(signal.price);
       const lossRate = avgPrice > 0 ? (avgPrice - currentPrice) / avgPrice : 0;
+      const watchStockId = ctx?.watchStock?.id;
+      let alreadyAlerted = false;
+      if (watchStockId) {
+        const todayStart = new Date(this.getTodayDate() + 'T00:00:00+09:00');
+        const todayEnd = new Date(this.getTodayDate() + 'T23:59:59+09:00');
+        alreadyAlerted = !!(await this.prisma.watchStockExecutionLog.findFirst({
+          where: {
+            watchStockId,
+            eventType: WatchStockExecutionEventType.SKIPPED,
+            message: { contains: '손절 알림 전송' },
+            createdAt: { gte: todayStart, lte: todayEnd },
+          },
+        }));
+      }
+
+      const slackService = this.slackService;
+      const shouldSendSlackAlert = !alreadyAlerted && slackService?.isEnabled();
+      if (shouldSendSlackAlert) {
+        await slackService!.sendStopLossAlert({
+          stockCode: signal.stockCode,
+          stockName: ctx?.watchStock?.stockName || signal.stockCode,
+          exchangeCode: signal.exchangeCode,
+          market: signal.market,
+          strategyName,
+          quantity: signal.quantity,
+          currentPrice,
+          avgPrice,
+          lossRate,
+        });
+      }
 
       await this.logWatchStockExecution(
         ctx,
-        WatchStockExecutionEventType.ORDER_AWAITING_APPROVAL,
-        `손절 승인 대기: ${signal.side} ${signal.quantity}주`,
+        WatchStockExecutionEventType.SKIPPED,
+        `손절 알림 전송: 포트폴리오에서 수동 매도 필요`,
         {
           side: signal.side,
           quantity: signal.quantity,
           price: signal.price,
           reason: signal.reason,
           lossRate,
+          currentPrice,
+          avgPrice,
+          slackAlertSent: shouldSendSlackAlert,
         },
-        record.id,
       );
 
-      const approval = await this.prisma.stopLossApproval.create({
-        data: {
-          tradeRecordId: record.id,
-          market: signal.market as Market,
-          exchangeCode: signal.exchangeCode,
-          stockCode: signal.stockCode,
-          stockName: ctx?.watchStock?.stockName || signal.stockCode,
-          strategyName: strategyName,
-          signal: signal as any,
-          currentPrice: new Prisma.Decimal(currentPrice),
-          avgPrice: new Prisma.Decimal(avgPrice),
-          quantity: signal.quantity,
-          lossRate: new Prisma.Decimal(lossRate),
-          timeoutMinutes: 10,
-        },
-      });
-
-      const msgResult = await this.slackService.sendStopLossApproval({
-        approvalId: approval.id,
-        tradeRecordId: record.id,
-        stockCode: signal.stockCode,
-        stockName: ctx?.watchStock?.stockName || signal.stockCode,
-        exchangeCode: signal.exchangeCode,
-        market: signal.market,
-        strategyName,
-        quantity: signal.quantity,
-        currentPrice,
-        avgPrice,
-        lossRate,
-        timeoutMinutes: 10,
-      });
-
-      if (msgResult) {
-        await this.prisma.stopLossApproval.update({
-          where: { id: approval.id },
-          data: { slackMessageTs: msgResult.ts, slackChannel: msgResult.channel },
-        });
-      }
-
-      this.logger.log(`Stop-loss approval requested for ${signal.stockCode} (${approval.id})`);
-
-      // 타임아웃 스케줄: 5분 후 미응답이면 자동 스킵
-      setTimeout(async () => {
-        try {
-          const current = await this.prisma.stopLossApproval.findUnique({ where: { id: approval.id } });
-          if (current && current.status === ApprovalStatus.PENDING) {
-            await this.prisma.stopLossApproval.update({
-              where: { id: approval.id },
-              data: { status: ApprovalStatus.EXPIRED, respondedAt: new Date() },
-            });
-            await this.prisma.tradeRecord.update({
-              where: { id: record.id },
-              data: { status: OrderStatus.CANCELLED, reason: 'Stop-loss approval timed out (auto-skipped)' },
-            });
-            await this.prisma.watchStockExecutionLog.create({
-              data: {
-                watchStockId: ctx!.watchStock.id,
-                tradeRecordId: record.id,
-                market: ctx!.watchStock.market as Market,
-                exchangeCode: ctx!.watchStock.exchangeCode,
-                stockCode: ctx!.watchStock.stockCode,
-                stockName: ctx!.watchStock.stockName,
-                strategyName: strategyName || 'unknown',
-                eventType: WatchStockExecutionEventType.ORDER_CANCELLED,
-                message: '손절 승인 시간 초과로 주문 취소',
-                details: { reason: 'approval timeout' },
-              },
-            });
-
-            if (current.slackMessageTs && current.slackChannel) {
-              await this.slackService!.updateStopLossApprovalMessage(
-                current.slackChannel, current.slackMessageTs, signal.stockCode, 'EXPIRED',
-              );
-            }
-
-            this.logger.log(`Stop-loss approval expired for ${signal.stockCode} (${approval.id})`);
-          }
-        } catch (e) {
-          this.logger.error(`Stop-loss timeout handler error: ${e.message}`);
-        }
-      }, 10 * 60 * 1000);
-
-      return; // 즉시 실행하지 않음
+      this.logger.log(`Stop-loss alert registered for ${signal.stockCode}; awaiting manual sell`);
+      return;
     }
 
     const record = await this.prisma.tradeRecord.create({

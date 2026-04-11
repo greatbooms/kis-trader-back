@@ -49,6 +49,7 @@ describe('TradingService', () => {
     isEnabled: jest.fn().mockReturnValue(true),
     sendFilterLog: jest.fn(),
     sendInsufficientFundsAlert: jest.fn(),
+    sendStopLossAlert: jest.fn(),
   };
 
   const mockConfigService = {

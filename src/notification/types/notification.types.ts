@@ -95,3 +95,15 @@ export interface StopLossApprovalRequest {
   lossRate: number;
   timeoutMinutes: number;
 }
+
+export interface StopLossAlertContext {
+  stockCode: string;
+  stockName: string;
+  exchangeCode: string;
+  market: string;
+  strategyName?: string;
+  quantity: number;
+  currentPrice: number;
+  avgPrice: number;
+  lossRate: number;
+}

@@ -149,7 +149,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       expect(stopLoss!.side).toBe('SELL');
     });
 
-    it('should respect T boundary: T=0 first buy, T=20 switch to Buy2 only', async () => {
+    it('should keep immediate buying enabled even when T is high', async () => {
       // T=0: should do initial buy
       const ctx0 = createBaseContext();
       ctx0.price.currentPrice = 70000;
@@ -174,7 +174,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       // T < 20 → Buy1 + Buy2
       expect(buys19.some((s) => s.reason.includes('Buy1'))).toBe(true);
 
-      // T=25 (>= 20): should have only Buy2
+      // T=25 (>= 20): 여전히 Buy1 + Buy2
       const ctx25 = createBaseContext({
         position: {
           stockCode: '005930',
@@ -187,7 +187,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       ctx25.price.currentPrice = 66000;
       const { signals: signals25 } = await strategy.evaluateStock(ctx25);
       const buys25 = signals25.filter((s) => s.side === 'BUY');
-      expect(buys25.every((s) => s.reason.includes('Buy2'))).toBe(true);
+      expect(buys25.some((s) => s.reason.includes('Buy1'))).toBe(true);
     });
   });
 

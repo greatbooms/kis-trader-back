@@ -529,11 +529,11 @@ const STRATEGY_META: Record<string, {
   stopLossDesc: string
 }> = {
   'infinite-buy': {
-    defaultStopLoss: 30,
+    defaultStopLoss: 50,
     hasMaxCycles: true,
     hasSellRates: false,
     quotaDesc: '이 종목에 배정할 총 투자 금액입니다. 최대 사이클에 걸쳐 분할 매수합니다.',
-    stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 전량 손절 매도합니다.',
+    stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 Slack 알림을 보내고, 포트폴리오에서 수동 매도합니다.',
   },
   'grid-mean-reversion': {
     defaultStopLoss: 8,

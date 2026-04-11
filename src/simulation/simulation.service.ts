@@ -54,7 +54,9 @@ export class SimulationService {
         strategyName: input.strategyName,
         currentCash: new Prisma.Decimal(input.quota),
         quota: new Prisma.Decimal(input.quota),
-        stopLossRate: input.stopLossRate ? new Prisma.Decimal(input.stopLossRate) : new Prisma.Decimal(0.3),
+        stopLossRate: input.stopLossRate
+          ? new Prisma.Decimal(input.stopLossRate)
+          : new Prisma.Decimal(input.strategyName === 'infinite-buy' ? 0.5 : 0.3),
         maxPortfolioRate: input.maxPortfolioRate ? new Prisma.Decimal(input.maxPortfolioRate) : new Prisma.Decimal(0.2),
         strategyParams: input.strategyParams ? JSON.parse(input.strategyParams) : undefined,
       },
