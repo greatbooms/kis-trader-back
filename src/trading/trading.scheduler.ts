@@ -24,6 +24,8 @@ import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';
 import { OrderSyncService } from './order-sync.service';
 
+const DAILY_SUMMARY_SENT_KEY_PREFIX = 'daily-summary-sent';
+
 @Injectable()
 export class TradingScheduler implements OnModuleInit {
   private readonly logger = new Logger(TradingScheduler.name);
@@ -285,7 +287,7 @@ export class TradingScheduler implements OnModuleInit {
     const riskState = await this.riskManagement.evaluateRisk(market);
 
     // 리스크 경고 Slack 알림 (같은 시장은 하루 1회만)
-    const alertDate = new Date().toISOString().slice(0, 10);
+    const alertDate = this.getKSTDate();
     if (riskState.reasons.length > 0 && this.slackService?.isEnabled() && this.lastRiskAlertDate[market] !== alertDate) {
       this.lastRiskAlertDate[market] = alertDate;
       const latestSnapshot = await this.prisma.riskSnapshot.findFirst({
@@ -348,7 +350,7 @@ export class TradingScheduler implements OnModuleInit {
       byStrategy.get(name)!.push(ws);
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getKSTDate();
     const investorTradeCache = new Map<string, Promise<any[] | undefined>>();
     const dividendScheduleCache = new Map<string, Promise<any[] | undefined>>();
     const investOpinionCache = new Map<string, Promise<any[] | undefined>>();
@@ -577,12 +579,28 @@ export class TradingScheduler implements OnModuleInit {
 
     // 8. Daily summary (once-daily 전략 실행 시각에만)
     if (hasOnceDailyNow && this.slackService?.isEnabled() && this.slackCommandsService) {
-      try {
-        const summary = await this.slackCommandsService.buildDailySummary();
-        summary.marketCondition = marketCondition;
-        await this.slackService.sendDailySummary(summary);
-      } catch (e) {
-        this.logger.warn(`Failed to send daily summary to Slack: ${e.message}`);
+      const summaryDate = this.getKSTDate();
+      const claimed = await this.claimDailySummary(summaryDate, market, exchangeCode);
+
+      if (claimed) {
+        try {
+          const summary = await this.slackCommandsService.buildDailySummary();
+          if ((summary.marketSummaries?.length ?? 0) === 0) {
+            this.logger.debug(`Skipping daily summary for ${summaryDate} because there are no held positions`);
+            return;
+          }
+
+          const sent = await this.slackService.sendDailySummary(summary);
+          if (!sent) {
+            await this.releaseDailySummaryClaim(summaryDate);
+            this.logger.warn(`Daily summary was not sent for ${summaryDate}; claim released for retry`);
+          }
+        } catch (e) {
+          await this.releaseDailySummaryClaim(summaryDate);
+          this.logger.warn(`Failed to send daily summary to Slack: ${e.message}`);
+        }
+      } else {
+        this.logger.debug(`Daily summary already sent for ${summaryDate}, skipping`);
       }
     }
   }
@@ -679,6 +697,56 @@ export class TradingScheduler implements OnModuleInit {
     const now = new Date();
     const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
     return kst.getUTCHours();
+  }
+
+  private getKSTDate(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  private getDailySummarySentKey(date: string): string {
+    return `${DAILY_SUMMARY_SENT_KEY_PREFIX}:${date}`;
+  }
+
+  private async claimDailySummary(
+    date: string,
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode: string,
+  ): Promise<boolean> {
+    try {
+      await this.prisma.appSetting.create({
+        data: {
+          key: this.getDailySummarySentKey(date),
+          value: {
+            date,
+            market,
+            exchangeCode,
+            claimedAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
+      return true;
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return false;
+      }
+
+      this.logger.warn(`Failed to claim daily summary for ${date}: ${e.message}`);
+      return true;
+    }
+  }
+
+  private async releaseDailySummaryClaim(date: string): Promise<void> {
+    try {
+      await this.prisma.appSetting.delete({
+        where: { key: this.getDailySummarySentKey(date) },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        return;
+      }
+
+      this.logger.warn(`Failed to release daily summary claim for ${date}: ${e.message}`);
+    }
   }
 
   // ========== 시장 상태 판별 ==========

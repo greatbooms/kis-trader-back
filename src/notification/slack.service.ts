@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { App, LogLevel } from '@slack/bolt';
 import { KnownBlock } from '@slack/types';
+import { EXCHANGE_CURRENCY } from '../kis/types/kis-config.types';
 import {
   PositionInfo,
   TradeAlertContext,
@@ -212,19 +213,21 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendDailySummary(ctx: DailySummaryContext): Promise<void> {
-    if (!await this.ensureConnected()) return;
+  async sendDailySummary(ctx: DailySummaryContext): Promise<boolean> {
+    if (!await this.ensureConnected()) return false;
 
     try {
       const blocks = this.formatDailySummary(ctx);
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `일일 매매 요약 | ${new Date().toISOString().slice(0, 10)}`,
+        text: `일일 매매 요약 | ${this.getKstDateString()}`,
       });
+      return true;
     } catch (e) {
       this.logger.error(`Failed to send daily summary: ${e.message}`);
       this.handleSendError(e);
+      return false;
     }
   }
 
@@ -701,7 +704,21 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   }
 
   formatDailySummary(ctx: DailySummaryContext): KnownBlock[] {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getKstDateString();
+    const marketSummaries = ctx.marketSummaries && ctx.marketSummaries.length > 0
+      ? ctx.marketSummaries
+      : [
+        {
+          exchangeCode: ctx.positions[0]?.exchangeCode ?? 'KRX',
+          market: 'OVERSEAS',
+          label: '통합',
+          positions: ctx.positions,
+          totalInvested: ctx.totalInvested,
+          totalEvaluation: ctx.totalEvaluation,
+          totalPnl: ctx.totalPnl,
+          totalPnlRate: ctx.totalPnlRate,
+        },
+      ];
 
     const blocks: KnownBlock[] = [
       {
@@ -728,44 +745,57 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
     // Portfolio summary
     if (ctx.positions.length > 0) {
-      const posLines = ctx.positions.map((p) => {
-        const market = p.market === 'OVERSEAS' ? 'OVERSEAS' : 'DOMESTIC';
-        const T = p.totalInvested > 0 ? (p.totalInvested / 1).toFixed(1) : '0.0';
-        return `${p.stockCode}  ${p.quantity}주 | 평단 ${this.fmtPrice(p.avgPrice, market)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(1)}%`;
-      });
+      for (const summary of marketSummaries) {
+        const posLines = summary.positions.map((p) => {
+          const market = p.market === 'OVERSEAS' ? 'OVERSEAS' : 'DOMESTIC';
+          const codeLabel = p.exchangeCode && p.exchangeCode !== 'KRX'
+            ? `${p.exchangeCode}:${p.stockCode}`
+            : p.stockCode;
+          return `${codeLabel}  ${p.quantity}주 | 평단 ${this.fmtPrice(p.avgPrice, market, p.exchangeCode)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(1)}%`;
+        });
 
-      blocks.push(
-        { type: 'divider' },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `:bar_chart: *포트폴리오 현황*\n\`\`\`\n${posLines.join('\n')}\n\`\`\``,
+        blocks.push(
+          { type: 'divider' },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:bar_chart: *포트폴리오 현황 | ${summary.label}*\n\`\`\`\n${posLines.join('\n')}\n\`\`\``,
+            },
           },
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: [
-              `*총 투자금:* ${this.fmtMoney(ctx.totalInvested, 'OVERSEAS')}`,
-              `*총 평가금:* ${this.fmtMoney(ctx.totalEvaluation, 'OVERSEAS')}`,
-              `*총 손익:* ${ctx.totalPnl >= 0 ? '+' : ''}${this.fmtMoney(ctx.totalPnl, 'OVERSEAS')} (${ctx.totalPnlRate >= 0 ? '+' : ''}${ctx.totalPnlRate.toFixed(2)}%)`,
-            ].join('\n'),
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: [
+                `*총 투자금:* ${this.fmtMoney(summary.totalInvested, summary.market, summary.exchangeCode)}`,
+                `*총 평가금:* ${this.fmtMoney(summary.totalEvaluation, summary.market, summary.exchangeCode)}`,
+                `*총 손익:* ${summary.totalPnl >= 0 ? '+' : ''}${this.fmtMoney(summary.totalPnl, summary.market, summary.exchangeCode)} (${summary.totalPnlRate >= 0 ? '+' : ''}${summary.totalPnlRate.toFixed(2)}%)`,
+              ].join('\n'),
+            },
           },
-        },
-      );
+        );
+      }
     }
 
     // Market condition
-    if (ctx.marketCondition) {
-      const mc = ctx.marketCondition;
+    const conditionSummaries = ctx.marketConditions && ctx.marketConditions.length > 0
+      ? ctx.marketConditions.map((item) => ({
+        label: item.label,
+        condition: item.condition,
+      }))
+      : (ctx.marketCondition
+        ? [{ label: '시장', condition: ctx.marketCondition }]
+        : []);
+
+    for (const item of conditionSummaries) {
+      const mc = item.condition;
       blocks.push({
         type: 'section',
         text: {
           type: 'mrkdwn',
           text: [
-            `:globe_with_meridians: *시장 상황*`,
+            `:globe_with_meridians: *시장 상황 | ${item.label}*`,
             `*${mc.referenceIndexName}:* MA200 ${mc.referenceIndexAboveMA200 ? '위 :white_check_mark:' : '아래 :x:'}`,
             mc.interestRate !== undefined
               ? `*금리:* ${mc.interestRate.toFixed(2)}% ${mc.interestRateRising ? '(상승 :warning:)' : '(안정)'}`
@@ -778,6 +808,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
 
     return blocks;
+  }
+
+  private getKstDateString(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   formatFilterLog(ctx: FilterLogContext): KnownBlock[] {
@@ -832,8 +866,8 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           type: 'mrkdwn',
           text: [
             `*${exchange}:${p.stockCode}* (${p.stockName})`,
-            `보유: ${p.quantity}주 | 평단: ${this.fmtPrice(p.avgPrice, p.market)} | 현재가: ${this.fmtPrice(p.currentPrice, p.market)}`,
-            `투자금: ${this.fmtMoney(p.totalInvested, p.market)} | 평가: ${this.fmtMoney(evalAmount, p.market)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(2)}%`,
+            `보유: ${p.quantity}주 | 평단: ${this.fmtPrice(p.avgPrice, p.market, p.exchangeCode)} | 현재가: ${this.fmtPrice(p.currentPrice, p.market, p.exchangeCode)}`,
+            `투자금: ${this.fmtMoney(p.totalInvested, p.market, p.exchangeCode)} | 평가: ${this.fmtMoney(evalAmount, p.market, p.exchangeCode)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(2)}%`,
           ].join('\n'),
         },
       });
@@ -858,11 +892,11 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       '',
       `:bar_chart: *보유 현황*`,
       `*보유:* ${position.quantity}주`,
-      `*평단:* ${this.fmtPrice(position.avgPrice, position.market)}`,
-      `*현재가:* ${this.fmtPrice(position.currentPrice, position.market)}`,
-      `*총 투자금:* ${this.fmtMoney(position.totalInvested, position.market)}`,
-      `*평가금액:* ${this.fmtMoney(evalAmount, position.market)}`,
-      `*수익률:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, position.market)})`,
+      `*평단:* ${this.fmtPrice(position.avgPrice, position.market, position.exchangeCode)}`,
+      `*현재가:* ${this.fmtPrice(position.currentPrice, position.market, position.exchangeCode)}`,
+      `*총 투자금:* ${this.fmtMoney(position.totalInvested, position.market, position.exchangeCode)}`,
+      `*평가금액:* ${this.fmtMoney(evalAmount, position.market, position.exchangeCode)}`,
+      `*수익률:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, position.market, position.exchangeCode)})`,
     ];
 
     if (watchStock) {
@@ -870,7 +904,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         '',
         `:bulb: *전략 정보*`,
         `*T값:* ${T.toFixed(1)} / ${watchStock.maxCycles}`,
-        `*Quota:* ${watchStock.quota ? this.fmtMoney(watchStock.quota, position.market) : 'N/A'}`,
+        `*Quota:* ${watchStock.quota ? this.fmtMoney(watchStock.quota, position.market, position.exchangeCode) : 'N/A'}`,
         `*Cycle:* ${watchStock.cycle}`,
         `*손절률:* ${(watchStock.stopLossRate * 100).toFixed(0)}%`,
       );
@@ -892,10 +926,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         lines.push(
           '',
           `:dart: *다음 주문 예상가*`,
-          `*기준가(pivot):* ${this.fmtPrice(roundPrice(pivotPrice), position.market)}`,
-          `*Sell1 가격:* ${this.fmtPrice(roundPrice(pivotPrice), position.market)}`,
-          `*Sell2 목표:* ${this.fmtPrice(roundPrice(position.avgPrice * targetRate), position.market)} (+${((targetRate - 1) * 100).toFixed(0)}%)`,
-          `*손절가:* ${this.fmtPrice(roundPrice(position.avgPrice * (1 - watchStock.stopLossRate)), position.market)}`,
+          `*기준가(pivot):* ${this.fmtPrice(roundPrice(pivotPrice), position.market, position.exchangeCode)}`,
+          `*Sell1 가격:* ${this.fmtPrice(roundPrice(pivotPrice), position.market, position.exchangeCode)}`,
+          `*Sell2 목표:* ${this.fmtPrice(roundPrice(position.avgPrice * targetRate), position.market, position.exchangeCode)} (+${((targetRate - 1) * 100).toFixed(0)}%)`,
+          `*손절가:* ${this.fmtPrice(roundPrice(position.avgPrice * (1 - watchStock.stopLossRate)), position.market, position.exchangeCode)}`,
         );
       }
     }
@@ -983,18 +1017,32 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
   // --- Helpers ---
 
-  private fmtPrice(price: number, market: string): string {
-    if (market === 'OVERSEAS') {
-      return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
-    return `${price.toLocaleString('ko-KR')}원`;
+  private fmtPrice(price: number, market: string, exchangeCode?: string): string {
+    return this.formatCurrency(price, market, exchangeCode);
   }
 
-  private fmtMoney(amount: number, market: string): string {
-    if (market === 'OVERSEAS') {
-      return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  private fmtMoney(amount: number, market: string, exchangeCode?: string): string {
+    return this.formatCurrency(amount, market, exchangeCode);
+  }
+
+  private formatCurrency(amount: number, market: string, exchangeCode?: string): string {
+    const currency = this.resolveCurrency(market, exchangeCode);
+    if (currency === 'KRW') {
+      return `${amount.toLocaleString('ko-KR')}원`;
     }
-    return `${amount.toLocaleString('ko-KR')}원`;
+
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: currency === 'JPY' || currency === 'VND' ? 0 : 2,
+      maximumFractionDigits: currency === 'JPY' || currency === 'VND' ? 0 : 2,
+    }).format(amount);
+  }
+
+  private resolveCurrency(market: string, exchangeCode?: string): string {
+    if (market !== 'OVERSEAS') return 'KRW';
+    if (exchangeCode) return EXCHANGE_CURRENCY[exchangeCode] ?? 'USD';
+    return 'USD';
   }
 
   private orderTypeLabel(division?: string): string {

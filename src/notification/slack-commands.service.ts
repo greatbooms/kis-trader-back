@@ -2,9 +2,31 @@ import { Injectable, Inject, Logger, OnModuleInit, forwardRef } from '@nestjs/co
 import { PrismaService } from '../prisma.service';
 import { TradeRecordService } from '../trade-record/trade-record.service';
 import { TradingService } from '../trading/trading.service';
+import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { SlackService } from './slack.service';
-import { PositionInfo, DailySummaryContext } from './types/notification.types';
+import {
+  PositionInfo,
+  DailySummaryContext,
+  DailySummaryMarketConditionSummary,
+  DailySummaryMarketSummary,
+} from './types/notification.types';
 import { Market, ApprovalStatus, OrderStatus } from '@prisma/client';
+
+const SUMMARY_COUNTRY_GROUPS = [
+  { code: 'KR', label: '국내', market: Market.DOMESTIC, exchanges: ['KRX'], regimeExchangeCode: 'KRX' },
+  { code: 'US', label: '미국', market: Market.OVERSEAS, exchanges: ['NASD', 'NYSE', 'AMEX'], regimeExchangeCode: 'NASD' },
+  { code: 'HK', label: '홍콩', market: Market.OVERSEAS, exchanges: ['SEHK'], regimeExchangeCode: 'SEHK' },
+  { code: 'CN', label: '중국', market: Market.OVERSEAS, exchanges: ['SHAA', 'SZAA'], regimeExchangeCode: 'SHAA' },
+  { code: 'JP', label: '일본', market: Market.OVERSEAS, exchanges: ['TKSE'], regimeExchangeCode: 'TKSE' },
+  { code: 'VN', label: '베트남', market: Market.OVERSEAS, exchanges: ['HASE', 'VNSE'], regimeExchangeCode: 'HASE' },
+] as const;
+
+const EXCHANGE_TO_COUNTRY = SUMMARY_COUNTRY_GROUPS.reduce<Record<string, (typeof SUMMARY_COUNTRY_GROUPS)[number]>>((acc, group) => {
+  for (const exchange of group.exchanges) {
+    acc[exchange] = group;
+  }
+  return acc;
+}, {});
 
 @Injectable()
 export class SlackCommandsService implements OnModuleInit {
@@ -14,6 +36,7 @@ export class SlackCommandsService implements OnModuleInit {
     private prisma: PrismaService,
     private tradeRecordService: TradeRecordService,
     @Inject(forwardRef(() => TradingService)) private tradingService: TradingService,
+    private marketAnalysisService: MarketAnalysisService,
     private slackService: SlackService,
   ) {}
 
@@ -263,14 +286,22 @@ export class SlackCommandsService implements OnModuleInit {
 
   async buildDailySummary(): Promise<DailySummaryContext> {
     const positions = await this.getPositions();
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const kstDate = this.getKstDateString();
+    const todayStart = new Date(`${kstDate}T00:00:00+09:00`);
+    const todayEnd = new Date(`${kstDate}T23:59:59.999+09:00`);
 
     const todayTrades = await this.prisma.tradeRecord.findMany({
       where: {
-        createdAt: { gte: today },
+        createdAt: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
         status: 'FILLED',
+      },
+      select: {
+        side: true,
+        market: true,
+        exchangeCode: true,
       },
     });
 
@@ -281,6 +312,8 @@ export class SlackCommandsService implements OnModuleInit {
     const totalEvaluation = positions.reduce((sum, p) => sum + p.quantity * p.currentPrice, 0);
     const totalPnl = totalEvaluation - totalInvested;
     const totalPnlRate = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
+    const marketSummaries = this.buildMarketSummaries(positions);
+    const marketConditions = await this.buildMarketConditions(positions);
 
     return {
       positions,
@@ -292,6 +325,74 @@ export class SlackCommandsService implements OnModuleInit {
       totalEvaluation,
       totalPnl,
       totalPnlRate,
+      marketSummaries,
+      marketConditions,
+      marketCondition: marketConditions.length === 1 ? marketConditions[0].condition : undefined,
     };
+  }
+
+  private buildMarketSummaries(positions: PositionInfo[]): DailySummaryMarketSummary[] {
+    const groups = new Map<string, { label: string; market: Market; exchangeCode: string; positions: PositionInfo[] }>();
+
+    for (const position of positions) {
+      const groupMeta = EXCHANGE_TO_COUNTRY[position.exchangeCode]
+        ?? (position.market === 'DOMESTIC'
+          ? SUMMARY_COUNTRY_GROUPS[0]
+          : undefined);
+      if (!groupMeta) continue;
+
+      if (!groups.has(groupMeta.code)) {
+        groups.set(groupMeta.code, {
+          label: groupMeta.label,
+          market: groupMeta.market,
+          exchangeCode: groupMeta.regimeExchangeCode,
+          positions: [],
+        });
+      }
+
+      groups.get(groupMeta.code)!.positions.push(position);
+    }
+
+    return SUMMARY_COUNTRY_GROUPS
+      .filter((group) => groups.has(group.code))
+      .map((group) => {
+        const summary = groups.get(group.code)!;
+        const marketPositions = summary.positions;
+        const totalInvested = marketPositions.reduce((sum, p) => sum + p.totalInvested, 0);
+        const totalEvaluation = marketPositions.reduce((sum, p) => sum + p.quantity * p.currentPrice, 0);
+        const totalPnl = totalEvaluation - totalInvested;
+        const totalPnlRate = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
+
+        return {
+          market: summary.market,
+          exchangeCode: summary.exchangeCode,
+          label: summary.label,
+          positions: marketPositions,
+          totalInvested,
+          totalEvaluation,
+          totalPnl,
+          totalPnlRate,
+        };
+      });
+  }
+
+  private async buildMarketConditions(
+    positions: PositionInfo[],
+  ): Promise<DailySummaryMarketConditionSummary[]> {
+    const summaries = this.buildMarketSummaries(positions);
+    const conditions = await Promise.all(
+      summaries.map(async (summary) => ({
+        market: summary.market,
+        exchangeCode: summary.exchangeCode,
+        label: summary.label,
+        condition: await this.marketAnalysisService.getMarketCondition(summary.exchangeCode),
+      })),
+    );
+
+    return conditions;
+  }
+
+  private getKstDateString(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 }

@@ -42,6 +42,26 @@ export interface DailySummaryContext {
   totalPnl: number;
   totalPnlRate: number;
   marketCondition?: MarketCondition;
+  marketSummaries?: DailySummaryMarketSummary[];
+  marketConditions?: DailySummaryMarketConditionSummary[];
+}
+
+export interface DailySummaryMarketSummary {
+  market: string;
+  exchangeCode: string;
+  label: string;
+  positions: PositionInfo[];
+  totalInvested: number;
+  totalEvaluation: number;
+  totalPnl: number;
+  totalPnlRate: number;
+}
+
+export interface DailySummaryMarketConditionSummary {
+  market: string;
+  exchangeCode: string;
+  label: string;
+  condition: MarketCondition;
 }
 
 export interface FilterLogContext {
