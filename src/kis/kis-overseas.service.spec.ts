@@ -176,4 +176,82 @@ describe('KisOverseasService', () => {
       },
     ]);
   });
+
+  it('should fallback to standard balance when present balance items exist but parsed holdings are empty', async () => {
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.get
+      .mockResolvedValueOnce({
+        output1: [
+          {
+            ovrs_pdno: 'TQQQ',
+            ovrs_item_name: 'PROSHARES QQQ 3X',
+            ovrs_cblc_qty: '0',
+            pchs_avg_pric: '49.33',
+            now_pric2: '49.50',
+            ovrs_stck_evlu_pfls_amt: '0',
+            evlu_pfls_rt: '0',
+            frcr_evlu_pfls_amt: '0',
+            ovrs_excg_cd: 'NASD',
+          },
+        ],
+        output2: [
+          {
+            crcy_cd: 'USD',
+            crcy_cd_name: '미국달러',
+            frcr_dncl_amt_2: '900.00',
+            frcr_drwg_psbl_amt_1: '900.00',
+          },
+        ],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      })
+      .mockResolvedValueOnce({
+        output1: [
+          {
+            pdno: 'TQQQ',
+            prdt_name: 'PROSHARES QQQ 3X',
+            ccld_qty_smtl1: '1.00000000',
+            evlu_pfls_amt2: '0',
+            evlu_pfls_rt1: '0',
+            ovrs_now_pric1: '49.50000000',
+            avg_unpr3: '49.33000000',
+            bass_exrt: '1.00000000',
+            unit_amt: '1',
+            ovrs_excg_cd: 'NASD',
+          },
+        ],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      });
+
+    const snapshot = await service.getAccountSnapshot();
+
+    expect(snapshot.balance).toEqual([
+      expect.objectContaining({
+        stockCode: 'TQQQ',
+        quantity: 1,
+        exchangeCode: 'NASD',
+      }),
+    ]);
+    expect(snapshot.cashBalances).toEqual([
+      expect.objectContaining({
+        currencyCode: 'USD',
+        amount: 900,
+      }),
+    ]);
+    expect(mockKisBase.get).toHaveBeenNthCalledWith(
+      2,
+      '/uapi/overseas-stock/v1/trading/inquire-balance',
+      'TTTS3012R',
+      expect.objectContaining({
+        OVRS_EXCG_CD: 'NASD',
+        TR_CRCY_CD: 'USD',
+      }),
+      {},
+    );
+  });
 });

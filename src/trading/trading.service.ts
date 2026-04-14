@@ -684,6 +684,7 @@ export class TradingService {
           }
 
           await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
+          await this.notifyTradeFill(record.id, nextStatus, filledNowQty);
         }
         continue;
       }
@@ -1058,6 +1059,69 @@ export class TradingService {
           cancelledRemainder: isCancelledRemainder,
         },
       },
+    });
+  }
+
+  private async notifyTradeFill(
+    tradeRecordId: string,
+    status: OrderStatus,
+    filledNowQty: number,
+  ): Promise<void> {
+    if (!this.slackService?.isEnabled()) return;
+    if (filledNowQty <= 0) return;
+    if (status !== OrderStatus.FILLED && status !== OrderStatus.PARTIAL) return;
+
+    const record = await this.prisma.tradeRecord.findUnique({
+      where: { id: tradeRecordId },
+    });
+    if (!record) return;
+
+    const signal = await this.getSubmittedSignal(tradeRecordId);
+    if (!signal) return;
+
+    const position = await this.prisma.position.findFirst({
+      where: {
+        market: record.market,
+        exchangeCode: record.exchangeCode,
+        stockCode: record.stockCode,
+      },
+    });
+
+    const executedPrice = Number(record.executedPrice ?? signal.price ?? record.price);
+    const totalExecutedQty = record.executedQty || filledNowQty;
+    const remainingQty = Math.max(0, record.quantity - totalExecutedQty);
+
+    await this.slackService.sendTradeAlert({
+      signal: {
+        ...signal,
+        quantity: filledNowQty,
+        price: executedPrice,
+      },
+      result: {
+        success: true,
+        orderNo: record.orderNo ?? undefined,
+        message: status === OrderStatus.PARTIAL ? '부분 체결' : '체결 완료',
+      },
+      execution: {
+        quantity: filledNowQty,
+        price: executedPrice,
+        remainingQuantity: remainingQty,
+        status: status as 'FILLED' | 'PARTIAL',
+      },
+      position: position
+        ? {
+            stockCode: position.stockCode,
+            stockName: position.stockName,
+            exchangeCode: position.exchangeCode,
+            market: position.market,
+            quantity: position.quantity,
+            avgPrice: Number(position.avgPrice),
+            currentPrice: Number(position.currentPrice),
+            profitLoss: Number(position.profitLoss),
+            profitRate: Number(position.profitRate),
+            totalInvested: Number(position.totalInvested),
+          }
+        : undefined,
     });
   }
 

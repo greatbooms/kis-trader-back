@@ -18,6 +18,12 @@ export interface TradeAlertContext {
   signal: TradingSignal;
   result: OrderResult;
   position?: PositionInfo;
+  execution?: {
+    quantity: number;
+    price?: number;
+    remainingQuantity?: number;
+    status?: 'FILLED' | 'PARTIAL';
+  };
   strategyDetails?: {
     tValue?: number;
     maxCycles?: number;

@@ -655,6 +655,7 @@ export class KisOverseasService {
   }> {
     const trId = this.isPaper ? 'VTRP6504R' : 'CTRP6504R';
     const items: BalanceItem[] = [];
+    let rawItemCount = 0;
     const cashBalances = new Map<string, {
       currencyCode: string;
       currencyName?: string;
@@ -689,6 +690,7 @@ export class KisOverseasService {
 
       const output1 = res.output1 as OverseasBalanceItem[];
       if (output1) {
+        rawItemCount += output1.length;
         for (const item of output1) {
           const qty = parseInt(item.ovrs_cblc_qty, 10) || 0;
           if (qty <= 0) continue;
@@ -741,6 +743,16 @@ export class KisOverseasService {
       ctxAreaNk200 = nextCtxAreaNk200;
       hasMore = this.hasContinuationToken(ctxAreaFk200);
       depth++;
+    }
+
+    if (rawItemCount > 0 && items.length === 0) {
+      this.logger.warn(
+        'Overseas present balance returned raw items but no usable holdings; falling back to standard balance parser',
+      );
+      return {
+        balance: await this.getStandardBalance(),
+        cashBalances: Array.from(cashBalances.values()),
+      };
     }
 
     return {

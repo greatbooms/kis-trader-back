@@ -599,9 +599,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   // --- Block Kit Formatting (also used by SlackCommandsService) ---
 
   formatTradeAlert(ctx: TradeAlertContext): KnownBlock[] {
-    const { signal, result, position, strategyDetails } = ctx;
+    const { signal, result, position, strategyDetails, execution } = ctx;
     const isBuy = signal.side === 'BUY';
     const isStopLoss = signal.reason?.toLowerCase().includes('stop loss');
+    const isPartialFill = execution?.status === 'PARTIAL';
+    const displayQuantity = execution?.quantity ?? signal.quantity;
+    const displayPrice = execution?.price ?? signal.price ?? 0;
 
     let emoji: string;
     let title: string;
@@ -610,10 +613,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       title = '손절 매도';
     } else if (isBuy) {
       emoji = ':chart_with_upwards_trend:';
-      title = '매수 체결';
+      title = isPartialFill ? '매수 일부 체결' : '매수 체결';
     } else {
       emoji = ':chart_with_downwards_trend:';
-      title = '매도 체결';
+      title = isPartialFill ? '매도 일부 체결' : '매도 체결';
     }
 
     const exchange = signal.exchangeCode;
@@ -630,9 +633,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         text: {
           type: 'mrkdwn',
           text: [
-            `*주문:* ${signal.quantity}주 x ${this.fmtPrice(signal.price || 0, signal.market)} (${this.orderTypeLabel(signal.orderDivision)})`,
+            `${execution ? '*체결:*' : '*주문:*'} ${displayQuantity}주 x ${this.fmtPrice(displayPrice, signal.market, signal.exchangeCode)} (${this.orderTypeLabel(signal.orderDivision)})`,
+            execution?.remainingQuantity !== undefined
+              ? `*잔여 수량:* ${execution.remainingQuantity}주`
+              : null,
             `*주문번호:* ${result.orderNo || 'N/A'}`,
-          ].join('\n'),
+          ].filter(Boolean).join('\n'),
         },
       },
     ];
@@ -690,11 +696,11 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           text: [
             `:bar_chart: *${isBuy ? '현재 보유 현황' : '매도 후 보유 현황'}*`,
             `*보유:* ${position.quantity}주`,
-            `*평단:* ${this.fmtPrice(position.avgPrice, signal.market)}`,
-            `*현재가:* ${this.fmtPrice(position.currentPrice, signal.market)}`,
-            `*총 투자금:* ${this.fmtMoney(position.totalInvested, signal.market)}`,
-            `*평가금액:* ${this.fmtMoney(evalAmount, signal.market)}`,
-            `*수익률:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, signal.market)})`,
+            `*평단:* ${this.fmtPrice(position.avgPrice, signal.market, signal.exchangeCode)}`,
+            `*현재가:* ${this.fmtPrice(position.currentPrice, signal.market, signal.exchangeCode)}`,
+            `*총 투자금:* ${this.fmtMoney(position.totalInvested, signal.market, signal.exchangeCode)}`,
+            `*평가금액:* ${this.fmtMoney(evalAmount, signal.market, signal.exchangeCode)}`,
+            `*수익률:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, signal.market, signal.exchangeCode)})`,
           ].join('\n'),
         },
       });

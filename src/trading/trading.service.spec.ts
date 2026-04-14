@@ -50,6 +50,7 @@ describe('TradingService', () => {
     sendFilterLog: jest.fn(),
     sendInsufficientFundsAlert: jest.fn(),
     sendStopLossAlert: jest.fn(),
+    sendTradeAlert: jest.fn(),
   };
 
   const mockConfigService = {
@@ -256,6 +257,20 @@ describe('TradingService', () => {
         },
       });
       expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalled();
+      expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          signal: expect.objectContaining({
+            stockCode: '005930',
+            quantity: 10,
+            price: 70000,
+          }),
+          execution: expect.objectContaining({
+            quantity: 10,
+            price: 70000,
+            status: 'FILLED',
+          }),
+        }),
+      );
     });
 
     it('should cancel a pending order when it disappears without any filled quantity', async () => {
