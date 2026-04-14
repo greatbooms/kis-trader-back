@@ -38,6 +38,13 @@ function getCurrencyCodeByExchange(exchangeCode?: string | null): string {
   return country ? getCurrencyCodeByCountry(country) : 'KRW'
 }
 
+function getDisplayCashAmount(balance: {
+  amount: number
+  withdrawableAmount?: number | null
+}): number {
+  return balance.withdrawableAmount ?? balance.amount
+}
+
 function buildCountryCapitalSummary(
   country: CountryOption,
   account?: DashboardAccountSummary,
@@ -56,7 +63,7 @@ function buildCountryCapitalSummary(
   const costBasis = countryPositions.reduce((sum, position) => sum + position.totalInvested, 0)
   const totalProfitLoss = countryPositions.reduce((sum, position) => sum + position.profitLoss, 0)
   const currentValue = costBasis + totalProfitLoss
-  const cashBalance = countryCashBalances.reduce((sum, balance) => sum + balance.amount, 0)
+  const cashBalance = countryCashBalances.reduce((sum, balance) => sum + getDisplayCashAmount(balance), 0)
   const totalAssets = currentValue + cashBalance
 
   return {

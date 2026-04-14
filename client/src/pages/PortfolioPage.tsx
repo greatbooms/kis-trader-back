@@ -78,6 +78,13 @@ function getCurrencyCodeByCountry(countryValue: string | null): string | null {
   return COUNTRY_CURRENCY[countryValue] ?? null
 }
 
+function getDisplayCashAmount(balance: {
+  amount: number
+  withdrawableAmount?: number | null
+}): number {
+  return balance.withdrawableAmount ?? balance.amount
+}
+
 function buildCountryPortfolioSummary(
   countryFilter: string | null,
   positions: PortfolioPosition[],
@@ -102,7 +109,7 @@ function buildCountryPortfolioSummary(
   const costBasis = countryPositions.reduce((sum, position) => sum + position.totalInvested, 0)
   const totalProfitLoss = countryPositions.reduce((sum, position) => sum + position.profitLoss, 0)
   const currentValue = costBasis + totalProfitLoss
-  const cashBalance = countryCashBalances.reduce((sum, balance) => sum + balance.amount, 0)
+  const cashBalance = countryCashBalances.reduce((sum, balance) => sum + getDisplayCashAmount(balance), 0)
   const totalAssets = currentValue + cashBalance
   const profitRate = costBasis > 0 ? (totalProfitLoss / costBasis) * 100 : 0
 
@@ -219,7 +226,7 @@ function AccountSummaryCard({ countryFilter }: { countryFilter: string | null })
     : null
   const overallDomesticCash = summary?.cashBalances
     .filter((cash) => cash.currencyCode === 'KRW')
-    .reduce((sum, cash) => sum + cash.amount, 0) ?? 0
+    .reduce((sum, cash) => sum + getDisplayCashAmount(cash), 0) ?? 0
   const overallOverseasCurrencies = Array.from(
     new Set((summary?.cashBalances ?? []).filter((cash) => cash.currencyCode !== 'KRW').map((cash) => cash.currencyCode)),
   )
