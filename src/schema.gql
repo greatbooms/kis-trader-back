@@ -102,6 +102,30 @@ type PositionType {
   totalInvested: Float!
 }
 
+type TechnicalIndicatorType {
+  key: String!
+  label: String!
+  value: Float
+  action: String!
+}
+
+type TechnicalRatingSummaryType {
+  score: Float!
+  recommendation: String!
+  buyCount: Int!
+  neutralCount: Int!
+  sellCount: Int!
+}
+
+type TechnicalRatingsType {
+  timeframe: String!
+  oscillators: [TechnicalIndicatorType!]!
+  movingAverages: [TechnicalIndicatorType!]!
+  oscillatorSummary: TechnicalRatingSummaryType!
+  movingAverageSummary: TechnicalRatingSummaryType!
+  overallSummary: TechnicalRatingSummaryType!
+}
+
 type StockPriceType {
   stockCode: String!
   stockName: String!
@@ -110,6 +134,8 @@ type StockPriceType {
   highPrice: Float
   lowPrice: Float
   volume: Int
+  changeRate: Float
+  technicalRatings: TechnicalRatingsType
 }
 
 type QuoteHistoryPointType {

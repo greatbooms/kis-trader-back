@@ -61,10 +61,47 @@ query GetQuote($stockCode: String!) {
     stockCode
     stockName
     currentPrice
+    changeRate
     openPrice
     highPrice
     lowPrice
     volume
+    technicalRatings {
+      timeframe
+      oscillatorSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      movingAverageSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      overallSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      oscillators {
+        key
+        label
+        value
+        action
+      }
+      movingAverages {
+        key
+        label
+        value
+        action
+      }
+    }
   }
 }
 
@@ -84,10 +121,47 @@ query GetOverseasQuote($input: OverseasQuoteInput!) {
     stockCode
     stockName
     currentPrice
+    changeRate
     openPrice
     highPrice
     lowPrice
     volume
+    technicalRatings {
+      timeframe
+      oscillatorSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      movingAverageSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      overallSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      oscillators {
+        key
+        label
+        value
+        action
+      }
+      movingAverages {
+        key
+        label
+        value
+        action
+      }
+    }
   }
 }
 

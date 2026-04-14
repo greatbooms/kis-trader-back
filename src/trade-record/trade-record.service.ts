@@ -5,9 +5,10 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
 import { ManualSellInput, CancelTradeOrderInput } from './dto';
-import { BalanceItem, BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
+import { BalanceItem, BrokerOrderStatus, StockPriceResult, UnfilledOrder } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
 import { DailyPrice } from '../kis/types/kis-api.types';
+import { MarketAnalysisService } from '../trading/market-analysis.service';
 
 @Injectable()
 export class TradeRecordService {
@@ -20,6 +21,7 @@ export class TradeRecordService {
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private configService: ConfigService,
+    private marketAnalysis: MarketAnalysisService,
   ) {
     this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
   }
@@ -101,10 +103,37 @@ export class TradeRecordService {
     return prices.reverse();
   }
 
+  async getDomesticQuote(stockCode: string): Promise<StockPriceResult & { technicalRatings: ReturnType<MarketAnalysisService['calculateTechnicalRatings']> }> {
+    const [quote, prices] = await Promise.all([
+      this.kisDomestic.getPrice(stockCode),
+      this.marketAnalysis.fetchDailyPrices('DOMESTIC', 'KRX', stockCode, 650),
+    ]);
+
+    return {
+      ...quote,
+      technicalRatings: this.marketAnalysis.calculateTechnicalRatings(prices, quote),
+    };
+  }
+
   async getOverseasQuoteHistory(exchangeCode: string, stockCode: string, months = 6): Promise<DailyPrice[]> {
     const estimatedTradingDays = Math.max(22, Math.ceil(months * 22));
     const prices = await this.kisOverseas.getDailyPrices(exchangeCode, stockCode, estimatedTradingDays);
     return prices.reverse();
+  }
+
+  async getOverseasQuote(
+    exchangeCode: string,
+    stockCode: string,
+  ): Promise<StockPriceResult & { technicalRatings: ReturnType<MarketAnalysisService['calculateTechnicalRatings']> }> {
+    const [quote, prices] = await Promise.all([
+      this.kisOverseas.getPrice(exchangeCode, stockCode),
+      this.marketAnalysis.fetchDailyPrices('OVERSEAS', exchangeCode, stockCode, 650),
+    ]);
+
+    return {
+      ...quote,
+      technicalRatings: this.marketAnalysis.calculateTechnicalRatings(prices, quote),
+    };
   }
 
   /** 대시보드 요약 */

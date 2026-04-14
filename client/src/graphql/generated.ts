@@ -676,12 +676,14 @@ export type StockDeepAnalysisType = {
 
 export type StockPriceType = {
   __typename?: 'StockPriceType';
+  changeRate?: Maybe<Scalars['Float']['output']>;
   currentPrice: Scalars['Float']['output'];
   highPrice?: Maybe<Scalars['Float']['output']>;
   lowPrice?: Maybe<Scalars['Float']['output']>;
   openPrice?: Maybe<Scalars['Float']['output']>;
   stockCode: Scalars['String']['output'];
   stockName: Scalars['String']['output'];
+  technicalRatings?: Maybe<TechnicalRatingsType>;
   volume?: Maybe<Scalars['Int']['output']>;
 };
 
@@ -771,6 +773,33 @@ export type SuggestedStrategyType = {
   matchScore: Scalars['Int']['output'];
   name: Scalars['String']['output'];
   reason: Scalars['String']['output'];
+};
+
+export type TechnicalIndicatorType = {
+  __typename?: 'TechnicalIndicatorType';
+  action: Scalars['String']['output'];
+  key: Scalars['String']['output'];
+  label: Scalars['String']['output'];
+  value?: Maybe<Scalars['Float']['output']>;
+};
+
+export type TechnicalRatingSummaryType = {
+  __typename?: 'TechnicalRatingSummaryType';
+  buyCount: Scalars['Int']['output'];
+  neutralCount: Scalars['Int']['output'];
+  recommendation: Scalars['String']['output'];
+  score: Scalars['Float']['output'];
+  sellCount: Scalars['Int']['output'];
+};
+
+export type TechnicalRatingsType = {
+  __typename?: 'TechnicalRatingsType';
+  movingAverageSummary: TechnicalRatingSummaryType;
+  movingAverages: Array<TechnicalIndicatorType>;
+  oscillatorSummary: TechnicalRatingSummaryType;
+  oscillators: Array<TechnicalIndicatorType>;
+  overallSummary: TechnicalRatingSummaryType;
+  timeframe: Scalars['String']['output'];
 };
 
 export type TradeFilterInput = {
@@ -1059,7 +1088,7 @@ export type GetQuoteQueryVariables = Exact<{
 }>;
 
 
-export type GetQuoteQuery = { __typename?: 'Query', quote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null } | null };
+export type GetQuoteQuery = { __typename?: 'Query', quote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, changeRate?: number | null, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null, technicalRatings?: { __typename?: 'TechnicalRatingsType', timeframe: string, oscillatorSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, movingAverageSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, overallSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, oscillators: Array<{ __typename?: 'TechnicalIndicatorType', key: string, label: string, value?: number | null, action: string }>, movingAverages: Array<{ __typename?: 'TechnicalIndicatorType', key: string, label: string, value?: number | null, action: string }> } | null } | null };
 
 export type GetQuoteHistoryQueryVariables = Exact<{
   stockCode: Scalars['String']['input'];
@@ -1074,7 +1103,7 @@ export type GetOverseasQuoteQueryVariables = Exact<{
 }>;
 
 
-export type GetOverseasQuoteQuery = { __typename?: 'Query', overseasQuote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null } | null };
+export type GetOverseasQuoteQuery = { __typename?: 'Query', overseasQuote?: { __typename?: 'StockPriceType', stockCode: string, stockName: string, currentPrice: number, changeRate?: number | null, openPrice?: number | null, highPrice?: number | null, lowPrice?: number | null, volume?: number | null, technicalRatings?: { __typename?: 'TechnicalRatingsType', timeframe: string, oscillatorSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, movingAverageSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, overallSummary: { __typename?: 'TechnicalRatingSummaryType', score: number, recommendation: string, buyCount: number, neutralCount: number, sellCount: number }, oscillators: Array<{ __typename?: 'TechnicalIndicatorType', key: string, label: string, value?: number | null, action: string }>, movingAverages: Array<{ __typename?: 'TechnicalIndicatorType', key: string, label: string, value?: number | null, action: string }> } | null } | null };
 
 export type GetOverseasQuoteHistoryQueryVariables = Exact<{
   input: OverseasQuoteInput;
@@ -2325,10 +2354,47 @@ export const GetQuoteDocument = gql`
     stockCode
     stockName
     currentPrice
+    changeRate
     openPrice
     highPrice
     lowPrice
     volume
+    technicalRatings {
+      timeframe
+      oscillatorSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      movingAverageSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      overallSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      oscillators {
+        key
+        label
+        value
+        action
+      }
+      movingAverages {
+        key
+        label
+        value
+        action
+      }
+    }
   }
 }
     `;
@@ -2421,10 +2487,47 @@ export const GetOverseasQuoteDocument = gql`
     stockCode
     stockName
     currentPrice
+    changeRate
     openPrice
     highPrice
     lowPrice
     volume
+    technicalRatings {
+      timeframe
+      oscillatorSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      movingAverageSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      overallSummary {
+        score
+        recommendation
+        buyCount
+        neutralCount
+        sellCount
+      }
+      oscillators {
+        key
+        label
+        value
+        action
+      }
+      movingAverages {
+        key
+        label
+        value
+        action
+      }
+    }
   }
 }
     `;

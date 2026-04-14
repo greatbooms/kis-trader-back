@@ -685,7 +685,7 @@ export class ScreeningService {
 
     const priceGroup = await Promise.allSettled([
       this.kisDomestic.getPrice(candidate.stockCode),
-      this.kisDomestic.getDailyPrices(candidate.stockCode, kstDateNDaysAgo(320), kstTodayStr()),
+      this.kisDomestic.getDailyPrices(candidate.stockCode, kstDateNDaysAgo(900), kstTodayStr()),
     ]);
     const priceDetail = this.getSettledValue<StockPriceResult>(priceGroup[0]);
     const dailyPrices = this.getSettledValue<DailyPrice[]>(priceGroup[1]) ?? [];
@@ -728,7 +728,7 @@ export class ScreeningService {
     if (priceDetail?.volume !== undefined) candidate.volume = priceDetail.volume;
     if (priceDetail?.changeRate !== undefined) candidate.changeRate = priceDetail.changeRate;
 
-    const indicators = this.calculateIndicators(dailyPrices, candidate.currentPrice);
+    const indicators = this.calculateIndicators(dailyPrices, candidate.currentPrice, priceDetail);
     const fiData = foreignInstMap.get(candidate.stockCode);
     this.applyCandidateIndicators(candidate, indicators);
     this.applyPriceIndicators(priceDetail, indicators);
@@ -811,7 +811,7 @@ export class ScreeningService {
     void mode;
 
     const results = await Promise.allSettled([
-      this.kisOverseas.getDailyPrices(candidate.exchangeCode, candidate.stockCode, 260),
+      this.kisOverseas.getDailyPrices(candidate.exchangeCode, candidate.stockCode, 650),
       this.kisOverseas.getPrice(candidate.exchangeCode, candidate.stockCode),
     ]);
     const dailyPrices = this.getSettledValue<DailyPrice[]>(results[0]) ?? [];
@@ -820,7 +820,7 @@ export class ScreeningService {
     if (priceDetail?.marketCap) candidate.marketCap = priceDetail.marketCap;
     if (priceDetail?.currentPrice) candidate.currentPrice = priceDetail.currentPrice;
 
-    const indicators = this.calculateIndicators(dailyPrices, candidate.currentPrice);
+    const indicators = this.calculateIndicators(dailyPrices, candidate.currentPrice, priceDetail);
     if (candidate.per !== undefined) indicators.per = candidate.per;
     this.applyPriceIndicators(priceDetail, indicators);
     indicators.sector = priceDetail?.sector ?? candidate.sector;
@@ -903,12 +903,25 @@ export class ScreeningService {
     };
   }
 
-  private calculateIndicators(prices: DailyPrice[], currentPrice: number): StockIndicatorDetail {
+  private calculateIndicators(
+    prices: DailyPrice[],
+    currentPrice: number,
+    priceDetail?: StockPriceResult,
+  ): StockIndicatorDetail {
     if (prices.length < 20) return {};
 
-    const closes = prices.map((item) => item.close);
-    const highs = prices.map((item) => item.high);
-    const lows = prices.map((item) => item.low);
+    const workingPrices = this.marketAnalysis.applyCurrentQuoteToPrices(prices, priceDetail
+      ? {
+          currentPrice: priceDetail.currentPrice,
+          openPrice: priceDetail.openPrice,
+          highPrice: priceDetail.highPrice,
+          lowPrice: priceDetail.lowPrice,
+          volume: priceDetail.volume,
+        }
+      : undefined);
+    const closes = workingPrices.map((item) => item.close);
+    const highs = workingPrices.map((item) => item.high);
+    const lows = workingPrices.map((item) => item.low);
     const indicators: StockIndicatorDetail = {};
 
     indicators.rsi14 = this.marketAnalysis.calculateRSI(closes, 14);
@@ -922,9 +935,9 @@ export class ScreeningService {
       const gap = (indicators.ma20 - indicators.ma60) / Math.max(indicators.ma60, 1);
       indicators.goldenCrossNear = gap > -0.03 && gap < 0.03;
     }
-    if (prices.length >= 20) {
-      const vol5 = prices.slice(0, 5).reduce((sum, item) => sum + item.volume, 0) / 5;
-      const vol20 = prices.slice(0, 20).reduce((sum, item) => sum + item.volume, 0) / 20;
+    if (workingPrices.length >= 20) {
+      const vol5 = workingPrices.slice(0, 5).reduce((sum, item) => sum + item.volume, 0) / 5;
+      const vol20 = workingPrices.slice(0, 20).reduce((sum, item) => sum + item.volume, 0) / 20;
       if (vol20 > 0) indicators.volumeSurgeRate = (vol5 / vol20 - 1) * 100;
     }
     if (closes.length >= 35) {
@@ -944,7 +957,7 @@ export class ScreeningService {
       indicators.adx14 = this.marketAnalysis.calculateADX(highs, lows, closes, 14);
     }
 
-    const recentWindow = prices.slice(0, 60);
+    const recentWindow = workingPrices.slice(0, 60);
     indicators.supportLevels = [...recentWindow].sort((a, b) => a.low - b.low).slice(0, 3).map((item) => item.low);
     indicators.resistanceLevels = [...recentWindow].sort((a, b) => b.high - a.high).slice(0, 3).map((item) => item.high);
 
@@ -957,14 +970,15 @@ export class ScreeningService {
       windowHigh - range * 0.5,
       windowHigh - range * 0.618,
     ];
-    indicators.volatility30d = this.calculateVolatility(prices.slice(0, 31));
-    if (prices.length >= 14) {
-      indicators.atr14 = this.calculateATR(prices.slice(0, 15));
+    indicators.volatility30d = this.calculateVolatility(workingPrices.slice(0, 31));
+    if (workingPrices.length >= 14) {
+      indicators.atr14 = this.calculateATR(workingPrices.slice(0, 15));
       if (currentPrice > 0) indicators.atrPercent = (indicators.atr14 / currentPrice) * 100;
     }
-    if (prices.length >= 60) {
-      indicators.maxDrawdown60d = this.calculateMaxDrawdown(prices.slice(0, 60));
+    if (workingPrices.length >= 60) {
+      indicators.maxDrawdown60d = this.calculateMaxDrawdown(workingPrices.slice(0, 60));
     }
+    indicators.technicalRatings = this.marketAnalysis.calculateTechnicalRatings(workingPrices);
     indicators.chartPattern = this.detectChartPattern(indicators, currentPrice);
 
     return indicators;

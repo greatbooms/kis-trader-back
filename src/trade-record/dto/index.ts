@@ -1,6 +1,9 @@
 export { TradeRecordType } from './trade-record.object';
 export { PositionType } from './position.object';
 export { StockPriceType } from './stock-price.object';
+export { TechnicalIndicatorType } from './technical-indicator.object';
+export { TechnicalRatingSummaryType } from './technical-rating-summary.object';
+export { TechnicalRatingsType } from './technical-ratings.object';
 export { QuoteHistoryPointType } from './quote-history-point.object';
 export { DashboardSummaryType } from './dashboard-summary.object';
 export { AccountSummaryType } from './account-summary.object';

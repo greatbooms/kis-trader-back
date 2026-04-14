@@ -28,6 +28,8 @@ import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import { formatNumber } from '@/lib/utils'
 import { EXCHANGE_LABELS, COUNTRY_OPTIONS } from '@/lib/market-constants'
 import { Tooltip } from '@/components/ui/tooltip'
+import { TechnicalRatingsPanel } from '@/components/TechnicalRatingsPanel'
+import type { TechnicalRatingsView } from '@/types'
 
 function scoreColor(score: number): string {
   if (score >= 70) return 'text-emerald-600'
@@ -533,6 +535,7 @@ function RecommendationCard({
   const technicalDetail = parseJson<Record<string, unknown>>(deepAnalysis?.technicalDetail)
   const dividendDetail = parseJson<Record<string, unknown>>(deepAnalysis?.dividendDetail)
   const consensusDetail = parseJson<Record<string, unknown>>(deepAnalysis?.consensusDetail)
+  const technicalRatings = indicators.technicalRatings as TechnicalRatingsView | undefined
   const radarData = buildRadarData(rec.factorScores)
 
   return (
@@ -603,6 +606,8 @@ function RecommendationCard({
             <InfoCell label="시가총액" value={formatNumber(rec.marketCap)} tooltip={CELL_TOOLTIPS.시가총액} />
             <InfoCell label="등락률" value={`${rec.changeRate >= 0 ? '+' : ''}${rec.changeRate.toFixed(2)}%`} danger={rec.changeRate < 0} success={rec.changeRate >= 0} tooltip={CELL_TOOLTIPS.등락률} />
           </div>
+
+          <TechnicalRatingsPanel ratings={technicalRatings} title="TradingView 스타일 기술 요약" compact />
 
           {radarData.length >= 4 && (
             <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">

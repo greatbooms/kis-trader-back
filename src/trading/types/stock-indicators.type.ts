@@ -1,3 +1,5 @@
+import { TechnicalRatingsSnapshot } from './technical-rating.type';
+
 export interface StockIndicators {
   ma200?: number;
   rsi14?: number;
@@ -75,4 +77,5 @@ export interface StockIndicators {
   latestSecPeriodicFilingForm?: string; // 최근 SEC 정기보고서 양식
   recentSecForm8KCount30d?: number; // 최근 30일 8-K 건수
   secPeriodicReportAgeDays?: number; // 최근 정기보고서 경과일
+  technicalRatings?: TechnicalRatingsSnapshot; // TradingView 스타일 1D 기술 요약
 }

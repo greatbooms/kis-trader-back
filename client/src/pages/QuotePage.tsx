@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { TrendingUp, TrendingDown, BarChart3, ArrowUpDown } from 'lucide-react'
+import { TrendingUp, TrendingDown, BarChart3, ArrowUpDown, RefreshCw } from 'lucide-react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -23,6 +23,9 @@ import {
 import { formatCurrency, formatNumber } from '@/lib/utils'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { StockSearchInput } from '@/components/StockSearchInput'
+import { TechnicalRatingsPanel } from '@/components/TechnicalRatingsPanel'
+import type { TechnicalRatingsView } from '@/types'
+import { Button } from '@/components/ui/button'
 
 export function QuotePage() {
   const [country, setCountry] = useState('KR')
@@ -85,18 +88,32 @@ export function QuotePage() {
 }
 
 function DomesticQuoteResult({ stockCode }: { stockCode: string }) {
-  const { data, loading, error } = useGetQuoteQuery({ variables: { stockCode } })
+  const { data, loading, error, refetch } = useGetQuoteQuery({ variables: { stockCode } })
   const historyQuery = useGetQuoteHistoryQuery({ variables: { stockCode, months: 6 } })
   const quote = data?.quote
 
   if (loading) return <QuoteLoading />
   if (error || !quote) return <QuoteNotFound />
 
-  return <QuoteCard quote={quote} market="DOMESTIC" history={historyQuery.data?.quoteHistory ?? []} historyLoading={historyQuery.loading} />
+  return (
+    <QuoteCard
+      quote={quote}
+      market="DOMESTIC"
+      history={historyQuery.data?.quoteHistory ?? []}
+      historyLoading={historyQuery.loading}
+      refreshing={loading || historyQuery.loading}
+      onRefresh={async () => {
+        await Promise.all([
+          refetch(),
+          historyQuery.refetch(),
+        ])
+      }}
+    />
+  )
 }
 
 function OverseasQuoteResult({ exchangeCode, symbol, countryLabel }: { exchangeCode: string; symbol: string; countryLabel: string }) {
-  const { data, loading, error } = useGetOverseasQuoteQuery({ variables: { input: { exchangeCode, symbol } } })
+  const { data, loading, error, refetch } = useGetOverseasQuoteQuery({ variables: { input: { exchangeCode, symbol } } })
   const historyQuery = useGetOverseasQuoteHistoryQuery({
     variables: { input: { exchangeCode, symbol }, months: 6 },
   })
@@ -112,6 +129,13 @@ function OverseasQuoteResult({ exchangeCode, symbol, countryLabel }: { exchangeC
       exchangeLabel={EXCHANGE_LABELS[exchangeCode] ?? countryLabel}
       history={historyQuery.data?.overseasQuoteHistory ?? []}
       historyLoading={historyQuery.loading}
+      refreshing={loading || historyQuery.loading}
+      onRefresh={async () => {
+        await Promise.all([
+          refetch(),
+          historyQuery.refetch(),
+        ])
+      }}
     />
   )
 }
@@ -142,6 +166,7 @@ interface QuoteData {
   highPrice?: number | null
   lowPrice?: number | null
   volume?: number | null
+  technicalRatings?: TechnicalRatingsView | null
 }
 
 interface QuoteHistoryData {
@@ -172,12 +197,16 @@ function QuoteCard({
   exchangeLabel,
   history,
   historyLoading,
+  refreshing,
+  onRefresh,
 }: {
   quote: QuoteData
   market: Market
   exchangeLabel?: string
   history: QuoteHistoryData[]
   historyLoading?: boolean
+  refreshing?: boolean
+  onRefresh?: () => Promise<void>
 }) {
   const changeFromOpen = quote.openPrice ? quote.currentPrice - quote.openPrice : 0
   const changeRate = quote.openPrice ? (changeFromOpen / quote.openPrice) * 100 : 0
@@ -200,6 +229,20 @@ function QuoteCard({
               </div>
             </div>
             <div className="text-left md:text-right">
+              {onRefresh && (
+                <div className="mb-3 flex md:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void onRefresh()}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? '새로고침 중...' : '시세 새로고침'}
+                  </Button>
+                </div>
+              )}
               <p className="text-3xl font-bold">{formatCurrency(quote.currentPrice, market)}</p>
               {quote.openPrice != null && (
                 <div className={`flex items-center gap-1 mt-1 md:justify-end ${isUp ? 'text-success' : 'text-danger'}`}>
@@ -258,6 +301,8 @@ function QuoteCard({
           )}
         </CardContent>
       </Card>
+
+      <TechnicalRatingsPanel ratings={quote.technicalRatings} title="기술 요약" />
 
       <Card>
         <CardHeader>

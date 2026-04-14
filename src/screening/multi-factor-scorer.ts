@@ -1,4 +1,5 @@
 import { ScreeningCandidate, StockIndicatorDetail, FactorComponent } from './types';
+import { TechnicalIndicatorSnapshot, TechnicalRatingsSnapshot } from '../trading/types';
 
 const MIN_MARKET_CAP_BY_EXCHANGE: Record<string, number> = {
   NASD: 150000,
@@ -19,6 +20,41 @@ function capScore(score: number, max: number): number {
 function emptyFactor(max: number): FactorComponent {
   return { score: 0, max, reasons: [], hasData: false };
 }
+
+const TECHNICAL_ACTION_MULTIPLIER: Record<string, number> = {
+  BUY: 1,
+  NEUTRAL: 0.45,
+  SELL: 0,
+};
+
+const TECHNICAL_INDICATOR_WEIGHT: Record<string, number> = {
+  rsi14: 1.2,
+  stochasticK: 1.1,
+  cci20: 1.1,
+  adx14: 1.2,
+  ao: 0.9,
+  momentum10: 1.0,
+  macd12269: 1.3,
+  stochRsiFast: 1.0,
+  williamsR14: 1.0,
+  bullBearPower13: 0.9,
+  uo71428: 1.0,
+  sma10: 0.8,
+  ema10: 0.8,
+  sma20: 0.9,
+  ema20: 0.9,
+  sma30: 1.0,
+  ema30: 1.0,
+  sma50: 1.1,
+  ema50: 1.1,
+  sma100: 1.2,
+  ema100: 1.2,
+  sma200: 1.4,
+  ema200: 1.4,
+  hma9: 0.9,
+  vwma20: 0.9,
+  ichimoku: 1.2,
+};
 
 export function buildDomesticScore(candidate: ScreeningCandidate, indicators: StockIndicatorDetail) {
   const technical = scoreTechnical(indicators, candidate, 15);
@@ -138,21 +174,95 @@ export function scoreTechnical(indicators: StockIndicatorDetail, candidate: Scre
   const reasons: string[] = [];
   let hasData = false;
 
+  const technicalRatings = indicators.technicalRatings;
+  if (technicalRatings) {
+    hasData = true;
+    const detailed = scoreTechnicalRatings(technicalRatings, max * 0.6);
+    score += detailed.score;
+    reasons.push(...detailed.reasons);
+
+    const overall = technicalRatings.overallSummary.score;
+    const oscillators = technicalRatings.oscillatorSummary.score;
+    const movingAverages = technicalRatings.movingAverageSummary.score;
+
+    if (overall > 0.5) {
+      score += max * 0.1;
+      reasons.push('기술 요약 강한 매수');
+    } else if (overall > 0.1) {
+      score += max * 0.07;
+      reasons.push('기술 요약 매수 우위');
+    } else if (overall < -0.5) {
+      reasons.push('기술 요약 강한 매도');
+    } else if (overall < -0.1) {
+      reasons.push('기술 요약 매도 우위');
+    }
+
+    if (oscillators > 0.1) score += max * 0.04;
+    if (movingAverages > 0.1) score += max * 0.06;
+  }
+
   if (indicators.rsi14 !== undefined) {
     hasData = true;
-    if (indicators.rsi14 >= 40 && indicators.rsi14 <= 60) { score += max * 0.25; reasons.push(`RSI ${indicators.rsi14.toFixed(1)} 안정권`); }
-    else if (indicators.rsi14 >= 30 && indicators.rsi14 < 40) { score += max * 0.2; reasons.push(`RSI ${indicators.rsi14.toFixed(1)} 반등 구간`); }
+    if (indicators.rsi14 >= 40 && indicators.rsi14 <= 60) { score += max * 0.08; reasons.push(`RSI ${indicators.rsi14.toFixed(1)} 안정권`); }
+    else if (indicators.rsi14 >= 30 && indicators.rsi14 < 40) { score += max * 0.06; reasons.push(`RSI ${indicators.rsi14.toFixed(1)} 반등 구간`); }
   }
   if (indicators.ma20 && indicators.ma60) {
     hasData = true;
-    if (candidate.currentPrice > indicators.ma20 && indicators.ma20 > indicators.ma60) { score += max * 0.25; reasons.push('MA20 > MA60, 가격이 단기 추세 상단'); }
-    else if (indicators.goldenCrossNear) { score += max * 0.15; reasons.push('골든크로스 근접'); }
+    if (candidate.currentPrice > indicators.ma20 && indicators.ma20 > indicators.ma60) { score += max * 0.08; reasons.push('MA20 > MA60, 가격이 단기 추세 상단'); }
+    else if (indicators.goldenCrossNear) { score += max * 0.05; reasons.push('골든크로스 근접'); }
   }
-  if (indicators.macd) { hasData = true; if (indicators.macd.histogram > 0) { score += max * 0.2; reasons.push('MACD 매수 우위'); } }
-  if (indicators.bollingerBands) { hasData = true; if (indicators.bollingerBands.percentB >= 0.35 && indicators.bollingerBands.percentB <= 0.75) { score += max * 0.15; reasons.push('볼린저 밴드 중상단 위치'); } }
-  if (indicators.adx14 !== undefined) { hasData = true; if (indicators.adx14 >= 25) { score += max * 0.15; reasons.push(`ADX ${indicators.adx14.toFixed(1)} 추세 형성`); } else if (indicators.adx14 >= 18) { score += max * 0.08; } }
+  if (indicators.macd) { hasData = true; if (indicators.macd.histogram > 0) { score += max * 0.05; reasons.push('MACD 매수 우위'); } }
+  if (indicators.bollingerBands) { hasData = true; if (indicators.bollingerBands.percentB >= 0.35 && indicators.bollingerBands.percentB <= 0.75) { score += max * 0.04; reasons.push('볼린저 밴드 중상단 위치'); } }
+  if (indicators.adx14 !== undefined) { hasData = true; if (indicators.adx14 >= 25) { score += max * 0.04; reasons.push(`ADX ${indicators.adx14.toFixed(1)} 추세 형성`); } else if (indicators.adx14 >= 18) { score += max * 0.02; } }
 
   return { score: capScore(score, max), max, reasons, hasData };
+}
+
+function scoreTechnicalRatings(
+  technicalRatings: TechnicalRatingsSnapshot,
+  max: number,
+): { score: number; reasons: string[] } {
+  const allIndicators = [
+    ...technicalRatings.oscillators,
+    ...technicalRatings.movingAverages,
+  ];
+
+  const totalWeight = allIndicators.reduce((sum, indicator) => {
+    return sum + (TECHNICAL_INDICATOR_WEIGHT[indicator.key] ?? 1);
+  }, 0);
+
+  if (totalWeight <= 0) {
+    return { score: 0, reasons: [] };
+  }
+
+  const weightedScore = allIndicators.reduce((sum, indicator) => {
+    const weight = TECHNICAL_INDICATOR_WEIGHT[indicator.key] ?? 1;
+    const actionWeight = TECHNICAL_ACTION_MULTIPLIER[indicator.action] ?? 0.45;
+    return sum + weight * actionWeight;
+  }, 0);
+
+  const score = (weightedScore / totalWeight) * max;
+  const buySignals = topTechnicalSignals(allIndicators, 'BUY').slice(0, 3);
+  const sellSignals = topTechnicalSignals(allIndicators, 'SELL').slice(0, 2);
+  const reasons: string[] = [];
+
+  if (buySignals.length > 0) {
+    reasons.push(`기술지표 매수 우위: ${buySignals.map((signal) => signal.label).join(', ')}`);
+  }
+  if (sellSignals.length > 0) {
+    reasons.push(`기술지표 주의: ${sellSignals.map((signal) => signal.label).join(', ')}`);
+  }
+
+  return {
+    score,
+    reasons,
+  };
+}
+
+function topTechnicalSignals(indicators: TechnicalIndicatorSnapshot[], action: 'BUY' | 'SELL') {
+  return indicators
+    .filter((indicator) => indicator.action === action)
+    .sort((left, right) => (TECHNICAL_INDICATOR_WEIGHT[right.key] ?? 1) - (TECHNICAL_INDICATOR_WEIGHT[left.key] ?? 1));
 }
 
 export function scoreValuation(indicators: StockIndicatorDetail, max: number): FactorComponent {

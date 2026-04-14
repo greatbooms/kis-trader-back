@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { ConfigService } from '@nestjs/config';
+import { MarketAnalysisService } from '../trading/market-analysis.service';
 
 describe('TradeRecordService', () => {
   let service: TradeRecordService;
@@ -57,6 +58,18 @@ describe('TradeRecordService', () => {
     }),
   };
 
+  const mockMarketAnalysis = {
+    fetchDailyPrices: jest.fn(),
+    calculateTechnicalRatings: jest.fn(() => ({
+      timeframe: '1D',
+      oscillators: [],
+      movingAverages: [],
+      oscillatorSummary: { score: 0, recommendation: 'NEUTRAL', buyCount: 0, neutralCount: 0, sellCount: 0 },
+      movingAverageSummary: { score: 0, recommendation: 'NEUTRAL', buyCount: 0, neutralCount: 0, sellCount: 0 },
+      overallSummary: { score: 0, recommendation: 'NEUTRAL', buyCount: 0, neutralCount: 0, sellCount: 0 },
+    })),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -65,6 +78,7 @@ describe('TradeRecordService', () => {
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
       ],
     }).compile();
 

@@ -2,8 +2,6 @@ import { Resolver, Query, Mutation, Args, ID, Int } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { TradeRecordService } from './trade-record.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
 import {
   TradeRecordType,
   PositionType,
@@ -26,8 +24,6 @@ import {
 export class TradeRecordResolver {
   constructor(
     private tradeRecordService: TradeRecordService,
-    private kisDomestic: KisDomesticService,
-    private kisOverseas: KisOverseasService,
   ) {}
 
   @Query(() => [TradeRecordType], { name: 'trades' })
@@ -55,7 +51,7 @@ export class TradeRecordResolver {
 
   @Query(() => StockPriceType, { name: 'quote', nullable: true })
   async quote(@Args('stockCode') stockCode: string) {
-    return this.kisDomestic.getPrice(stockCode);
+    return this.tradeRecordService.getDomesticQuote(stockCode);
   }
 
   @Query(() => [QuoteHistoryPointType], { name: 'quoteHistory' })
@@ -68,7 +64,7 @@ export class TradeRecordResolver {
 
   @Query(() => StockPriceType, { name: 'overseasQuote', nullable: true })
   async overseasQuote(@Args('input') input: OverseasQuoteInput) {
-    return this.kisOverseas.getPrice(input.exchangeCode, input.symbol);
+    return this.tradeRecordService.getOverseasQuote(input.exchangeCode, input.symbol);
   }
 
   @Query(() => [QuoteHistoryPointType], { name: 'overseasQuoteHistory' })

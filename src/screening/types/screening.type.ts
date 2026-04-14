@@ -1,3 +1,5 @@
+import { TechnicalRatingsSnapshot } from '../../trading/types';
+
 export interface ScreeningCandidate {
   stockCode: string;
   stockName: string;
@@ -213,4 +215,5 @@ export interface StockIndicatorDetail {
   // 해외 추가
   sector?: string; // 업종/섹터
   prevDayVolumeChangeRate?: number; // 전일거래량 대비 변화율 (해외)
+  technicalRatings?: TechnicalRatingsSnapshot;
 }

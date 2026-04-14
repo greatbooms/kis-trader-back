@@ -354,7 +354,45 @@ describe('MarketAnalysisService', () => {
 
       await service.getStockIndicators('OVERSEAS', 'NASD', 'AAPL', 150);
 
-      expect(mockKisOverseas.getDailyPrices).toHaveBeenCalledWith('NASD', 'AAPL', 200);
+      expect(mockKisOverseas.getDailyPrices).toHaveBeenCalledWith('NASD', 'AAPL', 650);
+    });
+  });
+
+  describe('technical ratings', () => {
+    it('should override latest daily bar with realtime quote data', () => {
+      const prices = generateDailyPrices(60);
+
+      const updated = service.applyCurrentQuoteToPrices(prices, {
+        currentPrice: 999,
+        openPrice: 900,
+        highPrice: 1000,
+        lowPrice: 880,
+        volume: 777777,
+      });
+
+      expect(updated[0]).toMatchObject({
+        close: 999,
+        open: 900,
+        high: 1000,
+        low: prices[0].low,
+        volume: 777777,
+      });
+      expect(updated[1]).toEqual(prices[1]);
+    });
+
+    it('should build TradingView-style rating groups', () => {
+      const ratings = service.calculateTechnicalRatings(generateDailyPrices(260), {
+        currentPrice: 140,
+        openPrice: 139,
+        highPrice: 141,
+        lowPrice: 138,
+        volume: 200000,
+      });
+
+      expect(ratings.timeframe).toBe('1D');
+      expect(ratings.oscillators.length).toBeGreaterThan(5);
+      expect(ratings.movingAverages.length).toBeGreaterThan(10);
+      expect(ratings.overallSummary.recommendation).toBeDefined();
     });
   });
 });

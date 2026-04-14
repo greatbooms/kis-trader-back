@@ -1,4 +1,5 @@
 import { ObjectType, Field, Float, Int } from '@nestjs/graphql';
+import { TechnicalRatingsType } from './technical-ratings.object';
 
 @ObjectType()
 export class StockPriceType {
@@ -22,4 +23,10 @@ export class StockPriceType {
 
   @Field(() => Int, { nullable: true })
   volume?: number;
+
+  @Field(() => Float, { nullable: true })
+  changeRate?: number;
+
+  @Field(() => TechnicalRatingsType, { nullable: true })
+  technicalRatings?: TechnicalRatingsType;
 }

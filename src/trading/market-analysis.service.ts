@@ -5,12 +5,22 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
-import { MarketCondition, StockIndicators } from './types';
+import {
+  MarketCondition,
+  StockIndicators,
+  TechnicalIndicatorAction,
+  TechnicalIndicatorSnapshot,
+  TechnicalRatingGroupSnapshot,
+  TechnicalRatingsSnapshot,
+} from './types';
 
 interface CacheEntry<T> {
   data: T;
   expiry: number;
 }
+
+const MA_PERIODS = [10, 20, 30, 50, 100, 200] as const;
+const TECHNICAL_RATINGS_HISTORY_COUNT = 650;
 
 @Injectable()
 export class MarketAnalysisService {
@@ -40,7 +50,7 @@ export class MarketAnalysisService {
     if (cached) return cached;
 
     try {
-      const prices = await this.fetchDailyPrices(market, exchangeCode, stockCode, 200);
+      const prices = await this.fetchDailyPrices(market, exchangeCode, stockCode, TECHNICAL_RATINGS_HISTORY_COUNT);
       if (prices.length < 14) {
         this.logger.warn(`Insufficient daily prices for ${stockCode}: ${prices.length} days`);
         return { currentAboveMA200: true }; // 데이터 부족시 필터 패스
@@ -124,6 +134,7 @@ export class MarketAnalysisService {
         prevLow,
         prevClose,
         todayOpen,
+        technicalRatings: this.calculateTechnicalRatings(prices, { currentPrice }),
       };
 
       this.setCache(cacheKey, result);
@@ -245,6 +256,303 @@ export class MarketAnalysisService {
     return sum / period;
   }
 
+  applyCurrentQuoteToPrices(
+    prices: DailyPrice[],
+    quote?: {
+      currentPrice?: number;
+      openPrice?: number | null;
+      highPrice?: number | null;
+      lowPrice?: number | null;
+      volume?: number | null;
+    },
+  ): DailyPrice[] {
+    if (prices.length === 0 || !quote) return prices;
+
+    const latest = prices[0];
+    const mergedOpen = quote.openPrice ?? latest.open;
+    const mergedClose = quote.currentPrice ?? latest.close;
+    const mergedHighCandidates = [
+      latest.high,
+      quote.highPrice ?? Number.NEGATIVE_INFINITY,
+      mergedOpen,
+      mergedClose,
+    ].filter(Number.isFinite);
+    const mergedLowCandidates = [
+      latest.low,
+      quote.lowPrice ?? Number.POSITIVE_INFINITY,
+      mergedOpen,
+      mergedClose,
+    ].filter(Number.isFinite);
+
+    return [
+      {
+        ...latest,
+        close: mergedClose,
+        open: mergedOpen,
+        // Keep the widest known intraday range instead of blindly overwriting.
+        high: Math.max(...mergedHighCandidates),
+        low: Math.min(...mergedLowCandidates),
+        volume: Math.max(latest.volume, quote.volume ?? 0),
+      },
+      ...prices.slice(1),
+    ];
+  }
+
+  calculateTechnicalRatings(
+    prices: DailyPrice[],
+    quote?: {
+      currentPrice?: number;
+      openPrice?: number | null;
+      highPrice?: number | null;
+      lowPrice?: number | null;
+      volume?: number | null;
+    },
+  ): TechnicalRatingsSnapshot {
+    const mergedPrices = this.applyCurrentQuoteToPrices(prices, quote);
+    const closes = mergedPrices.map((item) => item.close);
+    const highs = mergedPrices.map((item) => item.high);
+    const lows = mergedPrices.map((item) => item.low);
+    const volumes = mergedPrices.map((item) => item.volume);
+    const currentPrice = quote?.currentPrice ?? closes[0] ?? 0;
+
+    const oscillators: TechnicalIndicatorSnapshot[] = [];
+    const movingAverages: TechnicalIndicatorSnapshot[] = [];
+
+    const pushIndicator = (
+      target: TechnicalIndicatorSnapshot[],
+      key: string,
+      label: string,
+      value: number | undefined,
+      action: TechnicalIndicatorAction,
+    ) => {
+      if (!Number.isFinite(value)) return;
+      target.push({
+        key,
+        label,
+        value,
+        action,
+      });
+    };
+
+    for (const period of MA_PERIODS) {
+      const sma = this.calculateMA(closes, period);
+      pushIndicator(
+        movingAverages,
+        `sma${period}`,
+        `심플 무빙 애버리지 (${period})`,
+        sma || undefined,
+        this.compareAverageToPrice(sma, currentPrice),
+      );
+
+      const ema = this.calculateEMA(closes, period)[0];
+      pushIndicator(
+        movingAverages,
+        `ema${period}`,
+        `익스포넨셜 무빙 애버리지 (${period})`,
+        ema,
+        this.compareAverageToPrice(ema, currentPrice),
+      );
+    }
+
+    const hma9 = this.calculateHMA(closes, 9);
+    pushIndicator(
+      movingAverages,
+      'hma9',
+      '헐 이동 평균 (9)',
+      hma9,
+      this.compareAverageToPrice(hma9, currentPrice),
+    );
+
+    const vwma20 = this.calculateVWMA(closes, volumes, 20);
+    pushIndicator(
+      movingAverages,
+      'vwma20',
+      '볼륨 웨이티드 무빙 애버리지 (20)',
+      vwma20,
+      this.compareAverageToPrice(vwma20, currentPrice),
+    );
+
+    const ichimoku = this.calculateIchimokuSnapshot(mergedPrices);
+    pushIndicator(
+      movingAverages,
+      'ichimoku',
+      '일목 기준선 (9, 26, 52, 26)',
+      ichimoku?.baseLine,
+      !ichimoku
+        ? 'NEUTRAL'
+        : ichimoku.leadA > ichimoku.leadB
+            && ichimoku.baseLine > ichimoku.leadA
+            && ichimoku.conversionLine > ichimoku.baseLine
+            && currentPrice > ichimoku.conversionLine
+          ? 'BUY'
+          : ichimoku.leadA < ichimoku.leadB
+              && ichimoku.baseLine < ichimoku.leadA
+              && ichimoku.conversionLine < ichimoku.baseLine
+              && currentPrice < ichimoku.conversionLine
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const rsi = this.calculateRSI(closes, 14);
+    const prevRsi = this.calculateRSI(closes.slice(1), 14);
+    pushIndicator(
+      oscillators,
+      'rsi14',
+      '상대 강도 지수 (14)',
+      rsi,
+      rsi < 30 && rsi > prevRsi ? 'BUY' : rsi > 70 && rsi < prevRsi ? 'SELL' : 'NEUTRAL',
+    );
+
+    const stochastic = this.calculateSlowStochastic(mergedPrices, 14, 3, 3);
+    pushIndicator(
+      oscillators,
+      'stochasticK',
+      '스토캐스틱 %K (14, 3, 3)',
+      stochastic?.k,
+      !stochastic
+        ? 'NEUTRAL'
+        : stochastic.k < 20 && stochastic.d < 20 && stochastic.k > stochastic.d
+          ? 'BUY'
+          : stochastic.k > 80 && stochastic.d > 80 && stochastic.k < stochastic.d
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const cci = this.calculateCCI(closes, 20);
+    const prevCci = this.calculateCCI(closes.slice(1), 20);
+    pushIndicator(
+      oscillators,
+      'cci20',
+      '커머디티 채널 인덱스 (20)',
+      cci,
+      cci < -100 && cci > prevCci ? 'BUY' : cci > 100 && cci < prevCci ? 'SELL' : 'NEUTRAL',
+    );
+
+    const adx = this.calculateADXSignalSnapshot(highs, lows, closes, 14);
+    pushIndicator(
+      oscillators,
+      'adx14',
+      '애버리지 디렉셔널 인덱스 (14)',
+      adx?.adx,
+      !adx
+        ? 'NEUTRAL'
+        : adx.plusDi > adx.minusDi && adx.adx > 20 && adx.adx > adx.prevAdx
+          ? 'BUY'
+          : adx.plusDi < adx.minusDi && adx.adx > 20 && adx.adx < adx.prevAdx
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const ao = this.calculateAwesomeOscillator(mergedPrices);
+    pushIndicator(
+      oscillators,
+      'ao',
+      '어썸 오실레이터',
+      ao?.current,
+      !ao
+        ? 'NEUTRAL'
+        : (ao.prev <= 0 && ao.current > 0)
+            || (ao.current > 0 && ao.prev > 0 && ao.current > ao.prev && ao.prev < ao.prev2)
+          ? 'BUY'
+          : (ao.prev >= 0 && ao.current < 0)
+              || (ao.current < 0 && ao.prev < 0 && ao.current < ao.prev && ao.prev > ao.prev2)
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const momentum = this.calculateMomentum(closes, 10);
+    const prevMomentum = this.calculateMomentum(closes.slice(1), 10);
+    pushIndicator(
+      oscillators,
+      'momentum10',
+      '모멘텀 (10)',
+      momentum,
+      momentum > prevMomentum ? 'BUY' : momentum < prevMomentum ? 'SELL' : 'NEUTRAL',
+    );
+
+    const macd = this.calculateMACD(closes);
+    pushIndicator(
+      oscillators,
+      'macd12269',
+      'MACD 레벨 (12, 26)',
+      macd.line,
+      macd.line > macd.signal ? 'BUY' : macd.line < macd.signal ? 'SELL' : 'NEUTRAL',
+    );
+
+    const ema13 = this.calculateEMA(closes, 13)[0];
+    const uptrend = Number.isFinite(ema13) && currentPrice > (ema13 ?? 0);
+    const downtrend = Number.isFinite(ema13) && currentPrice < (ema13 ?? 0);
+
+    const stochRsi = this.calculateStochasticRsi(closes, 14, 14, 3, 3);
+    pushIndicator(
+      oscillators,
+      'stochRsiFast',
+      '스토캐스틱 RSI 패스트 (3, 3, 14, 14)',
+      stochRsi?.k,
+      !stochRsi
+        ? 'NEUTRAL'
+        : downtrend && stochRsi.k < 20 && stochRsi.d < 20 && stochRsi.k > stochRsi.d
+          ? 'BUY'
+          : uptrend && stochRsi.k > 80 && stochRsi.d > 80 && stochRsi.k < stochRsi.d
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const williams = this.calculateWilliamsR(mergedPrices, 14);
+    const prevWilliams = this.calculateWilliamsR(mergedPrices.slice(1), 14);
+    pushIndicator(
+      oscillators,
+      'williamsR14',
+      '윌리엄스 퍼센트 레인지 (14)',
+      williams,
+      williams < -80 && williams > prevWilliams
+        ? 'BUY'
+        : williams > -20 && williams < prevWilliams
+          ? 'SELL'
+          : 'NEUTRAL',
+    );
+
+    const bullBear = this.calculateBullBearPower(mergedPrices, 13);
+    pushIndicator(
+      oscillators,
+      'bullBearPower13',
+      '불 베어 파워',
+      bullBear?.combined,
+      !bullBear
+        ? 'NEUTRAL'
+        : uptrend && bullBear.bearPower < 0 && bullBear.bearPower > bullBear.prevBearPower
+          ? 'BUY'
+          : downtrend && bullBear.bullPower > 0 && bullBear.bullPower < bullBear.prevBullPower
+            ? 'SELL'
+            : 'NEUTRAL',
+    );
+
+    const uo = this.calculateUltimateOscillator(mergedPrices, 7, 14, 28);
+    pushIndicator(
+      oscillators,
+      'uo71428',
+      '얼티미트 오실레이터 (7, 14, 28)',
+      uo,
+      uo > 70 ? 'BUY' : uo < 30 ? 'SELL' : 'NEUTRAL',
+    );
+
+    const oscillatorSummary = this.buildTechnicalRatingGroup(oscillators);
+    const movingAverageSummary = this.buildTechnicalRatingGroup(movingAverages);
+    const overallSummary = this.buildTechnicalRatingGroup([
+      ...oscillators,
+      ...movingAverages,
+    ]);
+
+    return {
+      timeframe: '1D',
+      oscillators,
+      movingAverages,
+      oscillatorSummary,
+      movingAverageSummary,
+      overallSummary,
+    };
+  }
+
   /** RSI 계산 (Wilder's smoothing) */
   calculateRSI(prices: number[], period: number): number {
     if (prices.length < period + 1) return 50; // 데이터 부족시 중립
@@ -305,6 +613,31 @@ export class MarketAnalysisService {
 
     // 다시 역순 (최신이 [0])
     return ema.reverse();
+  }
+
+  calculateVWMA(prices: number[], volumes: number[], period: number): number {
+    if (prices.length < period || volumes.length < period) return 0;
+    let volumeSum = 0;
+    let weightedSum = 0;
+    for (let index = 0; index < period; index++) {
+      const volume = volumes[index] ?? 0;
+      volumeSum += volume;
+      weightedSum += (prices[index] ?? 0) * volume;
+    }
+    return volumeSum > 0 ? weightedSum / volumeSum : 0;
+  }
+
+  calculateHMA(prices: number[], period: number): number {
+    if (prices.length < period) return 0;
+    const half = Math.max(1, Math.floor(period / 2));
+    const sqrt = Math.max(1, Math.floor(Math.sqrt(period)));
+    const halfWma = this.calculateWmaSeries(prices, half);
+    const fullWma = this.calculateWmaSeries(prices, period);
+    const length = Math.min(halfWma.length, fullWma.length);
+    if (length === 0) return 0;
+
+    const rawSeries = Array.from({ length }, (_, index) => 2 * halfWma[index] - fullWma[index]);
+    return this.calculateWmaSeries(rawSeries, sqrt)[0] ?? 0;
   }
 
   /** 볼린저밴드 계산 (period=20, multiplier=2) */
@@ -466,6 +799,296 @@ export class MarketAnalysisService {
     if (volumes.length < period) return 0;
     const sum = volumes.slice(0, period).reduce((a, b) => a + b, 0);
     return sum / period;
+  }
+
+  private compareAverageToPrice(value: number | undefined, price: number): TechnicalIndicatorAction {
+    if (!Number.isFinite(value) || !Number.isFinite(price)) return 'NEUTRAL';
+    if ((value ?? 0) < price) return 'BUY';
+    if ((value ?? 0) > price) return 'SELL';
+    return 'NEUTRAL';
+  }
+
+  private buildTechnicalRatingGroup(indicators: TechnicalIndicatorSnapshot[]): TechnicalRatingGroupSnapshot {
+    const buyCount = indicators.filter((indicator) => indicator.action === 'BUY').length;
+    const sellCount = indicators.filter((indicator) => indicator.action === 'SELL').length;
+    const neutralCount = indicators.filter((indicator) => indicator.action === 'NEUTRAL').length;
+    const score = indicators.length > 0
+      ? indicators.reduce((sum, indicator) => sum + (indicator.action === 'BUY' ? 1 : indicator.action === 'SELL' ? -1 : 0), 0) / indicators.length
+      : 0;
+
+    return {
+      score,
+      recommendation: this.scoreToRecommendation(score),
+      buyCount,
+      neutralCount,
+      sellCount,
+    };
+  }
+
+  private scoreToRecommendation(score: number) {
+    if (score > 0.5) return 'STRONG_BUY' as const;
+    if (score > 0.1) return 'BUY' as const;
+    if (score < -0.5) return 'STRONG_SELL' as const;
+    if (score < -0.1) return 'SELL' as const;
+    return 'NEUTRAL' as const;
+  }
+
+  private calculateWmaSeries(prices: number[], period: number): number[] {
+    if (prices.length < period) return [];
+    const denominator = (period * (period + 1)) / 2;
+    const values: number[] = [];
+
+    for (let start = 0; start <= prices.length - period; start++) {
+      let weighted = 0;
+      for (let offset = 0; offset < period; offset++) {
+        weighted += prices[start + offset] * (period - offset);
+      }
+      values.push(weighted / denominator);
+    }
+
+    return values;
+  }
+
+  private calculateCCI(source: number[], period: number): number {
+    if (source.length < period) return NaN;
+    const values = source.slice(0, period);
+    const current = values[0];
+    const sma = values.reduce((sum, value) => sum + value, 0) / period;
+    const meanDeviation = values.reduce((sum, value) => sum + Math.abs(value - sma), 0) / period;
+    if (meanDeviation === 0) return 0;
+    return (current - sma) / (0.015 * meanDeviation);
+  }
+
+  private calculateSlowStochastic(
+    prices: DailyPrice[],
+    kPeriod: number,
+    smoothK: number,
+    dPeriod: number,
+  ): { k: number; d: number } | undefined {
+    if (prices.length < kPeriod + smoothK + dPeriod - 2) return undefined;
+
+    const fastKs: number[] = [];
+    for (let start = 0; start <= prices.length - kPeriod; start++) {
+      const window = prices.slice(start, start + kPeriod);
+      const highest = Math.max(...window.map((item) => item.high));
+      const lowest = Math.min(...window.map((item) => item.low));
+      const close = prices[start].close;
+      fastKs.push(highest === lowest ? 50 : ((close - lowest) / (highest - lowest)) * 100);
+    }
+
+    const slowKs = this.calculateSmaSeries(fastKs, smoothK);
+    const ds = this.calculateSmaSeries(slowKs, dPeriod);
+    if (slowKs.length === 0 || ds.length === 0) return undefined;
+    return { k: slowKs[0], d: ds[0] };
+  }
+
+  private calculateSmaSeries(values: number[], period: number): number[] {
+    if (values.length < period) return [];
+    const result: number[] = [];
+    for (let start = 0; start <= values.length - period; start++) {
+      const window = values.slice(start, start + period);
+      result.push(window.reduce((sum, value) => sum + value, 0) / period);
+    }
+    return result;
+  }
+
+  private calculateADXSignalSnapshot(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number,
+  ): { adx: number; prevAdx: number; plusDi: number; minusDi: number } | undefined {
+    if (highs.length < period * 2 + 1) return undefined;
+
+    const h = [...highs].reverse();
+    const l = [...lows].reverse();
+    const c = [...closes].reverse();
+
+    const trueRanges: number[] = [];
+    const plusDMs: number[] = [];
+    const minusDMs: number[] = [];
+
+    for (let index = 1; index < h.length; index++) {
+      const tr = Math.max(h[index] - l[index], Math.abs(h[index] - c[index - 1]), Math.abs(l[index] - c[index - 1]));
+      trueRanges.push(tr);
+
+      const upMove = h[index] - h[index - 1];
+      const downMove = l[index - 1] - l[index];
+      plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+      minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    }
+
+    if (trueRanges.length < period + 1) return undefined;
+
+    let atrSum = trueRanges.slice(0, period).reduce((sum, value) => sum + value, 0);
+    let plusDMSum = plusDMs.slice(0, period).reduce((sum, value) => sum + value, 0);
+    let minusDMSum = minusDMs.slice(0, period).reduce((sum, value) => sum + value, 0);
+
+    const dxValues: number[] = [];
+    const plusDis: number[] = [];
+    const minusDis: number[] = [];
+
+    const initialPlusDi = atrSum > 0 ? (plusDMSum / atrSum) * 100 : 0;
+    const initialMinusDi = atrSum > 0 ? (minusDMSum / atrSum) * 100 : 0;
+    plusDis.push(initialPlusDi);
+    minusDis.push(initialMinusDi);
+    const initialDiSum = initialPlusDi + initialMinusDi;
+    dxValues.push(initialDiSum > 0 ? (Math.abs(initialPlusDi - initialMinusDi) / initialDiSum) * 100 : 0);
+
+    for (let index = period; index < trueRanges.length; index++) {
+      atrSum = atrSum - atrSum / period + trueRanges[index];
+      plusDMSum = plusDMSum - plusDMSum / period + plusDMs[index];
+      minusDMSum = minusDMSum - minusDMSum / period + minusDMs[index];
+
+      const plusDi = atrSum > 0 ? (plusDMSum / atrSum) * 100 : 0;
+      const minusDi = atrSum > 0 ? (minusDMSum / atrSum) * 100 : 0;
+      plusDis.push(plusDi);
+      minusDis.push(minusDi);
+      const diSum = plusDi + minusDi;
+      dxValues.push(diSum > 0 ? (Math.abs(plusDi - minusDi) / diSum) * 100 : 0);
+    }
+
+    if (dxValues.length < period + 1) return undefined;
+
+    const adxSeries: number[] = [];
+    let adx = dxValues.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+    adxSeries.push(adx);
+    for (let index = period; index < dxValues.length; index++) {
+      adx = (adx * (period - 1) + dxValues[index]) / period;
+      adxSeries.push(adx);
+    }
+
+    if (adxSeries.length < 2) return undefined;
+
+    return {
+      adx: adxSeries[adxSeries.length - 1],
+      prevAdx: adxSeries[adxSeries.length - 2],
+      plusDi: plusDis[plusDis.length - 1],
+      minusDi: minusDis[minusDis.length - 1],
+    };
+  }
+
+  private calculateAwesomeOscillator(
+    prices: DailyPrice[],
+  ): { current: number; prev: number; prev2: number } | undefined {
+    if (prices.length < 36) return undefined;
+    const medians = prices.map((item) => (item.high + item.low) / 2);
+    const aoAt = (offset: number) => this.calculateMA(medians.slice(offset), 5) - this.calculateMA(medians.slice(offset), 34);
+    return {
+      current: aoAt(0),
+      prev: aoAt(1),
+      prev2: aoAt(2),
+    };
+  }
+
+  private calculateMomentum(prices: number[], period: number): number {
+    if (prices.length <= period) return NaN;
+    return prices[0] - prices[period];
+  }
+
+  private calculateStochasticRsi(
+    closes: number[],
+    rsiPeriod: number,
+    stochPeriod: number,
+    smoothK: number,
+    smoothD: number,
+  ): { k: number; d: number } | undefined {
+    if (closes.length < rsiPeriod + stochPeriod + smoothK + smoothD) return undefined;
+
+    const rsiSeries: number[] = [];
+    for (let start = 0; start <= closes.length - (rsiPeriod + 1); start++) {
+      rsiSeries.push(this.calculateRSI(closes.slice(start), rsiPeriod));
+    }
+
+    const stochValues: number[] = [];
+    for (let start = 0; start <= rsiSeries.length - stochPeriod; start++) {
+      const window = rsiSeries.slice(start, start + stochPeriod);
+      const highest = Math.max(...window);
+      const lowest = Math.min(...window);
+      const current = rsiSeries[start];
+      stochValues.push(highest === lowest ? 50 : ((current - lowest) / (highest - lowest)) * 100);
+    }
+
+    const ks = this.calculateSmaSeries(stochValues, smoothK);
+    const ds = this.calculateSmaSeries(ks, smoothD);
+    if (ks.length === 0 || ds.length === 0) return undefined;
+    return { k: ks[0], d: ds[0] };
+  }
+
+  private calculateWilliamsR(prices: DailyPrice[], period: number): number {
+    if (prices.length < period) return NaN;
+    const window = prices.slice(0, period);
+    const highest = Math.max(...window.map((item) => item.high));
+    const lowest = Math.min(...window.map((item) => item.low));
+    if (highest === lowest) return -50;
+    return ((highest - window[0].close) / (highest - lowest)) * -100;
+  }
+
+  private calculateBullBearPower(
+    prices: DailyPrice[],
+    emaPeriod: number,
+  ): { bullPower: number; bearPower: number; prevBullPower: number; prevBearPower: number; combined: number } | undefined {
+    if (prices.length < emaPeriod + 1) return undefined;
+    const closes = prices.map((item) => item.close);
+    const emaSeries = this.calculateEMA(closes, emaPeriod);
+    if (emaSeries.length < 2) return undefined;
+
+    const bullPower = prices[0].high - emaSeries[0];
+    const bearPower = prices[0].low - emaSeries[0];
+    const prevBullPower = prices[1].high - emaSeries[1];
+    const prevBearPower = prices[1].low - emaSeries[1];
+
+    return {
+      bullPower,
+      bearPower,
+      prevBullPower,
+      prevBearPower,
+      combined: bullPower + bearPower,
+    };
+  }
+
+  private calculateUltimateOscillator(prices: DailyPrice[], shortPeriod: number, midPeriod: number, longPeriod: number): number {
+    if (prices.length < longPeriod + 1) return NaN;
+
+    const buyingPressure: number[] = [];
+    const trueRange: number[] = [];
+    for (let index = 0; index < prices.length - 1; index++) {
+      const current = prices[index];
+      const previousClose = prices[index + 1].close;
+      const minLow = Math.min(current.low, previousClose);
+      const maxHigh = Math.max(current.high, previousClose);
+      buyingPressure.push(current.close - minLow);
+      trueRange.push(maxHigh - minLow);
+    }
+
+    const avg = (period: number) => {
+      const bp = buyingPressure.slice(0, period).reduce((sum, value) => sum + value, 0);
+      const tr = trueRange.slice(0, period).reduce((sum, value) => sum + value, 0);
+      return tr > 0 ? bp / tr : 0;
+    };
+
+    return 100 * ((4 * avg(shortPeriod)) + (2 * avg(midPeriod)) + avg(longPeriod)) / 7;
+  }
+
+  private calculateIchimokuSnapshot(
+    prices: DailyPrice[],
+  ): { conversionLine: number; baseLine: number; leadA: number; leadB: number } | undefined {
+    if (prices.length < 52) return undefined;
+    const conversionSlice = prices.slice(0, 9);
+    const baseSlice = prices.slice(0, 26);
+    const spanBSlice = prices.slice(0, 52);
+
+    const conversionLine = (Math.max(...conversionSlice.map((item) => item.high)) + Math.min(...conversionSlice.map((item) => item.low))) / 2;
+    const baseLine = (Math.max(...baseSlice.map((item) => item.high)) + Math.min(...baseSlice.map((item) => item.low))) / 2;
+    const leadA = (conversionLine + baseLine) / 2;
+    const leadB = (Math.max(...spanBSlice.map((item) => item.high)) + Math.min(...spanBSlice.map((item) => item.low))) / 2;
+
+    return {
+      conversionLine,
+      baseLine,
+      leadA,
+      leadB,
+    };
   }
 
   /** count 거래일에 대응하는 캘린더 날짜 범위 (여유 포함) */
