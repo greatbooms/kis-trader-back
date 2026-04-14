@@ -158,6 +158,12 @@ type ManualSellResult {
   orderNo: String
 }
 
+type CancelTradeOrderResult {
+  success: Boolean!
+  message: String
+  orderNo: String
+}
+
 type RefreshAccountStateResult {
   success: Boolean!
   message: String!
@@ -532,6 +538,7 @@ type Mutation {
   setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
   refreshAccountState: RefreshAccountStateResult!
   manualSell(input: ManualSellInput!): ManualSellResult!
+  cancelTradeOrder(input: CancelTradeOrderInput!): CancelTradeOrderResult!
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
@@ -564,6 +571,10 @@ input ManualSellInput {
 
   """매도 수량 (미지정 시 전량)"""
   quantity: Float
+}
+
+input CancelTradeOrderInput {
+  tradeRecordId: ID!
 }
 
 input CreateWatchStockInput {

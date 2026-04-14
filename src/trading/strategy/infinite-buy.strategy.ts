@@ -364,6 +364,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     }
 
     let buySignalCount = 0;
+    let buy1QtyLogged = 0;
+    let buy2QtyLogged = 0;
+    let buy1PriceLogged = 0;
+    let buy2PriceLogged = 0;
+    let dipRateLogged = 0;
 
     if (buyAllowed) {
       // --- 매수 시그널 ---
@@ -377,6 +382,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       let buy2Qty = Math.floor(buy2Quota / buy2Price);
       let buy1ReasonShare = '70%';
       let buy2ReasonShare = '30%';
+
+      buy1PriceLogged = buy1Price;
+      buy2PriceLogged = buy2Price;
+      dipRateLogged = dipRate;
 
       // 분할 매수 불가 시 전액으로 단일 매수 (고가주 대응)
       if (buy1Qty === 0 && buy2Qty === 0) {
@@ -411,6 +420,14 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           details.remainingBudgetAfterReallocation = remainingBudget;
         }
       }
+
+      buy1QtyLogged = buy1Qty;
+      buy2QtyLogged = buy2Qty;
+      details.buy1Qty = buy1Qty;
+      details.buy2Qty = buy2Qty;
+      details.buy1Price = buy1Price;
+      details.buy2Price = buy2Price;
+      details.dipRate = dipRate;
 
       if (buy1Qty > 0 && buy1Price > 0) {
         signals.push({
@@ -492,8 +509,21 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       }
     }
 
+    const quotaAdjustments = Array.isArray(details.quotaAdjustments)
+      ? details.quotaAdjustments
+          .map((item: { label?: string; multiplier?: number }) =>
+            `${item.label ?? 'unknown'} x${Number(item.multiplier ?? 1).toFixed(2)}`,
+          )
+          .join(', ')
+      : 'none';
+
     this.logger.log(
-      `[${watchStock.stockCode}] T=${T.toFixed(1)}, signals=${signals.length}, quota=${adjustedQuota.toFixed(0)}`,
+      `[${watchStock.stockCode}] T=${T.toFixed(1)}, signals=${signals.length}, buySignals=${buySignalCount}, ` +
+      `baseQuota=${perCycleQuota.toFixed(0)}, accumulated=${accumulatedQuota.toFixed(0)}, adjustedQuota=${adjustedQuota.toFixed(0)}, ` +
+      `buyable=${ctx.buyableAmount.toFixed(0)}, RSI=${stockIndicators.rsi14?.toFixed(2) ?? 'n/a'}, ` +
+      `vol30=${stockIndicators.volatility30d?.toFixed(2) ?? 'n/a'}, adjustments=${quotaAdjustments}, ` +
+      `buy1=${buy1QtyLogged}@${buy1PriceLogged || 0}, buy2=${buy2QtyLogged}@${buy2PriceLogged || 0}, ` +
+      `dip=${(dipRateLogged * 100).toFixed(2)}%`,
     );
 
     return { signals, skipReasons, details };

@@ -551,15 +551,13 @@ export class KisOverseasService {
   }
 
   /** 해외 주문 취소 */
-  async cancelOrder(exchangeCode: string, orderNo: string, stockCode: string, qty: number, price: number): Promise<OrderResult> {
-    // 미국 시장 취소 TR
+  async cancelOrder(exchangeCode: string, orderNo: string, stockCode: string, qty: number, _price: number): Promise<OrderResult> {
     const trIds = OVERSEAS_ORDER_TR_IDS[exchangeCode];
     if (!trIds) {
       return { success: false, message: `Unsupported exchange for cancel: ${exchangeCode}` };
     }
 
-    // 정정/취소는 매도 TR ID 계열 사용
-    const trId = this.isPaper ? trIds.sellPaper : trIds.sell;
+    const trId = this.isPaper ? trIds.cancelPaper : trIds.cancel;
 
     try {
       const res = await this.kisBase.post<OverseasOrderOutput>(
@@ -573,7 +571,7 @@ export class KisOverseasService {
           ORGN_ODNO: orderNo,
           RVSE_CNCL_DVSN_CD: '02', // 02=취소
           ORD_QTY: String(qty),
-          OVRS_ORD_UNPR: String(price),
+          OVRS_ORD_UNPR: '0',
           MGCO_APTM_ODNO: '',
           ORD_SVR_DVSN_CD: '0',
         },

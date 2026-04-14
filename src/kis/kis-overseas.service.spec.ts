@@ -5,6 +5,7 @@ import { KisOverseasService } from './kis-overseas.service';
 describe('KisOverseasService', () => {
   const mockKisBase = {
     get: jest.fn(),
+    post: jest.fn(),
   };
 
   const buildConfigService = (env: 'paper' | 'prod') =>
@@ -324,5 +325,66 @@ describe('KisOverseasService', () => {
         withdrawableAmount: 950.55,
       },
     ]);
+  });
+
+  it('should use dedicated overseas cancel TR ID and zero unit price when cancelling', async () => {
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.post.mockResolvedValue({
+      output: {
+        ODNO: '0000000001',
+      },
+    });
+
+    const result = await service.cancelOrder('NASD', '12345678', 'TQQQ', 1, 56.73);
+
+    expect(mockKisBase.post).toHaveBeenCalledWith(
+      '/uapi/overseas-stock/v1/trading/order-rvsecncl',
+      'TTTT1004U',
+      expect.objectContaining({
+        OVRS_EXCG_CD: 'NASD',
+        PDNO: 'TQQQ',
+        ORGN_ODNO: '12345678',
+        RVSE_CNCL_DVSN_CD: '02',
+        ORD_QTY: '1',
+        OVRS_ORD_UNPR: '0',
+      }),
+    );
+    expect(result).toEqual({
+      success: true,
+      orderNo: '0000000001',
+      message: 'Cancel order placed: NASD:TQQQ #12345678',
+    });
+  });
+
+  it('should use exchange-specific cancel TR ID for asia markets', async () => {
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.post.mockResolvedValue({
+      output: {
+        ODNO: '0000000002',
+      },
+    });
+
+    await service.cancelOrder('SEHK', '87654321', '0700', 2, 450);
+
+    expect(mockKisBase.post).toHaveBeenCalledWith(
+      '/uapi/overseas-stock/v1/trading/order-rvsecncl',
+      'TTTS1003U',
+      expect.objectContaining({
+        OVRS_EXCG_CD: 'SEHK',
+        PDNO: '0700',
+        ORGN_ODNO: '87654321',
+        RVSE_CNCL_DVSN_CD: '02',
+        ORD_QTY: '2',
+        OVRS_ORD_UNPR: '0',
+      }),
+    );
   });
 });

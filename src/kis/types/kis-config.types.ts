@@ -46,17 +46,17 @@ export const EXCHANGE_CODE_MAP: Record<string, string> = {
 /** 해외 거래소별 주문 TR ID 매핑 */
 export const OVERSEAS_ORDER_TR_IDS: Record<
   string,
-  { buy: string; sell: string; buyPaper: string; sellPaper: string }
+  { buy: string; sell: string; cancel: string; buyPaper: string; sellPaper: string; cancelPaper: string }
 > = {
-  NASD: { buy: 'TTTT1002U', sell: 'TTTT1006U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U' },
-  NYSE: { buy: 'TTTT1002U', sell: 'TTTT1006U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U' },
-  AMEX: { buy: 'TTTT1002U', sell: 'TTTT1006U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U' },
-  SEHK: { buy: 'TTTS1002U', sell: 'TTTS1001U', buyPaper: 'VTTS1002U', sellPaper: 'VTTS1001U' },
-  SHAA: { buy: 'TTTS0202U', sell: 'TTTS1005U', buyPaper: 'VTTS0202U', sellPaper: 'VTTS1005U' },
-  SZAA: { buy: 'TTTS0305U', sell: 'TTTS0304U', buyPaper: 'VTTS0305U', sellPaper: 'VTTS0304U' },
-  TKSE: { buy: 'TTTS0308U', sell: 'TTTS0307U', buyPaper: 'VTTS0308U', sellPaper: 'VTTS0307U' },
-  HASE: { buy: 'TTTS0311U', sell: 'TTTS0310U', buyPaper: 'VTTS0311U', sellPaper: 'VTTS0310U' },
-  VNSE: { buy: 'TTTS0311U', sell: 'TTTS0310U', buyPaper: 'VTTS0311U', sellPaper: 'VTTS0310U' },
+  NASD: { buy: 'TTTT1002U', sell: 'TTTT1006U', cancel: 'TTTT1004U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U', cancelPaper: 'VTTT1004U' },
+  NYSE: { buy: 'TTTT1002U', sell: 'TTTT1006U', cancel: 'TTTT1004U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U', cancelPaper: 'VTTT1004U' },
+  AMEX: { buy: 'TTTT1002U', sell: 'TTTT1006U', cancel: 'TTTT1004U', buyPaper: 'VTTT1002U', sellPaper: 'VTTT1006U', cancelPaper: 'VTTT1004U' },
+  SEHK: { buy: 'TTTS1002U', sell: 'TTTS1001U', cancel: 'TTTS1003U', buyPaper: 'VTTS1002U', sellPaper: 'VTTS1001U', cancelPaper: 'VTTS1003U' },
+  SHAA: { buy: 'TTTS0202U', sell: 'TTTS1005U', cancel: 'TTTS0302U', buyPaper: 'VTTS0202U', sellPaper: 'VTTS1005U', cancelPaper: 'VTTS0302U' },
+  SZAA: { buy: 'TTTS0305U', sell: 'TTTS0304U', cancel: 'TTTS0306U', buyPaper: 'VTTS0305U', sellPaper: 'VTTS0304U', cancelPaper: 'VTTS0306U' },
+  TKSE: { buy: 'TTTS0308U', sell: 'TTTS0307U', cancel: 'TTTS0309U', buyPaper: 'VTTS0308U', sellPaper: 'VTTS0307U', cancelPaper: 'VTTS0309U' },
+  HASE: { buy: 'TTTS0311U', sell: 'TTTS0310U', cancel: 'TTTS0312U', buyPaper: 'VTTS0311U', sellPaper: 'VTTS0310U', cancelPaper: 'VTTS0312U' },
+  VNSE: { buy: 'TTTS0311U', sell: 'TTTS0310U', cancel: 'TTTS0312U', buyPaper: 'VTTS0311U', sellPaper: 'VTTS0310U', cancelPaper: 'VTTS0312U' },
 };
 
 /** 거래소별 참조 지수 매핑 (개선 E: 시장 상황 판단용) */

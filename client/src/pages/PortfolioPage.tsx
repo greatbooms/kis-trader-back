@@ -10,17 +10,19 @@ import {
   GetAccountSummaryDocument,
   GetDashboardSummaryDocument,
   GetPositionsDocument,
+  GetTradesDocument,
   useGetPositionsQuery,
   useGetTradesQuery,
   useGetAccountSummaryQuery,
   useRefreshAccountStateMutation,
   useManualSellMutation,
+  useCancelTradeOrderMutation,
   type Market,
   type GetPositionsQuery,
   type Side,
 } from '@/graphql/generated'
-import { getTradeRecordDisplayInfo } from '@/lib/trade-record'
-import { formatCurrency, formatCurrencyByCode, formatPercent, formatNumber, formatDate } from '@/lib/utils'
+import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
+import { formatCurrency, formatCurrencyByCode, formatPercent, formatNumber, formatDate, formatDateInputInTimeZone } from '@/lib/utils'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 
 export function PortfolioPage() {
@@ -617,8 +619,8 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
   const isMobile = useIsMobile()
   const [sideFilter, setSideFilter] = useState<Side | null>(null)
   const [collapsed, setCollapsed] = useState(false)
-  const today = new Date().toISOString().slice(0, 10)
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const today = formatDateInputInTimeZone(new Date())
+  const weekAgo = formatDateInputInTimeZone(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
   const [dateFrom, setDateFrom] = useState<string>(weekAgo)
   const [dateTo, setDateTo] = useState<string>(today)
   const [page, setPage] = useState(0)
@@ -636,8 +638,36 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
       },
     },
   })
+  const [cancelTradeOrder, { loading: cancelLoading }] = useCancelTradeOrderMutation()
   const allTrades = data?.trades ?? []
   const trades = filterByCountry(allTrades, countryFilter)
+
+  const handleCancelTrade = async (tradeId: string) => {
+    if (!window.confirm('이 미체결 주문을 취소할까요?')) {
+      return
+    }
+
+    try {
+      const { data: result } = await cancelTradeOrder({
+        variables: {
+          input: {
+            tradeRecordId: tradeId,
+          },
+        },
+        refetchQueries: [GetTradesDocument],
+        awaitRefetchQueries: true,
+      })
+
+      if (result?.cancelTradeOrder.success) {
+        alert(result.cancelTradeOrder.message || '주문 취소 요청을 접수했습니다.')
+        return
+      }
+
+      alert(result?.cancelTradeOrder.message || '주문 취소 실패')
+    } catch (e: any) {
+      alert(`주문 취소 실패: ${e.message}`)
+    }
+  }
 
   useEffect(() => {
     setCollapsed(isMobile)
@@ -728,6 +758,18 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                       <MetricItem label="상세" value={info.detail ?? '-'} />
                     </div>
                     <div className="text-xs text-muted-foreground">{trade.reason ?? '-'}</div>
+                    {canCancelTrade(trade) ? (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={cancelLoading}
+                          onClick={() => handleCancelTrade(trade.id)}
+                        >
+                          주문 취소
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}
@@ -745,6 +787,7 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                     <TableHead className="w-[150px]">상세</TableHead>
                     <TableHead>전략</TableHead>
                     <TableHead>사유</TableHead>
+                    <TableHead className="w-[100px] text-center">액션</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -788,6 +831,20 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                         <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
                         <TableCell className="py-2 text-xs text-muted-foreground max-w-[260px]">
                           <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                        </TableCell>
+                        <TableCell className="py-2 text-center">
+                          {canCancelTrade(trade) ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={cancelLoading}
+                              onClick={() => handleCancelTrade(trade.id)}
+                            >
+                              취소
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     )

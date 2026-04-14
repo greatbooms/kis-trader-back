@@ -139,6 +139,14 @@ mutation ManualSell($input: ManualSellInput!) {
   }
 }
 
+mutation CancelTradeOrder($input: CancelTradeOrderInput!) {
+  cancelTradeOrder(input: $input) {
+    success
+    message
+    orderNo
+  }
+}
+
 mutation RefreshAccountState {
   refreshAccountState {
     success

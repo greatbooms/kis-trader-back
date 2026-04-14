@@ -4,8 +4,8 @@ import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { Market, Side, OrderType, OrderStatus, Prisma } from '@prisma/client';
-import { ManualSellInput } from './dto';
-import { BalanceItem } from '../kis/types/kis-api.types';
+import { ManualSellInput, CancelTradeOrderInput } from './dto';
+import { BalanceItem, BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
 import { DailyPrice } from '../kis/types/kis-api.types';
 
@@ -22,6 +22,41 @@ export class TradeRecordService {
     private configService: ConfigService,
   ) {
     this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
+  }
+
+  private toKstDateString(date: Date): string {
+    return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+  }
+
+  private getTodayKstDateString(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+  }
+
+  private async getBrokerOrderSnapshot(record: {
+    market: Market;
+    exchangeCode: string | null;
+    orderNo: string | null;
+    createdAt: Date;
+  }): Promise<{ brokerOrder?: BrokerOrderStatus; unfilledOrders: UnfilledOrder[] }> {
+    if (record.market === Market.DOMESTIC) {
+      const [brokerOrders, unfilledOrders] = await Promise.all([
+        this.kisDomestic.getOrderExecutions(this.toKstDateString(record.createdAt), this.getTodayKstDateString()),
+        this.kisDomestic.getUnfilledOrders(),
+      ]);
+      return {
+        brokerOrder: brokerOrders.find((item) => item.orderNo === record.orderNo),
+        unfilledOrders,
+      };
+    }
+
+    const [brokerOrders, unfilledOrders] = await Promise.all([
+      this.kisOverseas.getOrderExecutions(this.toKstDateString(record.createdAt), this.getTodayKstDateString()),
+      this.kisOverseas.getUnfilledOrders(),
+    ]);
+    return {
+      brokerOrder: brokerOrders.find((item) => item.orderNo === record.orderNo),
+      unfilledOrders,
+    };
   }
 
   findAll(options?: {
@@ -414,5 +449,131 @@ export class TradeRecordService {
       });
       return { success: false, message: e.message };
     }
+  }
+
+  async cancelTradeOrder(
+    input: CancelTradeOrderInput,
+  ): Promise<{ success: boolean; message?: string; orderNo?: string }> {
+    if (!this.tradingEnabled) {
+      return { success: false, message: '현재 환경에서는 실거래가 비활성화되어 주문 취소를 실행할 수 없습니다.' };
+    }
+
+    const record = await this.prisma.tradeRecord.findUnique({
+      where: { id: input.tradeRecordId },
+    });
+
+    if (!record) {
+      return { success: false, message: '주문 기록을 찾을 수 없습니다.' };
+    }
+
+    if (record.status !== OrderStatus.PENDING && record.status !== OrderStatus.PARTIAL) {
+      return { success: false, message: '취소 가능한 주문 상태가 아닙니다.' };
+    }
+
+    if (!record.orderNo) {
+      return { success: false, message: '브로커 주문번호가 없어 취소할 수 없습니다.' };
+    }
+
+    const remainingQty = Math.max(0, record.quantity - (record.executedQty || 0));
+    if (remainingQty <= 0) {
+      return { success: false, message: '남아 있는 미체결 수량이 없습니다.' };
+    }
+
+    let result;
+    if (record.market === Market.DOMESTIC) {
+      result = await this.kisDomestic.cancelOrder(record.orderNo, record.stockCode, remainingQty);
+    } else {
+      result = await this.kisOverseas.cancelOrder(
+        record.exchangeCode,
+        record.orderNo,
+        record.stockCode,
+        remainingQty,
+        Number(record.price),
+      );
+    }
+
+    if (!result.success) {
+      const { brokerOrder, unfilledOrders } = await this.getBrokerOrderSnapshot(record);
+      const stillOpen = !!record.orderNo && unfilledOrders.some((item) => item.orderNo === record.orderNo);
+
+      if (!stillOpen) {
+        const totalExecutedQty = Math.min(record.quantity, brokerOrder?.filledQuantity || record.executedQty || 0);
+        const nextExecutedPrice = brokerOrder?.filledPrice ?? Number(record.executedPrice ?? record.price);
+
+        if (totalExecutedQty >= record.quantity) {
+          await this.prisma.tradeRecord.update({
+            where: { id: record.id },
+            data: {
+              status: OrderStatus.FILLED,
+              executedQty: totalExecutedQty,
+              executedPrice: nextExecutedPrice,
+              reason: record.reason ? `${record.reason} | 취소 요청 시 전량 체결 확인` : '취소 요청 시 전량 체결 확인',
+            },
+          });
+          return { success: false, message: `${record.stockCode} 주문은 이미 전량 체결된 것으로 확인되었습니다.` };
+        }
+
+        if (totalExecutedQty > 0) {
+          await this.prisma.tradeRecord.update({
+            where: { id: record.id },
+            data: {
+              status: OrderStatus.PARTIAL,
+              executedQty: totalExecutedQty,
+              executedPrice: nextExecutedPrice,
+              orderNo: null,
+              reason: record.reason ? `${record.reason} | 이미 일부 체결 후 잔량 취소됨` : '이미 일부 체결 후 잔량 취소됨',
+            },
+          });
+          return {
+            success: true,
+            orderNo: record.orderNo,
+            message: `${record.stockCode} 주문은 이미 일부 체결 후 잔량 취소된 것으로 확인되었습니다.`,
+          };
+        }
+
+        await this.prisma.tradeRecord.update({
+          where: { id: record.id },
+          data: {
+            status: OrderStatus.CANCELLED,
+            reason: record.reason ? `${record.reason} | 이미 취소된 주문으로 확인됨` : '이미 취소된 주문으로 확인됨',
+          },
+        });
+        return {
+          success: true,
+          orderNo: record.orderNo,
+          message: `${record.stockCode} 주문은 이미 취소된 것으로 확인되었습니다.`,
+        };
+      }
+
+      return { success: false, message: result.message };
+    }
+
+    const nextReasonBase = record.reason ? `${record.reason} | 사용자 취소 요청` : '사용자 취소 요청';
+
+    if (record.status === OrderStatus.PARTIAL) {
+      await this.prisma.tradeRecord.update({
+        where: { id: record.id },
+        data: {
+          orderNo: null,
+          reason: nextReasonBase,
+        },
+      });
+    } else {
+      await this.prisma.tradeRecord.update({
+        where: { id: record.id },
+        data: {
+          status: OrderStatus.CANCELLED,
+          reason: nextReasonBase,
+        },
+      });
+    }
+
+    this.logger.log(`Manual cancel order submitted: ${record.stockCode} #${record.orderNo}`);
+
+    return {
+      success: true,
+      orderNo: record.orderNo,
+      message: `${record.stockCode} 주문 취소 요청을 접수했습니다.`,
+    };
   }
 }

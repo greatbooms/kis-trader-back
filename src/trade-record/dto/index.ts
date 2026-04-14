@@ -10,4 +10,6 @@ export { OverseasQuoteInput } from './overseas-quote.input';
 export { PositionsFilterInput } from './positions-filter.input';
 export { ManualSellInput } from './manual-sell.input';
 export { ManualSellResult } from './manual-sell-result.object';
+export { CancelTradeOrderInput } from './cancel-trade-order.input';
+export { CancelTradeOrderResult } from './cancel-trade-order-result.object';
 export { RefreshAccountStateResult } from './refresh-account-state-result.object';

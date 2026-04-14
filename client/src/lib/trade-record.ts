@@ -9,11 +9,16 @@ export interface TradeRecordDisplayInfo {
 }
 
 export interface TradeRecordLike {
+  id?: string
   status: OrderStatus
   quantity: number
   executedQty?: number | null
   orderNo?: string | null
   reason?: string | null
+}
+
+export function canCancelTrade(trade: TradeRecordLike): boolean {
+  return trade.status === 'PENDING' && !!trade.orderNo
 }
 
 export function getTradeRecordDisplayInfo(trade: TradeRecordLike): TradeRecordDisplayInfo {

@@ -41,6 +41,17 @@ export type AuthPayload = {
   success: Scalars['Boolean']['output'];
 };
 
+export type CancelTradeOrderInput = {
+  tradeRecordId: Scalars['ID']['input'];
+};
+
+export type CancelTradeOrderResult = {
+  __typename?: 'CancelTradeOrderResult';
+  message?: Maybe<Scalars['String']['output']>;
+  orderNo?: Maybe<Scalars['String']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 export type CashBalanceType = {
   __typename?: 'CashBalanceType';
   amount: Scalars['Float']['output'];
@@ -145,6 +156,7 @@ export type MarketRegimeType = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  cancelTradeOrder: CancelTradeOrderResult;
   createSimulation: SimulationSessionType;
   createWatchStock: WatchStockType;
   deleteSimulation: Scalars['Boolean']['output'];
@@ -164,6 +176,11 @@ export type Mutation = {
   updateSimulationSettings: SimulationSessionType;
   updateSimulationStatus: SimulationSessionType;
   updateWatchStock: WatchStockType;
+};
+
+
+export type MutationCancelTradeOrderArgs = {
+  input: CancelTradeOrderInput;
 };
 
 
@@ -1083,6 +1100,13 @@ export type ManualSellMutationVariables = Exact<{
 
 
 export type ManualSellMutation = { __typename?: 'Mutation', manualSell: { __typename?: 'ManualSellResult', success: boolean, message?: string | null, orderNo?: string | null } };
+
+export type CancelTradeOrderMutationVariables = Exact<{
+  input: CancelTradeOrderInput;
+}>;
+
+
+export type CancelTradeOrderMutation = { __typename?: 'Mutation', cancelTradeOrder: { __typename?: 'CancelTradeOrderResult', success: boolean, message?: string | null, orderNo?: string | null } };
 
 export type RefreshAccountStateMutationVariables = Exact<{ [key: string]: never; }>;
 
@@ -2618,6 +2642,38 @@ export function useManualSellMutation(baseOptions?: ApolloReactHooks.MutationHoo
         return ApolloReactHooks.useMutation<ManualSellMutation, ManualSellMutationVariables>(ManualSellDocument, options);
       }
 export type ManualSellMutationHookResult = ReturnType<typeof useManualSellMutation>;
+export const CancelTradeOrderDocument = gql`
+    mutation CancelTradeOrder($input: CancelTradeOrderInput!) {
+  cancelTradeOrder(input: $input) {
+    success
+    message
+    orderNo
+  }
+}
+    `;
+
+/**
+ * __useCancelTradeOrderMutation__
+ *
+ * To run a mutation, you first call `useCancelTradeOrderMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useCancelTradeOrderMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [cancelTradeOrderMutation, { data, loading, error }] = useCancelTradeOrderMutation({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useCancelTradeOrderMutation(baseOptions?: ApolloReactHooks.MutationHookOptions<CancelTradeOrderMutation, CancelTradeOrderMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return ApolloReactHooks.useMutation<CancelTradeOrderMutation, CancelTradeOrderMutationVariables>(CancelTradeOrderDocument, options);
+      }
+export type CancelTradeOrderMutationHookResult = ReturnType<typeof useCancelTradeOrderMutation>;
 export const RefreshAccountStateDocument = gql`
     mutation RefreshAccountState {
   refreshAccountState {

@@ -12,12 +12,13 @@ import {
   useGetWatchStockExecutionLogsQuery,
   useResetWatchStockCarryMutation,
   useGetTradesQuery,
+  useCancelTradeOrderMutation,
   useTriggerWatchStockNowMutation,
   useUpdateWatchStockMutation,
   useGetAvailableStrategiesQuery,
 } from '@/graphql/generated'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
-import { getTradeRecordDisplayInfo } from '@/lib/trade-record'
+import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 
@@ -93,7 +94,7 @@ export function WatchStockDetailPage() {
     skip: !id,
   })
 
-  const { data: tradesData, loading: tradesLoading } = useGetTradesQuery({
+  const { data: tradesData, loading: tradesLoading, refetch: tradesRefetch } = useGetTradesQuery({
     variables: {
       input: stock
         ? {
@@ -105,9 +106,10 @@ export function WatchStockDetailPage() {
     },
     skip: !stock,
   })
+  const [cancelTradeOrder, { loading: cancelTradeLoading }] = useCancelTradeOrderMutation()
 
   const actualTrades = useMemo(
-    () => (tradesData?.trades ?? []).filter((trade) => trade.status === 'FILLED' || (trade.executedQty ?? 0) > 0),
+    () => tradesData?.trades ?? [],
     [tradesData],
   )
 
@@ -177,6 +179,30 @@ export function WatchStockDetailPage() {
       setIsEditing(false)
     } catch (e: unknown) {
       setError(getMutationErrorMessage(e, '설정 저장 중 오류가 발생했습니다'))
+    }
+  }
+
+  const handleCancelTrade = async (tradeId: string) => {
+    if (!window.confirm('이 미체결 주문을 취소할까요?')) {
+      return
+    }
+
+    try {
+      const { data: result } = await cancelTradeOrder({
+        variables: {
+          input: { tradeRecordId: tradeId },
+        },
+      })
+
+      if (result?.cancelTradeOrder.success) {
+        await tradesRefetch()
+        alert(result.cancelTradeOrder.message || '주문 취소 요청을 접수했습니다.')
+        return
+      }
+
+      alert(result?.cancelTradeOrder.message || '주문 취소 실패')
+    } catch (e: unknown) {
+      alert(getMutationErrorMessage(e, '주문 취소 중 오류가 발생했습니다'))
     }
   }
 
@@ -454,6 +480,18 @@ export function WatchStockDetailPage() {
                         </div>
                       </div>
                       <div className="text-sm text-muted-foreground">{trade.reason ?? '-'}</div>
+                      {canCancelTrade(trade) ? (
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={cancelTradeLoading}
+                            onClick={() => handleCancelTrade(trade.id)}
+                          >
+                            주문 취소
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })}
@@ -468,6 +506,7 @@ export function WatchStockDetailPage() {
                       <TableHead className="text-right">수량</TableHead>
                       <TableHead className="text-right">가격</TableHead>
                       <TableHead>사유</TableHead>
+                      <TableHead className="text-center">액션</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -501,6 +540,20 @@ export function WatchStockDetailPage() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {canCancelTrade(trade) ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={cancelTradeLoading}
+                              onClick={() => handleCancelTrade(trade.id)}
+                            >
+                              취소
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

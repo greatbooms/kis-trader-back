@@ -34,6 +34,9 @@ describe('TradeRecordService', () => {
     getBuyableAmount: jest.fn(),
     getPrice: jest.fn(),
     orderSell: jest.fn(),
+    cancelOrder: jest.fn(),
+    getUnfilledOrders: jest.fn(),
+    getOrderExecutions: jest.fn(),
   };
 
   const mockKisOverseas = {
@@ -42,6 +45,9 @@ describe('TradeRecordService', () => {
     getAccountSnapshot: jest.fn(),
     getPrice: jest.fn(),
     orderSell: jest.fn(),
+    cancelOrder: jest.fn(),
+    getUnfilledOrders: jest.fn(),
+    getOrderExecutions: jest.fn(),
   };
 
   const mockConfigService = {
@@ -118,6 +124,134 @@ describe('TradeRecordService', () => {
           skip: 20,
         }),
       );
+    });
+  });
+
+  describe('cancelTradeOrder', () => {
+    it('should cancel a pending overseas order and update the record', async () => {
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 2,
+        executedQty: 0,
+        price: '56.73',
+        status: 'PENDING',
+        orderNo: '12345',
+        reason: 'Take profit order',
+      });
+      mockKisOverseas.cancelOrder.mockResolvedValue({
+        success: true,
+        orderNo: '12345',
+        message: 'Cancel order placed',
+      });
+
+      const result = await service.cancelTradeOrder({ tradeRecordId: 'trade-1' });
+
+      expect(mockKisOverseas.cancelOrder).toHaveBeenCalledWith('NASD', '12345', 'TQQQ', 2, 56.73);
+      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
+        where: { id: 'trade-1' },
+        data: {
+          status: 'CANCELLED',
+          reason: 'Take profit order | 사용자 취소 요청',
+        },
+      });
+      expect(result).toEqual({
+        success: true,
+        orderNo: '12345',
+        message: 'TQQQ 주문 취소 요청을 접수했습니다.',
+      });
+    });
+
+    it('should treat an already-cancelled order as success when broker no longer reports it as open', async () => {
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-2',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 1,
+        executedQty: 0,
+        executedPrice: null,
+        price: '56.73',
+        status: 'PENDING',
+        orderNo: '88888',
+        reason: 'Take profit order',
+        createdAt: new Date('2026-04-15T00:00:00.000Z'),
+      });
+      mockKisOverseas.cancelOrder.mockResolvedValue({
+        success: false,
+        message: 'KIS API error [TTTT1004U] /uapi/overseas-stock/v1/trading/order-rvsecncl: ABCD1234 - 이미 취소된 주문입니다.',
+      });
+      mockKisOverseas.getOrderExecutions.mockResolvedValue([]);
+      mockKisOverseas.getUnfilledOrders.mockResolvedValue([]);
+
+      const result = await service.cancelTradeOrder({ tradeRecordId: 'trade-2' });
+
+      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
+        where: { id: 'trade-2' },
+        data: {
+          status: 'CANCELLED',
+          reason: 'Take profit order | 이미 취소된 주문으로 확인됨',
+        },
+      });
+      expect(result).toEqual({
+        success: true,
+        orderNo: '88888',
+        message: 'TQQQ 주문은 이미 취소된 것으로 확인되었습니다.',
+      });
+    });
+
+    it('should reconcile a partially filled order when cancel fails but broker reports closed remainder', async () => {
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-3',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 2,
+        executedQty: 0,
+        executedPrice: null,
+        price: '56.73',
+        status: 'PENDING',
+        orderNo: '77777',
+        reason: 'Take profit order',
+        createdAt: new Date('2026-04-15T00:00:00.000Z'),
+      });
+      mockKisOverseas.cancelOrder.mockResolvedValue({
+        success: false,
+        message: 'KIS API error [TTTT1004U] /uapi/overseas-stock/v1/trading/order-rvsecncl: ABCD1234 - 원주문 없음',
+      });
+      mockKisOverseas.getOrderExecutions.mockResolvedValue([
+        {
+          orderNo: '77777',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          orderQuantity: 2,
+          filledQuantity: 1,
+          remainingQuantity: 0,
+          filledPrice: 56.73,
+          exchangeCode: 'NASD',
+        },
+      ]);
+      mockKisOverseas.getUnfilledOrders.mockResolvedValue([]);
+
+      const result = await service.cancelTradeOrder({ tradeRecordId: 'trade-3' });
+
+      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
+        where: { id: 'trade-3' },
+        data: {
+          status: 'PARTIAL',
+          executedQty: 1,
+          executedPrice: 56.73,
+          orderNo: null,
+          reason: 'Take profit order | 이미 일부 체결 후 잔량 취소됨',
+        },
+      });
+      expect(result).toEqual({
+        success: true,
+        orderNo: '77777',
+        message: 'TQQQ 주문은 이미 일부 체결 후 잔량 취소된 것으로 확인되었습니다.',
+      });
     });
   });
 

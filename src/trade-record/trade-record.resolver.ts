@@ -16,6 +16,8 @@ import {
   PositionsFilterInput,
   ManualSellInput,
   ManualSellResult,
+  CancelTradeOrderInput,
+  CancelTradeOrderResult,
   RefreshAccountStateResult,
 } from './dto';
 
@@ -95,5 +97,12 @@ export class TradeRecordResolver {
   @Mutation(() => ManualSellResult, { name: 'manualSell' })
   async manualSell(@Args('input') input: ManualSellInput): Promise<ManualSellResult> {
     return this.tradeRecordService.manualSell(input);
+  }
+
+  @Mutation(() => CancelTradeOrderResult, { name: 'cancelTradeOrder' })
+  async cancelTradeOrder(
+    @Args('input') input: CancelTradeOrderInput,
+  ): Promise<CancelTradeOrderResult> {
+    return this.tradeRecordService.cancelTradeOrder(input);
   }
 }

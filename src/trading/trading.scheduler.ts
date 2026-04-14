@@ -26,6 +26,11 @@ import { OrderSyncService } from './order-sync.service';
 
 const DAILY_SUMMARY_SENT_KEY_PREFIX = 'daily-summary-sent';
 
+type KstExecutionTime = {
+  hour: number;
+  minute: number;
+};
+
 @Injectable()
 export class TradingScheduler implements OnModuleInit {
   private readonly logger = new Logger(TradingScheduler.name);
@@ -331,12 +336,8 @@ export class TradingScheduler implements OnModuleInit {
     );
 
     // 3. 미체결 주문 정리 (once-daily 전략 실행 시각에만)
-    const kstHour = this.getKSTHour();
-    const hasOnceDailyNow = this.strategyRegistry.getAllStrategies().some((s) => {
-      if (s.executionMode.type !== 'once-daily') return false;
-      if (market === 'DOMESTIC') return kstHour === s.executionMode.hours.domestic;
-      return kstHour === this.getOverseasExecutionHour(exchangeCode, s.executionMode.hours.overseas);
-    });
+    const hasOnceDailyNow = this.strategyRegistry.getAllStrategies()
+      .some((strategy) => this.shouldExecuteNow(strategy, market, exchangeCode));
 
     if (hasOnceDailyNow) {
       await this.cancelUnfilledOrders(market, unfilledOrders);
@@ -669,34 +670,52 @@ export class TradingScheduler implements OnModuleInit {
 
     if (mode.type === 'continuous') return true;
 
-    // once-daily: 해당 시각(KST hour)에만 실행
-    const kstHour = this.getKSTHour();
-    if (market === 'DOMESTIC') return kstHour === mode.hours.domestic;
-    // 해외: 거래소 장 시간 기준으로 실행 시각 계산
-    return kstHour === this.getOverseasExecutionHour(exchangeCode, mode.hours.overseas);
+    const now = this.getKSTTime();
+    const target = market === 'DOMESTIC'
+      ? { hour: mode.hours.domestic, minute: 0 }
+      : this.getOverseasExecutionTime(exchangeCode, mode.hours.overseas);
+
+    return now.hour === target.hour && now.minute === target.minute;
   }
 
   /** 거래소 장 시간 기준으로 KST 실행 시각 계산 */
-  private getOverseasExecutionHour(
+  private getOverseasExecutionTime(
     exchangeCode: string,
     overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
-  ): number {
+  ): KstExecutionTime {
     const hours = getMarketHours(exchangeCode);
-    if (!hours) return (0 + overseas.offsetHours) % 24;
-    if (overseas.basis === 'afterOpen') {
-      return (hours.open.hour + overseas.offsetHours) % 24;
+    if (!hours) {
+      return {
+        hour: (overseas.offsetHours + 24) % 24,
+        minute: 0,
+      };
     }
+
+    if (overseas.basis === 'afterOpen') {
+      return {
+        hour: (hours.open.hour + overseas.offsetHours) % 24,
+        minute: hours.open.minute,
+      };
+    }
+
     // beforeClose: 장 마감 시각에서 offset만큼 빼기
     const closeHour = hours.overnight
       ? hours.close.hour + 24 // 미국: 06 → 30
       : hours.close.hour;
-    return (closeHour - overseas.offsetHours) % 24;
+
+    return {
+      hour: ((closeHour - overseas.offsetHours) % 24 + 24) % 24,
+      minute: hours.close.minute,
+    };
   }
 
-  private getKSTHour(): number {
+  private getKSTTime(): KstExecutionTime {
     const now = new Date();
     const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    return kst.getUTCHours();
+    return {
+      hour: kst.getUTCHours(),
+      minute: kst.getUTCMinutes(),
+    };
   }
 
   private getKSTDate(): string {
@@ -803,6 +822,7 @@ export class TradingScheduler implements OnModuleInit {
   ): Promise<void> {
     try {
       if (marketType === 'OVERSEAS') {
+        let cancelledCount = 0;
         for (const order of orders) {
           this.logger.log(`Cancelling overseas unfilled order: ${order.stockCode} #${order.orderNo}`);
           const result = await this.kisOverseas.cancelOrder(
@@ -813,30 +833,37 @@ export class TradingScheduler implements OnModuleInit {
             order.price,
           );
           if (result.success) {
+            cancelledCount += 1;
             await this.tradingService.markOpenOrderCancelled(
               'OVERSEAS',
               order.orderNo,
               '장중 재실행 전 미체결 주문 취소',
             );
+          } else {
+            this.logger.warn(`Failed to cancel overseas unfilled order ${order.stockCode} #${order.orderNo}: ${result.message}`);
           }
         }
-        if (orders.length > 0) {
-          this.logger.log(`Cancelled ${orders.length} overseas unfilled orders`);
+        if (cancelledCount > 0) {
+          this.logger.log(`Cancelled ${cancelledCount} overseas unfilled orders`);
         }
       } else {
+        let cancelledCount = 0;
         for (const order of orders) {
           this.logger.log(`Cancelling domestic unfilled order: ${order.stockCode} #${order.orderNo}`);
           const result = await this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity);
           if (result.success) {
+            cancelledCount += 1;
             await this.tradingService.markOpenOrderCancelled(
               'DOMESTIC',
               order.orderNo,
               '장중 재실행 전 미체결 주문 취소',
             );
+          } else {
+            this.logger.warn(`Failed to cancel domestic unfilled order ${order.stockCode} #${order.orderNo}: ${result.message}`);
           }
         }
-        if (orders.length > 0) {
-          this.logger.log(`Cancelled ${orders.length} domestic unfilled orders`);
+        if (cancelledCount > 0) {
+          this.logger.log(`Cancelled ${cancelledCount} domestic unfilled orders`);
         }
       }
     } catch (e) {
