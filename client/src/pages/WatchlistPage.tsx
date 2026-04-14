@@ -580,6 +580,15 @@ const DEFAULT_STRATEGY_META = {
   stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절 매도합니다.',
 }
 
+function parseStrategyParams(value?: string | null): Record<string, any> {
+  if (!value) return {}
+  try {
+    return JSON.parse(value) as Record<string, any>
+  } catch {
+    return {}
+  }
+}
+
 // ── 종목 수정 모달 ──
 
 function EditWatchStockModal({
@@ -597,7 +606,7 @@ function EditWatchStockModal({
   const [quota, setQuota] = useState(String(stock.quota ?? ''))
   const [maxCycles, setMaxCycles] = useState(String(stock.maxCycles))
   const [stopLossRate, setStopLossRate] = useState(String(Math.round(stock.stopLossRate * 100)))
-  const existingParams = stock.strategyParams ? JSON.parse(stock.strategyParams) : {}
+  const existingParams = parseStrategyParams(stock.strategyParams)
   const [sell1Rate, setSell1Rate] = useState(existingParams.sell1Rate ? String(Math.round(existingParams.sell1Rate * 100)) : '')
   const [sell2Rate, setSell2Rate] = useState(existingParams.sell2Rate ? String(Math.round(existingParams.sell2Rate * 100)) : '')
   const [submitting, setSubmitting] = useState(false)
