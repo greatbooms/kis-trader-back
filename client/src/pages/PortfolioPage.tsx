@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Wallet, TrendingUp, TrendingDown, PiggyBank, BarChart3, Info, RefreshCw, ChevronDown } from 'lucide-react'
 import {
+  GetAccountSummaryDocument,
+  GetDashboardSummaryDocument,
+  GetPositionsDocument,
   useGetPositionsQuery,
   useGetTradesQuery,
   useGetAccountSummaryQuery,
@@ -192,7 +195,14 @@ function AccountSummaryCard({ countryFilter }: { countryFilter: string | null })
   const [collapsed, setCollapsed] = useState(false)
   const { data, loading, refetch } = useGetAccountSummaryQuery()
   const { data: positionsData } = useGetPositionsQuery()
-  const [refreshAccountState, { loading: refreshLoading }] = useRefreshAccountStateMutation()
+  const [refreshAccountState, { loading: refreshLoading }] = useRefreshAccountStateMutation({
+    refetchQueries: [
+      GetAccountSummaryDocument,
+      GetPositionsDocument,
+      GetDashboardSummaryDocument,
+    ],
+    awaitRefetchQueries: true,
+  })
   const summary = data?.accountSummary
   const positions = positionsData?.positions ?? []
   const scopedSummary = summary

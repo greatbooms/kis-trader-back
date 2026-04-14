@@ -6,6 +6,7 @@ export default () => ({
     accountNo: process.env.KIS_ACCOUNT_NO || '',
     prodCode: process.env.KIS_PROD_CODE || '01',
     env: (process.env.KIS_ENV || 'paper') as 'paper' | 'prod',
+    debugRawBalance: process.env.KIS_DEBUG_RAW_BALANCE === 'true',
   },
   openDart: {
     apiKey: process.env.OPENDART_API_KEY || '',

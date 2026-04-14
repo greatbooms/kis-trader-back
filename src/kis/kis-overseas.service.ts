@@ -27,6 +27,7 @@ export class KisOverseasService {
   private readonly accountNo: string;
   private readonly prodCode: string;
   private readonly isPaper: boolean;
+  private readonly debugRawBalance: boolean;
   private useStandardBalanceOnly = false;
 
   constructor(
@@ -36,6 +37,7 @@ export class KisOverseasService {
     this.accountNo = this.configService.get<string>('kis.accountNo')!;
     this.prodCode = this.configService.get<string>('kis.prodCode')!;
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
+    this.debugRawBalance = this.configService.get<boolean>('kis.debugRawBalance') ?? false;
   }
 
   private hasContinuationToken(token?: string): boolean {
@@ -53,6 +55,143 @@ export class KisOverseasService {
       previousFk === nextFk &&
       previousNk === nextNk
     );
+  }
+
+  private pickQuantityFields(row: Record<string, any> | undefined): Record<string, any> {
+    if (!row) return {};
+    return Object.fromEntries(
+      Object.entries(row).filter(([key]) => /qty|qnt|cblc|hldg|ccld/i.test(key)),
+    );
+  }
+
+  private logRawBalancePage(
+    label: string,
+    output1: unknown,
+    output2: unknown,
+    extra?: Record<string, any>,
+    force = false,
+  ): void {
+    if (!this.debugRawBalance && !force) return;
+
+    const rows1 = Array.isArray(output1) ? output1 : [];
+    const rows2 = Array.isArray(output2) ? output2 : [];
+    const first1 = rows1[0] as Record<string, any> | undefined;
+    const first2 = rows2[0] as Record<string, any> | undefined;
+
+    this.logger.warn(
+      `[KIS DEBUG] ${label} summary ${JSON.stringify({
+        output1Count: rows1.length,
+        output2Count: rows2.length,
+        output1Keys: first1 ? Object.keys(first1) : [],
+        output2Keys: first2 ? Object.keys(first2) : [],
+        output1QuantityFields: this.pickQuantityFields(first1),
+        ...extra,
+      })}`,
+    );
+
+    if (first1) {
+      this.logger.warn(`[KIS DEBUG] ${label} output1[0] ${JSON.stringify(first1)}`);
+    }
+    if (first2) {
+      this.logger.warn(`[KIS DEBUG] ${label} output2[0] ${JSON.stringify(first2)}`);
+    }
+  }
+
+  private readNumber(
+    row: Record<string, any>,
+    ...keys: string[]
+  ): number | undefined {
+    for (const key of keys) {
+      const value = row[key];
+      if (value === undefined || value === null || value === '') continue;
+      const parsed = parseFloat(String(value));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  }
+
+  private readString(
+    row: Record<string, any>,
+    ...keys: string[]
+  ): string | undefined {
+    for (const key of keys) {
+      const value = row[key];
+      if (value === undefined || value === null) continue;
+      const trimmed = String(value).trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    return undefined;
+  }
+
+  private parseOverseasPresentBalanceRow(row: Record<string, any>): BalanceItem | undefined {
+    const quantity = Math.trunc(
+      this.readNumber(row, 'ovrs_cblc_qty', 'ccld_qty_smtl1', 'ord_psbl_qty1', 'cblc_qty13') || 0,
+    );
+    if (quantity <= 0) return undefined;
+
+    const exchangeRate = this.readNumber(row, 'bass_exrt') || 0;
+    const unitAmount = this.readNumber(row, 'unit_amt') || 1;
+    const useConvertedPricing = row.ovrs_now_pric1 !== undefined;
+    const avgPrice = useConvertedPricing
+      ? this.toLocalCurrencyPrice(
+          String(this.readNumber(row, 'avg_unpr3', 'pchs_avg_pric') || 0),
+          exchangeRate,
+          unitAmount,
+        )
+      : (this.readNumber(row, 'pchs_avg_pric') || 0);
+    const currentPrice = useConvertedPricing
+      ? this.toLocalCurrencyPrice(String(this.readNumber(row, 'ovrs_now_pric1') || 0), exchangeRate, unitAmount)
+      : (this.readNumber(row, 'now_pric2') || 0);
+    const profitLoss = row.frcr_evlu_pfls_amt !== undefined
+      ? (this.readNumber(row, 'frcr_evlu_pfls_amt') || 0)
+      : useConvertedPricing
+        ? this.toLocalCurrencyPrice(String(this.readNumber(row, 'evlu_pfls_amt2') || 0), exchangeRate, unitAmount)
+        : (this.readNumber(row, 'ovrs_stck_evlu_pfls_amt', 'evlu_pfls_amt2') || 0);
+
+    return {
+      stockCode: this.readString(row, 'ovrs_pdno', 'pdno') || '',
+      stockName: this.readString(row, 'ovrs_item_name', 'prdt_name') || '',
+      quantity,
+      avgPrice,
+      currentPrice,
+      profitLoss,
+      profitRate: this.readNumber(row, 'evlu_pfls_rt', 'evlu_pfls_rt1') || 0,
+      exchangeCode: this.readString(row, 'ovrs_excg_cd'),
+    };
+  }
+
+  private parseOverseasStandardBalanceRow(
+    row: Record<string, any>,
+    fallbackExchangeCode: string,
+  ): BalanceItem | undefined {
+    const quantity = Math.trunc(
+      this.readNumber(row, 'ccld_qty_smtl1', 'ovrs_cblc_qty', 'ord_psbl_qty') || 0,
+    );
+    if (quantity <= 0) return undefined;
+
+    const exchangeRate = this.readNumber(row, 'bass_exrt') || 0;
+    const unitAmount = this.readNumber(row, 'unit_amt') || 1;
+    const hasDirectPricing = row.now_pric2 !== undefined || row.pchs_avg_pric !== undefined;
+    const avgPrice = hasDirectPricing
+      ? (this.readNumber(row, 'pchs_avg_pric') || 0)
+      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'avg_unpr3') || 0), exchangeRate, unitAmount);
+    const currentPrice = hasDirectPricing
+      ? (this.readNumber(row, 'now_pric2') || 0)
+      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'ovrs_now_pric1') || 0), exchangeRate, unitAmount);
+    const profitLoss = row.frcr_evlu_pfls_amt !== undefined
+      ? (this.readNumber(row, 'frcr_evlu_pfls_amt') || 0)
+      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'evlu_pfls_amt2') || 0), exchangeRate, unitAmount);
+
+    return {
+      stockCode: this.readString(row, 'pdno', 'ovrs_pdno') || '',
+      stockName: this.readString(row, 'prdt_name', 'ovrs_item_name') || '',
+      quantity,
+      avgPrice,
+      currentPrice,
+      profitLoss,
+      profitRate: this.readNumber(row, 'evlu_pfls_rt1', 'evlu_pfls_rt') || 0,
+      exchangeCode: this.readString(row, 'ovrs_excg_cd') || fallbackExchangeCode,
+    };
   }
 
   /** 해외 현재가상세 조회 (PER/PBR/EPS/BPS 포함) */
@@ -689,22 +828,43 @@ export class KisOverseasService {
       );
 
       const output1 = res.output1 as OverseasBalanceItem[];
+      const parsedCountBefore = items.length;
+      this.logRawBalancePage(
+        'present-balance',
+        output1,
+        res.output2,
+        { page: depth + 1 },
+      );
       if (output1) {
         rawItemCount += output1.length;
         for (const item of output1) {
-          const qty = parseInt(item.ovrs_cblc_qty, 10) || 0;
-          if (qty <= 0) continue;
-          items.push({
-            stockCode: item.ovrs_pdno,
-            stockName: item.ovrs_item_name,
-            quantity: qty,
-            avgPrice: parseFloat(item.pchs_avg_pric) || 0,
-            currentPrice: parseFloat(item.now_pric2) || 0,
-            profitLoss: parseFloat(item.ovrs_stck_evlu_pfls_amt) || 0,
-            profitRate: parseFloat(item.evlu_pfls_rt) || 0,
-            exchangeCode: item.ovrs_excg_cd,
-          });
+          const parsed = this.parseOverseasPresentBalanceRow(item as unknown as Record<string, any>);
+          if (!parsed) {
+            if (this.debugRawBalance) {
+              this.logger.warn(
+                `[KIS DEBUG] present-balance skipped row due to qty<=0 ${JSON.stringify({
+                  stockCode: this.readString(item as unknown as Record<string, any>, 'ovrs_pdno', 'pdno'),
+                  exchangeCode: this.readString(item as unknown as Record<string, any>, 'ovrs_excg_cd'),
+                  parsedQty: this.readNumber(item as unknown as Record<string, any>, 'ovrs_cblc_qty', 'ccld_qty_smtl1', 'ord_psbl_qty1', 'cblc_qty13') || 0,
+                  quantityFields: this.pickQuantityFields(item as unknown as Record<string, any>),
+                  row: item,
+                })}`,
+              );
+            }
+            continue;
+          }
+          items.push(parsed);
         }
+      }
+
+      if ((output1?.length ?? 0) > 0 && items.length === parsedCountBefore) {
+        this.logRawBalancePage(
+          'present-balance:unparsed-page',
+          output1,
+          res.output2,
+          { page: depth + 1, parsedCountBefore, parsedCountAfter: items.length },
+          true,
+        );
       }
 
       const output2 = (res.output2 as OverseasPresentBalanceCurrencyItem[]) || [];
@@ -746,6 +906,13 @@ export class KisOverseasService {
     }
 
     if (rawItemCount > 0 && items.length === 0) {
+      this.logRawBalancePage(
+        'present-balance:unparsed-fallback',
+        [],
+        Array.from(cashBalances.values()),
+        { rawItemCount, parsedCount: items.length },
+        true,
+      );
       this.logger.warn(
         'Overseas present balance returned raw items but no usable holdings; falling back to standard balance parser',
       );
@@ -797,25 +964,45 @@ export class KisOverseasService {
         );
 
         const output1 = res.output1 as OverseasStandardBalanceItem[];
+        const parsedCountBefore = items.length;
+        this.logRawBalancePage(
+          `standard-balance:${exchangeCode}`,
+          output1,
+          undefined,
+          { page: depth + 1, currencyCode },
+        );
         if (output1) {
           for (const item of output1) {
-            const qty = Math.trunc(parseFloat(item.ccld_qty_smtl1) || 0);
-            if (qty <= 0) continue;
-
-            const exchangeRate = parseFloat(item.bass_exrt) || 0;
-            const unitAmount = parseFloat(item.unit_amt) || 1;
-
-            items.push({
-              stockCode: item.pdno,
-              stockName: item.prdt_name,
-              quantity: qty,
-              avgPrice: this.toLocalCurrencyPrice(item.avg_unpr3, exchangeRate, unitAmount),
-              currentPrice: this.toLocalCurrencyPrice(item.ovrs_now_pric1, exchangeRate, unitAmount),
-              profitLoss: parseFloat(item.evlu_pfls_amt2) || 0,
-              profitRate: parseFloat(item.evlu_pfls_rt1) || 0,
-              exchangeCode: item.ovrs_excg_cd || exchangeCode,
-            });
+            const parsed = this.parseOverseasStandardBalanceRow(
+              item as unknown as Record<string, any>,
+              exchangeCode,
+            );
+            if (!parsed) {
+              if (this.debugRawBalance) {
+                this.logger.warn(
+                  `[KIS DEBUG] standard-balance skipped row due to qty<=0 ${JSON.stringify({
+                    stockCode: this.readString(item as unknown as Record<string, any>, 'pdno', 'ovrs_pdno'),
+                    exchangeCode: this.readString(item as unknown as Record<string, any>, 'ovrs_excg_cd') || exchangeCode,
+                    parsedQty: this.readNumber(item as unknown as Record<string, any>, 'ccld_qty_smtl1', 'ovrs_cblc_qty', 'ord_psbl_qty') || 0,
+                    quantityFields: this.pickQuantityFields(item as unknown as Record<string, any>),
+                    row: item,
+                  })}`,
+                );
+              }
+              continue;
+            }
+            items.push(parsed);
           }
+        }
+
+        if ((output1?.length ?? 0) > 0 && items.length === parsedCountBefore) {
+          this.logRawBalancePage(
+            `standard-balance:${exchangeCode}:unparsed-page`,
+            output1,
+            undefined,
+            { page: depth + 1, currencyCode, parsedCountBefore, parsedCountAfter: items.length },
+            true,
+          );
         }
 
         const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();

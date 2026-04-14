@@ -24,7 +24,7 @@ describe('KisOverseasService', () => {
     }) as unknown as ConfigService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   it('should fallback to standard balance when present balance returns INVALID_CHECK_ACNO', async () => {
@@ -226,6 +226,11 @@ describe('KisOverseasService', () => {
         ],
         ctx_area_fk200: '',
         ctx_area_nk200: '',
+      })
+      .mockResolvedValue({
+        output1: [],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
       });
 
     const snapshot = await service.getAccountSnapshot();
@@ -253,5 +258,71 @@ describe('KisOverseasService', () => {
       }),
       {},
     );
+  });
+
+  it('should parse current production present-balance and standard-balance response shapes', async () => {
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.get
+      .mockResolvedValueOnce({
+        output1: [
+          {
+            prdt_name: 'PROSHARES QQQ 3X',
+            cblc_qty13: '0.00000000',
+            thdt_buy_ccld_qty1: '1.00000000',
+            thdt_sll_ccld_qty1: '0.00000000',
+            ccld_qty_smtl1: '1.00000000',
+            ord_psbl_qty1: '1.00000000',
+            frcr_pchs_amt: '73491.00000',
+            frcr_evlu_amt2: '76501.000000',
+            evlu_pfls_amt2: '3010.00000',
+            evlu_pfls_rt1: '4.09000000',
+            pdno: 'TQQQ',
+            bass_exrt: '1489.80000000',
+            buy_crcy_cd: 'USD',
+            ovrs_now_pric1: '76501.23000',
+            avg_unpr3: '73491.0000',
+            tr_mket_name: '나스닥',
+            natn_kor_name: '미국',
+            unit_amt: '1',
+            ovrs_excg_cd: 'NASD',
+          },
+        ],
+        output2: [
+          {
+            crcy_cd: 'USD',
+            crcy_cd_name: '미국 달러',
+            frcr_dncl_amt_2: '1000.000000',
+            frcr_drwg_psbl_amt_1: '950.550000',
+          },
+        ],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      });
+
+    const snapshot = await service.getAccountSnapshot();
+
+    expect(snapshot.balance).toHaveLength(1);
+    expect(snapshot.balance[0]).toMatchObject({
+      stockCode: 'TQQQ',
+      stockName: 'PROSHARES QQQ 3X',
+      quantity: 1,
+      exchangeCode: 'NASD',
+      profitRate: 4.09,
+    });
+    expect(snapshot.balance[0]?.avgPrice).toBeCloseTo(49.33, 2);
+    expect(snapshot.balance[0]?.currentPrice).toBeCloseTo(51.35, 2);
+    expect(snapshot.balance[0]?.profitLoss).toBeCloseTo(2.02, 2);
+    expect(snapshot.cashBalances).toEqual([
+      {
+        currencyCode: 'USD',
+        currencyName: '미국 달러',
+        amount: 1000,
+        withdrawableAmount: 950.55,
+      },
+    ]);
   });
 });
