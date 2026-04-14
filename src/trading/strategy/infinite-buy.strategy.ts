@@ -113,11 +113,13 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 하락장에서도 분할매수를 이어가되, 가격 과열/과매도와 초고변동성만 최소한으로 반영',
     '- RSI < 30 과매도 구간에서는 매수금액 1.25배 증가',
     '- RSI 60 이상 과열 구간에서는 단계적으로 매수금액 축소',
-    '- RSI 60~70: 15% 축소, 70~80: 40% 축소, 80 이상: 60% 축소',
+    '- RSI 60~70: 15% 축소, 70 이상: 눌림목(Buy2)만 허용하며 매수금액 추가 축소',
+    '- RSI 70~80: 40% 축소, 80 이상: 60% 축소',
     '- 30일 변동성 45% 이상이면 매수금액 15% 축소',
     '',
     '【매수 방식】',
-    '- 모든 구간에서 Buy1(현재가) 70% + Buy2(현재가 아래 지정가) 30%로 분할 매수',
+    '- 기본적으로 Buy1(현재가) 70% + Buy2(현재가 아래 지정가) 30%로 분할 매수',
+    '- RSI 70 이상 과열 구간에서는 Buy1을 막고 Buy2 눌림 매수만 허용',
     '- 한쪽 주문 수량이 0주면 남는 예산을 반대쪽 주문으로 재배분해 총 매수 수량을 최대화',
     '- 매수금액이 1주 가격 미만이면 다음 사이클로 이월, 누적 후 매수',
     '- Buy2 지정가: ATR% 기반 할인폭의 50%를 적용하되, 0.5%~1.5% 범위로 제한 (기본 1.0%)',
@@ -378,20 +380,29 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       const buy1Quota = adjustedQuota * 0.7;
       const buy2Quota = adjustedQuota * 0.3;
-      let buy1Qty = Math.floor(buy1Quota / buy1Price);
+      const buy2OnlyMode = (stockIndicators.rsi14 ?? 0) >= 70;
+      let buy1Qty = buy2OnlyMode ? 0 : Math.floor(buy1Quota / buy1Price);
       let buy2Qty = Math.floor(buy2Quota / buy2Price);
-      let buy1ReasonShare = '70%';
+      let buy1ReasonShare = buy2OnlyMode ? '차단' : '70%';
       let buy2ReasonShare = '30%';
 
       buy1PriceLogged = buy1Price;
       buy2PriceLogged = buy2Price;
       dipRateLogged = dipRate;
+      details.buy2OnlyMode = buy2OnlyMode;
 
       // 분할 매수 불가 시 전액으로 단일 매수 (고가주 대응)
       if (buy1Qty === 0 && buy2Qty === 0) {
-        buy1Qty = Math.floor(adjustedQuota / buy1Price);
-        if (buy1Qty > 0) {
-          buy1ReasonShare = '100%';
+        if (buy2OnlyMode) {
+          buy2Qty = Math.floor(adjustedQuota / buy2Price);
+          if (buy2Qty > 0) {
+            buy2ReasonShare = '100%';
+          }
+        } else {
+          buy1Qty = Math.floor(adjustedQuota / buy1Price);
+          if (buy1Qty > 0) {
+            buy1ReasonShare = '100%';
+          }
         }
       }
 
@@ -414,7 +425,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (extraBuy2Qty > 0) {
           buy2Qty += extraBuy2Qty;
           remainingBudget -= extraBuy2Qty * buy2Price;
-          buy2ReasonShare = '30%+잔여재배분';
+          buy2ReasonShare = buy2OnlyMode ? '100%+잔여재배분' : '30%+잔여재배분';
           details.buyQuotaReallocatedTo = 'Buy2';
           details.reallocatedQuantity = extraBuy2Qty;
           details.remainingBudgetAfterReallocation = remainingBudget;
@@ -522,6 +533,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       `baseQuota=${perCycleQuota.toFixed(0)}, accumulated=${accumulatedQuota.toFixed(0)}, adjustedQuota=${adjustedQuota.toFixed(0)}, ` +
       `buyable=${ctx.buyableAmount.toFixed(0)}, RSI=${stockIndicators.rsi14?.toFixed(2) ?? 'n/a'}, ` +
       `vol30=${stockIndicators.volatility30d?.toFixed(2) ?? 'n/a'}, adjustments=${quotaAdjustments}, ` +
+      `buy2Only=${details.buy2OnlyMode ? 'Y' : 'N'}, ` +
       `buy1=${buy1QtyLogged}@${buy1PriceLogged || 0}, buy2=${buy2QtyLogged}@${buy2PriceLogged || 0}, ` +
       `dip=${(dipRateLogged * 100).toFixed(2)}%`,
     );

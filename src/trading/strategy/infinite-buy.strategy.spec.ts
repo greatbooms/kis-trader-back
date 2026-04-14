@@ -566,15 +566,18 @@ describe('InfiniteBuyStrategy', () => {
       });
 
       const { signals, details } = await strategy.evaluateStock(ctx);
-      const buySignal = signals.find((s) => s.side === 'BUY');
+      const buySignals = signals.filter((s) => s.side === 'BUY');
 
-      expect(buySignal).toBeDefined();
-      expect(buySignal!.quantity).toBe(1);
+      expect(buySignals).toHaveLength(1);
+      expect(buySignals[0].reason).toContain('Buy2');
+      expect(buySignals[0].quantity).toBe(1);
+      expect(buySignals[0].price).toBe(49500);
       expect(details?.quotaAdjustments).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ multiplier: 0.6 }),
         ]),
       );
+      expect(details?.buy2OnlyMode).toBe(true);
     });
 
     it('should reduce quota to 0.4x when RSI is above 80', async () => {
@@ -601,6 +604,44 @@ describe('InfiniteBuyStrategy', () => {
           expect.objectContaining({ multiplier: 0.4 }),
         ]),
       );
+      expect(details?.buy2OnlyMode).toBe(true);
+    });
+
+    it('should allow only Buy2 for overheated overseas entries', async () => {
+      const ctx = createContext({
+        watchStock: {
+          ...createContext().watchStock,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          quota: 5000,
+        },
+        price: {
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          currentPrice: 49.33,
+          openPrice: 49,
+          highPrice: 50,
+          lowPrice: 48.5,
+          volume: 1000000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          ma200: 45,
+          rsi14: 75,
+        },
+        buyableAmount: 1000,
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      expect(buys).toHaveLength(1);
+      expect(buys[0].reason).toContain('Buy2');
+      expect(buys[0].reason).not.toContain('Buy1');
+      expect(buys[0].price).toBe(48.84);
+      expect(details?.buy2OnlyMode).toBe(true);
     });
 
     it('should limit quota to buyable amount', async () => {
