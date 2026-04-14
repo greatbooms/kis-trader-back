@@ -7,9 +7,10 @@ query GetStockRecommendations($input: StockRecommendationsFilterInput) {
     stockCode
     stockName
     totalScore
-    technicalScore
+    trendScore
+    timingScore
     fundamentalScore
-    momentumScore
+    riskSupplyScore
     rank
     reasons
     indicators
@@ -28,16 +29,16 @@ query GetStockRecommendations($input: StockRecommendationsFilterInput) {
     deepAnalysisMessage
     deepAnalysisUpdatedAt
     factorScores {
-      technical
+      trend
+      timing
+      riskSupply
       valuation
       growth
       profitability
       risk
-      momentum
       supplyDemand
       dividend
       consensus
-      pattern
       fundamental
     }
     createdAt

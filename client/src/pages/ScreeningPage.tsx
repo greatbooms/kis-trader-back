@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Search, TrendingUp, BarChart3, Brain, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, Award, BookOpen, FlaskConical, X } from 'lucide-react'
+import { Search, TrendingUp, BarChart3, Zap, ChevronDown, ChevronUp, ChevronLeft, Target, Calendar, Info, ShieldAlert, DollarSign, BookOpen, FlaskConical, X } from 'lucide-react'
 import {
   useGetScreeningDateSummariesQuery,
   useGetStockRecommendationsQuery,
@@ -89,16 +89,16 @@ const INDICATOR_TOOLTIPS: Record<string, string> = {
 }
 
 const FACTOR_TOOLTIPS: Record<string, string> = {
-  technical: '이동평균, RSI, MACD, 추세 신호 등 기술적 지표 기반 점수입니다.',
+  trend: '이동평균 구조, Ichimoku, MACD, ADX, Bollinger 등 가격 구조와 방향성 점수입니다.',
+  timing: 'RSI, Stochastic, CCI, Williams %R 등 과열/침체와 눌림·반등 타이밍 점수입니다.',
+  riskSupply: '변동성·낙폭·재무안정성과 함께 거래량·외인/기관 흐름을 합친 점수입니다.',
   valuation: 'PER, PBR, EV/EBITDA, 안전마진 등 가치평가 지표 기반 점수입니다.',
   growth: '매출, 이익, 자본 성장률 중심의 성장성 점수입니다.',
   profitability: '영업이익률, ROE, 순이익률 등 수익성 지표 점수입니다.',
   risk: '변동성, MDD, 부채비율, 유동비율, 차입금 의존도 등을 반영한 리스크 점수입니다.',
-  momentum: '단기 가격 흐름과 추세 강도 중심의 점수입니다.',
   supplyDemand: '거래량, 수급, 외국인/기관 흐름 등 수급 기반 점수입니다.',
   dividend: '배당수익률, 배당성향, 연속 배당 여부 등 주주환원 점수입니다.',
   consensus: '증권사 목표가, 투자의견, 추정 실적 등 시장 컨센서스를 바탕으로 한 점수입니다.',
-  pattern: '지지/저항, 차트 패턴, 기술적 위치를 바탕으로 한 보조 점수입니다.',
   fundamental: '가치, 성장, 수익성 등 펀더멘털 팩터를 종합한 보조 점수입니다.',
 }
 
@@ -201,6 +201,18 @@ type DateSummary = {
 
 type ScreeningRecommendationItem = GetStockRecommendationsQuery['stockRecommendations'][number]
 type FactorScores = ScreeningRecommendationItem['factorScores']
+
+function getAxisMax(rec: Pick<ScreeningRecommendationItem, 'isEtf'>, axis: 'trend' | 'timing' | 'fundamental' | 'riskSupply') {
+  if (rec.isEtf) {
+    return { trend: 35, timing: 25, fundamental: 10, riskSupply: 30 }[axis]
+  }
+  return { trend: 30, timing: 20, fundamental: 30, riskSupply: 20 }[axis]
+}
+
+function axisRatio(score: number, max: number) {
+  if (max <= 0) return 0
+  return (score / max) * 100
+}
 
 export function ScreeningPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -410,13 +422,16 @@ function StockDetailView({
       : countryFiltered
   const filteredRecommendations = baseRecommendations.filter((item) => {
     if (factorFilter === 'income') return (item.factorScores?.dividend ?? 0) >= 2
-    if (factorFilter === 'safe') return (item.factorScores?.risk ?? 0) >= 7
+    if (factorFilter === 'safe') return axisRatio(item.riskSupplyScore, getAxisMax(item, 'riskSupply')) >= 55
     return true
   })
   const recommendations = [...filteredRecommendations].sort((left, right) => {
     if (sortBy === 'dividend') return (right.factorScores?.dividend ?? 0) - (left.factorScores?.dividend ?? 0)
     if (sortBy === 'safety') return (right.factorScores?.valuation ?? 0) - (left.factorScores?.valuation ?? 0)
-    if (sortBy === 'risk') return (right.factorScores?.risk ?? 0) - (left.factorScores?.risk ?? 0)
+    if (sortBy === 'risk') {
+      return axisRatio(right.riskSupplyScore, getAxisMax(right, 'riskSupply'))
+        - axisRatio(left.riskSupplyScore, getAxisMax(left, 'riskSupply'))
+    }
     return right.totalScore - left.totalScore
   })
 
@@ -536,7 +551,7 @@ function RecommendationCard({
   const dividendDetail = parseJson<Record<string, unknown>>(deepAnalysis?.dividendDetail)
   const consensusDetail = parseJson<Record<string, unknown>>(deepAnalysis?.consensusDetail)
   const technicalRatings = indicators.technicalRatings as TechnicalRatingsView | undefined
-  const radarData = buildRadarData(rec.factorScores)
+  const radarData = buildRadarData(rec)
 
   return (
     <Card className="overflow-hidden">
@@ -565,7 +580,7 @@ function RecommendationCard({
               <div className="text-left md:text-right">
                 <div className="flex items-center gap-1 justify-end">
                   <span className={`text-xl font-bold ${scoreColor(rec.totalScore)}`}>{rec.totalScore.toFixed(1)}</span>
-                  <Tooltip text="멀티팩터 100점 만점 점수입니다. 기술, 가치, 성장, 수익성, 리스크, 수급, 배당, 컨센서스를 종합합니다.">
+                  <Tooltip text="멀티팩터 100점 만점 점수입니다. 추세, 타이밍, 펀더, 리스크·수급 4축을 종합합니다.">
                     <Info className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                   </Tooltip>
                 </div>
@@ -589,12 +604,11 @@ function RecommendationCard({
       </button>
 
       <CardContent className="pt-0 pb-3">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-          <ScoreBar icon={<Brain className="h-3.5 w-3.5" />} label="기술" score={rec.technicalScore} max={40} tooltip="기술적 분석 호환 점수" />
-          <ScoreBar icon={<BarChart3 className="h-3.5 w-3.5" />} label="펀더" score={rec.fundamentalScore} max={30} tooltip="가치/성장/수익성/배당/컨센서스 집계" />
-          <ScoreBar icon={<Zap className="h-3.5 w-3.5" />} label="모멘텀" score={rec.momentumScore} max={30} tooltip="모멘텀/수급 집계" />
-          <ScoreBar icon={<ShieldAlert className="h-3.5 w-3.5" />} label="리스크" score={rec.factorScores?.risk ?? 0} max={10} tooltip="부채/유동비율/변동성/MDD/차입금의존도" />
-          <ScoreBar icon={<Award className="h-3.5 w-3.5" />} label="퀄리티" score={((rec.factorScores?.growth ?? 0) + (rec.factorScores?.profitability ?? 0) + (rec.factorScores?.dividend ?? 0))} max={25} tooltip="성장+수익성+배당 종합 품질" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          <ScoreBar icon={<TrendingUp className="h-3.5 w-3.5" />} label="추세" score={rec.trendScore} max={getAxisMax(rec, 'trend')} tooltip="가격 구조와 방향성 점수" />
+          <ScoreBar icon={<Zap className="h-3.5 w-3.5" />} label="타이밍" score={rec.timingScore} max={getAxisMax(rec, 'timing')} tooltip="과열/침체와 눌림·반등 타이밍 점수" />
+          <ScoreBar icon={<BarChart3 className="h-3.5 w-3.5" />} label="펀더" score={rec.fundamentalScore} max={getAxisMax(rec, 'fundamental')} tooltip="가치·성장·수익성·주주환원 종합 점수" />
+          <ScoreBar icon={<ShieldAlert className="h-3.5 w-3.5" />} label="리스크·수급" score={rec.riskSupplyScore} max={getAxisMax(rec, 'riskSupply')} tooltip="위험도와 실제 자금 유입 흐름 종합 점수" />
         </div>
       </CardContent>
 
@@ -1004,19 +1018,12 @@ function renderIndicator(label: string, value: unknown, numberFormat = false, su
   )
 }
 
-function buildRadarData(factors?: FactorScores) {
-  if (!factors) return []
+function buildRadarData(rec: Pick<ScreeningRecommendationItem, 'factorScores' | 'trendScore' | 'timingScore' | 'fundamentalScore' | 'riskSupplyScore' | 'isEtf'>) {
   return [
-    ['기술', factors.technical, 15],
-    ['가치', factors.valuation, 15],
-    ['성장', factors.growth, 10],
-    ['수익성', factors.profitability, 10],
-    ['리스크', factors.risk, 10],
-    ['모멘텀', factors.momentum, 10],
-    ['수급', factors.supplyDemand, 10],
-    ['배당', factors.dividend, 5],
-    ['컨센서스', factors.consensus, 10],
-    ['패턴', factors.pattern, 5],
+    ['추세', rec.trendScore, getAxisMax(rec, 'trend')],
+    ['타이밍', rec.timingScore, getAxisMax(rec, 'timing')],
+    ['펀더', rec.fundamentalScore, getAxisMax(rec, 'fundamental')],
+    ['리스크·수급', rec.riskSupplyScore, getAxisMax(rec, 'riskSupply')],
   ]
     .filter(([, value]) => value !== undefined && value !== null)
     .map(([label, value, max]) => ({ label, value: (Number(value) / Number(max)) * 100 }))
@@ -1029,16 +1036,16 @@ function factorEntries(factors?: FactorScores) {
 
 function factorLabel(key: string): string {
   const map: Record<string, string> = {
-    technical: '기술',
+    trend: '추세',
+    timing: '타이밍',
     valuation: '가치',
     growth: '성장',
     profitability: '수익성',
     risk: '리스크',
-    momentum: '모멘텀',
+    riskSupply: '리스크·수급',
     supplyDemand: '수급',
     dividend: '배당',
     consensus: '컨센서스',
-    pattern: '패턴',
     fundamental: '펀더 종합',
   }
   return map[key] || key

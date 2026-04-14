@@ -18,9 +18,10 @@ export class StockRecommendationType {
   @Field() stockCode: string;
   @Field() stockName: string;
   @Field(() => Float) totalScore: number;
-  @Field(() => Float) technicalScore: number;
+  @Field(() => Float) trendScore: number;
+  @Field(() => Float) timingScore: number;
   @Field(() => Float) fundamentalScore: number;
-  @Field(() => Float) momentumScore: number;
+  @Field(() => Float) riskSupplyScore: number;
   @Field(() => Int) rank: number;
   @Field() reasons: string; // JSON string
   @Field() indicators: string; // JSON string

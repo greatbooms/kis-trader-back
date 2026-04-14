@@ -62,9 +62,10 @@ export interface StockScore {
   exchangeCode: string;
   market: 'DOMESTIC' | 'OVERSEAS';
   totalScore: number;
-  technicalScore: number;
+  trendScore: number;
+  timingScore: number;
   fundamentalScore: number;
-  momentumScore: number;
+  riskSupplyScore: number;
   reasons: string[];
   indicators: StockIndicatorDetail;
   suggestedStrategies: SuggestedStrategy[];

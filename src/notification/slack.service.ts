@@ -317,7 +317,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendScreeningResult(market: string, date: string, scores: { stockCode: string; stockName: string; exchangeCode: string; totalScore: number; technicalScore: number; fundamentalScore: number; momentumScore: number; reasons: string[]; currentPrice: number; changeRate: number; factorScores?: Record<string, number> }[]): Promise<void> {
+  async sendScreeningResult(market: string, date: string, scores: { stockCode: string; stockName: string; exchangeCode: string; totalScore: number; trendScore: number; timingScore: number; fundamentalScore: number; riskSupplyScore: number; reasons: string[]; currentPrice: number; changeRate: number; factorScores?: Record<string, number> }[]): Promise<void> {
     if (!await this.ensureConnected()) return;
 
     try {
@@ -326,11 +326,11 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       const factorSummary = top.slice(0, 3).map((s) => {
         const factors = s.factorScores;
         if (!factors) return `${s.stockName}: 팩터 데이터 없음`;
-        return `${s.stockName}: 기술 ${factors.technical ?? 0}, 가치 ${factors.valuation ?? 0}, 성장 ${factors.growth ?? 0}, 수급 ${factors.supplyDemand ?? 0}`;
+        return `${s.stockName}: 추세 ${factors.trend ?? 0}, 타이밍 ${factors.timing ?? 0}, 펀더 ${factors.fundamental ?? 0}, 리스크·수급 ${factors.riskSupply ?? 0}`;
       });
       const lines = top.map((s, i) =>
         `${i + 1}. *${s.stockName}* (${s.stockCode}) — ${s.totalScore.toFixed(1)}점\n` +
-        `    기술 ${s.technicalScore.toFixed(0)} | 펀더 ${s.fundamentalScore.toFixed(0)} | 모멘텀 ${s.momentumScore.toFixed(0)} | ${s.changeRate >= 0 ? '+' : ''}${s.changeRate.toFixed(1)}%\n` +
+        `    추세 ${s.trendScore.toFixed(0)} | 타이밍 ${s.timingScore.toFixed(0)} | 펀더 ${s.fundamentalScore.toFixed(0)} | 리스크·수급 ${s.riskSupplyScore.toFixed(0)} | ${s.changeRate >= 0 ? '+' : ''}${s.changeRate.toFixed(1)}%\n` +
         `    ${s.reasons.slice(0, 3).join(' / ')}`,
       );
 

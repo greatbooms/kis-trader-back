@@ -71,25 +71,7 @@ export class ScreeningScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('screening-overseas-asia', asiaJob);
     asiaJob.start();
 
-    // 2차 딥 분석: 국내 09:40 KST
-    const domesticDeepJob = new CronJob(
-      '40 9 * * 1-5',
-      () => this.runDomesticDeepAnalysis(),
-      null, false, 'Asia/Seoul',
-    );
-    this.schedulerRegistry.addCronJob('screening-domestic-deep', domesticDeepJob);
-    domesticDeepJob.start();
-
-    // 2차 딥 분석: 미국 00:50 KST
-    const usDeepJob = new CronJob(
-      '50 0 * * 2-6',
-      () => this.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX'], 'overseas-us-deep'),
-      null, false, 'Asia/Seoul',
-    );
-    this.schedulerRegistry.addCronJob('screening-overseas-us-deep', usDeepJob);
-    usDeepJob.start();
-
-    this.logger.log('Screening scheduler registered (fast: domestic 09:10, Asia 10:50, US 00:10 / deep: domestic 09:40, US 00:50 KST)');
+    this.logger.log('Screening scheduler registered (screening + deep analysis: domestic 09:10, Asia 10:50, US 00:10 KST)');
   }
 
   async runDomesticScreening(): Promise<void> {
@@ -129,6 +111,7 @@ export class ScreeningScheduler implements OnModuleInit {
           count: scores.length,
           message: `${scores[0].stockName} ${scores[0].totalScore.toFixed(1)}`,
         });
+        await this.runDomesticDeepAnalysisForDate(date);
       } else {
         await this.recordSchedulerRun(jobKey, {
           status: 'success',
@@ -216,6 +199,7 @@ export class ScreeningScheduler implements OnModuleInit {
           count: allScores.length,
           message: `${allScores[0].stockName} ${allScores[0].totalScore.toFixed(1)}`,
         });
+        await this.runOverseasDeepAnalysisForDate(date, filteredExchanges, this.resolveDeepJobKey(filteredExchanges));
       } else {
         await this.recordSchedulerRun(resolvedJobKey, {
           status: 'success',
@@ -268,15 +252,7 @@ export class ScreeningScheduler implements OnModuleInit {
         });
         return;
       }
-      const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'DOMESTIC', ['KRX']);
-      this.logger.log(`Domestic deep analysis saved: ${completed} stocks`);
-      await this.sendTopDeepAnalysisReports(date, 'DOMESTIC', ['KRX']);
-      await this.recordSchedulerRun(jobKey, {
-        status: 'success',
-        date,
-        exchanges: ['KRX'],
-        count: completed,
-      });
+      await this.runDomesticDeepAnalysisForDate(date);
     } catch (e) {
       this.logger.error(`Domestic deep analysis error: ${e.message}`);
       await this.recordSchedulerRun(jobKey, {
@@ -331,20 +307,77 @@ export class ScreeningScheduler implements OnModuleInit {
         });
         return;
       }
-      const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'OVERSEAS', filteredExchanges);
-      this.logger.log(`Overseas deep analysis saved: ${completed} stocks`);
-      await this.sendTopDeepAnalysisReports(date, 'OVERSEAS', filteredExchanges);
-      await this.recordSchedulerRun(resolvedJobKey, {
-        status: 'success',
-        date,
-        exchanges: filteredExchanges,
-        count: completed,
-      });
+      await this.runOverseasDeepAnalysisForDate(date, filteredExchanges, resolvedJobKey);
     } catch (e) {
       this.logger.error(`Overseas deep analysis error: ${e.message}`);
       await this.recordSchedulerRun(resolvedJobKey, {
         status: 'failed',
         exchanges: filteredExchanges,
+        message: e.message,
+      });
+    } finally {
+      this.isDeepRunning = false;
+    }
+  }
+
+  private async runDomesticDeepAnalysisForDate(date: string): Promise<void> {
+    const jobKey: ScreeningSchedulerJobKey = 'domestic-deep';
+    this.isDeepRunning = true;
+    await this.recordSchedulerRun(jobKey, {
+      status: 'started',
+      date,
+      exchanges: ['KRX'],
+    });
+    try {
+      const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'DOMESTIC', ['KRX']);
+      this.logger.log(`Domestic deep analysis saved: ${completed} stocks`);
+      await this.sendTopDeepAnalysisReports(date, 'DOMESTIC', ['KRX']);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'success',
+        date,
+        exchanges: ['KRX'],
+        count: completed,
+      });
+    } catch (e) {
+      this.logger.error(`Domestic deep analysis error: ${e.message}`);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'failed',
+        date,
+        exchanges: ['KRX'],
+        message: e.message,
+      });
+    } finally {
+      this.isDeepRunning = false;
+    }
+  }
+
+  private async runOverseasDeepAnalysisForDate(
+    date: string,
+    exchanges: string[],
+    jobKey: ScreeningSchedulerJobKey,
+  ): Promise<void> {
+    this.isDeepRunning = true;
+    await this.recordSchedulerRun(jobKey, {
+      status: 'started',
+      date,
+      exchanges,
+    });
+    try {
+      const completed = await this.screeningService.runDeepAnalysisForMarket(date, 'OVERSEAS', exchanges);
+      this.logger.log(`Overseas deep analysis saved: ${completed} stocks`);
+      await this.sendTopDeepAnalysisReports(date, 'OVERSEAS', exchanges);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'success',
+        date,
+        exchanges,
+        count: completed,
+      });
+    } catch (e) {
+      this.logger.error(`Overseas deep analysis error: ${e.message}`);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'failed',
+        date,
+        exchanges,
         message: e.message,
       });
     } finally {

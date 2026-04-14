@@ -103,12 +103,12 @@ export type FactorScoreType = {
   dividend?: Maybe<Scalars['Float']['output']>;
   fundamental?: Maybe<Scalars['Float']['output']>;
   growth?: Maybe<Scalars['Float']['output']>;
-  momentum?: Maybe<Scalars['Float']['output']>;
-  pattern?: Maybe<Scalars['Float']['output']>;
   profitability?: Maybe<Scalars['Float']['output']>;
   risk?: Maybe<Scalars['Float']['output']>;
+  riskSupply?: Maybe<Scalars['Float']['output']>;
   supplyDemand?: Maybe<Scalars['Float']['output']>;
-  technical?: Maybe<Scalars['Float']['output']>;
+  timing?: Maybe<Scalars['Float']['output']>;
+  trend?: Maybe<Scalars['Float']['output']>;
   valuation?: Maybe<Scalars['Float']['output']>;
 };
 
@@ -703,15 +703,16 @@ export type StockRecommendationType = {
   isEtf: Scalars['Boolean']['output'];
   market: Scalars['String']['output'];
   marketCap: Scalars['Float']['output'];
-  momentumScore: Scalars['Float']['output'];
   rank: Scalars['Int']['output'];
   reasons: Scalars['String']['output'];
+  riskSupplyScore: Scalars['Float']['output'];
   screeningDate: Scalars['String']['output'];
   stockCode: Scalars['String']['output'];
   stockName: Scalars['String']['output'];
   suggestedStrategies: Array<SuggestedStrategyType>;
-  technicalScore: Scalars['Float']['output'];
+  timingScore: Scalars['Float']['output'];
   totalScore: Scalars['Float']['output'];
+  trendScore: Scalars['Float']['output'];
   volume: Scalars['Float']['output'];
 };
 
@@ -934,7 +935,7 @@ export type GetStockRecommendationsQueryVariables = Exact<{
 }>;
 
 
-export type GetStockRecommendationsQuery = { __typename?: 'Query', stockRecommendations: Array<{ __typename?: 'StockRecommendationType', id: string, screeningDate: string, market: string, exchangeCode: string, stockCode: string, stockName: string, totalScore: number, technicalScore: number, fundamentalScore: number, momentumScore: number, rank: number, reasons: string, indicators: string, currentPrice: number, changeRate: number, volume: number, marketCap: number, isEtf: boolean, deepAnalysisStatus?: string | null, deepAnalysisMessage?: string | null, deepAnalysisUpdatedAt?: any | null, createdAt: any, suggestedStrategies: Array<{ __typename?: 'SuggestedStrategyType', name: string, displayName: string, matchScore: number, reason: string }>, factorScores?: { __typename?: 'FactorScoreType', technical?: number | null, valuation?: number | null, growth?: number | null, profitability?: number | null, risk?: number | null, momentum?: number | null, supplyDemand?: number | null, dividend?: number | null, consensus?: number | null, pattern?: number | null, fundamental?: number | null } | null }> };
+export type GetStockRecommendationsQuery = { __typename?: 'Query', stockRecommendations: Array<{ __typename?: 'StockRecommendationType', id: string, screeningDate: string, market: string, exchangeCode: string, stockCode: string, stockName: string, totalScore: number, trendScore: number, timingScore: number, fundamentalScore: number, riskSupplyScore: number, rank: number, reasons: string, indicators: string, currentPrice: number, changeRate: number, volume: number, marketCap: number, isEtf: boolean, deepAnalysisStatus?: string | null, deepAnalysisMessage?: string | null, deepAnalysisUpdatedAt?: any | null, createdAt: any, suggestedStrategies: Array<{ __typename?: 'SuggestedStrategyType', name: string, displayName: string, matchScore: number, reason: string }>, factorScores?: { __typename?: 'FactorScoreType', trend?: number | null, timing?: number | null, riskSupply?: number | null, valuation?: number | null, growth?: number | null, profitability?: number | null, risk?: number | null, supplyDemand?: number | null, dividend?: number | null, consensus?: number | null, fundamental?: number | null } | null }> };
 
 export type GetScreeningDatesQueryVariables = Exact<{
   input?: InputMaybe<ScreeningListFilterInput>;
@@ -1282,9 +1283,10 @@ export const GetStockRecommendationsDocument = gql`
     stockCode
     stockName
     totalScore
-    technicalScore
+    trendScore
+    timingScore
     fundamentalScore
-    momentumScore
+    riskSupplyScore
     rank
     reasons
     indicators
@@ -1303,16 +1305,16 @@ export const GetStockRecommendationsDocument = gql`
     deepAnalysisMessage
     deepAnalysisUpdatedAt
     factorScores {
-      technical
+      trend
+      timing
+      riskSupply
       valuation
       growth
       profitability
       risk
-      momentum
       supplyDemand
       dividend
       consensus
-      pattern
       fundamental
     }
     createdAt

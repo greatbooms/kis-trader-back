@@ -160,9 +160,10 @@ model StockRecommendation {
   stockCode           String   @map("stock_code")
   stockName           String   @map("stock_name")
   totalScore          Decimal  @map("total_score") @db.Decimal(6, 2)
-  technicalScore      Decimal  @map("technical_score") @db.Decimal(6, 2)
+  trendScore          Decimal  @map("trend_score") @db.Decimal(6, 2)
+  timingScore         Decimal  @map("timing_score") @db.Decimal(6, 2)
   fundamentalScore    Decimal  @map("fundamental_score") @db.Decimal(6, 2)
-  momentumScore       Decimal  @map("momentum_score") @db.Decimal(6, 2)
+  riskSupplyScore     Decimal  @map("risk_supply_score") @db.Decimal(6, 2)
   rank                Int
   reasons             Json
   indicators          Json

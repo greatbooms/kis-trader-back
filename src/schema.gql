@@ -374,16 +374,16 @@ type StockSearchResult {
 }
 
 type FactorScoreType {
-  technical: Float
+  trend: Float
+  timing: Float
+  riskSupply: Float
   valuation: Float
   growth: Float
   profitability: Float
   risk: Float
-  momentum: Float
   supplyDemand: Float
   dividend: Float
   consensus: Float
-  pattern: Float
   fundamental: Float
 }
 
@@ -402,9 +402,10 @@ type StockRecommendationType {
   stockCode: String!
   stockName: String!
   totalScore: Float!
-  technicalScore: Float!
+  trendScore: Float!
+  timingScore: Float!
   fundamentalScore: Float!
-  momentumScore: Float!
+  riskSupplyScore: Float!
   rank: Int!
   reasons: String!
   indicators: String!

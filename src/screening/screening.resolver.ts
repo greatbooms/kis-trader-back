@@ -58,9 +58,10 @@ export class ScreeningResolver {
       stockCode: r.stockCode,
       stockName: r.stockName,
       totalScore: Number(r.totalScore),
-      technicalScore: Number(r.technicalScore),
+      trendScore: Number(r.trendScore),
+      timingScore: Number(r.timingScore),
       fundamentalScore: Number(r.fundamentalScore),
-      momentumScore: Number(r.momentumScore),
+      riskSupplyScore: Number(r.riskSupplyScore),
       rank: r.rank,
       reasons: JSON.stringify(r.reasons),
       indicators: JSON.stringify(r.indicators),
@@ -140,13 +141,10 @@ export class ScreeningResolver {
   ): Promise<boolean> {
     if (input.market === 'DOMESTIC') {
       await this.screeningScheduler.runDomesticScreening();
-      await this.screeningScheduler.runDomesticDeepAnalysis();
     } else if (input.exchangeCode) {
       await this.screeningScheduler.runOverseasScreening([input.exchangeCode]);
-      await this.screeningScheduler.runOverseasDeepAnalysis([input.exchangeCode]);
     } else {
       await this.screeningScheduler.runOverseasScreening(['NASD', 'NYSE', 'AMEX']);
-      await this.screeningScheduler.runOverseasDeepAnalysis(['NASD', 'NYSE', 'AMEX']);
     }
     return true;
   }

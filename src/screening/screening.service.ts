@@ -188,9 +188,10 @@ export class ScreeningService {
           stockCode: item.stockCode,
           stockName: item.stockName,
           totalScore: item.totalScore,
-          technicalScore: item.technicalScore,
+          trendScore: item.trendScore,
+          timingScore: item.timingScore,
           fundamentalScore: item.fundamentalScore,
-          momentumScore: item.momentumScore,
+          riskSupplyScore: item.riskSupplyScore,
           rank: index + 1,
           reasons: item.reasons as any,
           indicators: item.indicators as any,
@@ -786,9 +787,10 @@ export class ScreeningService {
     return {
       ...candidate,
       totalScore: score.totalScore,
-      technicalScore: score.technicalScore,
+      trendScore: score.trendScore,
+      timingScore: score.timingScore,
       fundamentalScore: score.fundamentalScore,
-      momentumScore: score.momentumScore,
+      riskSupplyScore: score.riskSupplyScore,
       reasons: score.reasons,
       indicators: {
         ...indicators,
@@ -887,9 +889,10 @@ export class ScreeningService {
     return {
       ...candidate,
       totalScore: score.totalScore,
-      technicalScore: score.technicalScore,
+      trendScore: score.trendScore,
+      timingScore: score.timingScore,
       fundamentalScore: score.fundamentalScore,
-      momentumScore: score.momentumScore,
+      riskSupplyScore: score.riskSupplyScore,
       reasons: score.reasons,
       indicators: {
         ...indicators,
