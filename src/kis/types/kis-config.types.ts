@@ -87,9 +87,11 @@ export const EXCHANGE_CURRENCY: Record<string, string> = {
 export interface MarketHours {
   open: { hour: number; minute: number };
   close: { hour: number; minute: number };
-  /** true이면 자정을 넘기는 시간대 (예: 미국 23:30~06:00) */
+  /** true이면 자정을 넘기는 시간대 (예: 미국 22:30~05:00 또는 23:30~06:00) */
   overnight: boolean;
 }
+
+const US_EXCHANGES = new Set<string>(['NASD', 'NYSE', 'AMEX']);
 
 export const MARKET_HOURS: Record<string, MarketHours> = {
   KRX: { open: { hour: 9, minute: 0 }, close: { hour: 15, minute: 30 }, overnight: false },
@@ -103,3 +105,38 @@ export const MARKET_HOURS: Record<string, MarketHours> = {
   HASE: { open: { hour: 9, minute: 0 }, close: { hour: 14, minute: 30 }, overnight: false },
   VNSE: { open: { hour: 9, minute: 0 }, close: { hour: 14, minute: 30 }, overnight: false },
 };
+
+function getUtcOffsetHours(date: Date, timeZone: string): number | undefined {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'shortOffset',
+  });
+  const timeZoneName = formatter.formatToParts(date).find((part) => part.type === 'timeZoneName')?.value;
+  const match = timeZoneName?.match(/^GMT([+-])(\d{1,2})(?::(\d{2}))?$/i);
+  if (!match) return undefined;
+
+  const sign = match[1] === '-' ? -1 : 1;
+  const hours = parseInt(match[2], 10);
+  const minutes = parseInt(match[3] || '0', 10);
+  return sign * (hours + minutes / 60);
+}
+
+export function isUsMarketDst(date = new Date()): boolean {
+  return getUtcOffsetHours(date, 'America/New_York') === -4;
+}
+
+export function getMarketHours(exchangeCode: string, date = new Date()): MarketHours | undefined {
+  const hours = MARKET_HOURS[exchangeCode];
+  if (!hours) return undefined;
+  if (!US_EXCHANGES.has(exchangeCode)) return hours;
+
+  if (isUsMarketDst(date)) {
+    return {
+      open: { hour: 22, minute: 30 },
+      close: { hour: 5, minute: 0 },
+      overnight: true,
+    };
+  }
+
+  return hours;
+}

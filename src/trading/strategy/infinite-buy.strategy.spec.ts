@@ -342,6 +342,48 @@ describe('InfiniteBuyStrategy', () => {
       expect(buys[0].price).toBe(70000);
     });
 
+    it('should reallocate leftover quota to Buy1 when Buy2 cannot afford one share', async () => {
+      const ctx = createContext({
+        watchStock: {
+          id: 'ws-tqqq',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 5000,
+          cycle: 0,
+          maxCycles: 40,
+          stopLossRate: 0.3,
+          maxPortfolioRate: 0.15,
+        },
+        price: {
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          currentPrice: 49.33,
+          openPrice: 49,
+          highPrice: 50,
+          lowPrice: 48.5,
+          volume: 1000000,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          ma200: 45,
+          rsi14: 65,
+        },
+        buyableAmount: 1000,
+      });
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      expect(buys).toHaveLength(1);
+      expect(buys[0].reason).toContain('Buy1');
+      expect(buys[0].reason).toContain('잔여재배분');
+      expect(buys[0].quantity).toBe(2);
+      expect(buys[0].price).toBe(49.33);
+    });
+
     it('should generate first take-profit target based on T', async () => {
       const ctx = createContext({
         position: {

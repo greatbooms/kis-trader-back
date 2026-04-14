@@ -10,7 +10,7 @@ import { StrategyRegistryService } from './strategy/strategy-registry.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
-import { MARKET_HOURS, MarketHours } from '../kis/types/kis-config.types';
+import { MarketHours, getMarketHours } from '../kis/types/kis-config.types';
 import { HolidayItem, StockPriceResult, UnfilledOrder } from '../kis/types/kis-api.types';
 import { StockStrategyContext, StockFundamentals, WatchStockConfig, PerStockTradingStrategy, StockIndicators, PositionQuantitySnapshot } from './types';
 import { Market, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
@@ -101,25 +101,25 @@ export class TradingScheduler implements OnModuleInit {
     asiaJob.start();
     this.logger.log('Trading overseas-asia cron registered: every 1min 09:00-16:59 KST');
 
-    // 해외 시장 (미국): 매 1분, 23:00-05:59 KST
-    const usNightJob = new CronJob('*/1 23 * * 1-5', () => this.executeOverseas(), null, false, 'Asia/Seoul');
+    // 해외 시장 (미국): 매 1분, 22:00-06:59 KST 범위에서 실행 후 실제 장시간으로 필터링 (DST 포함)
+    const usNightJob = new CronJob('*/1 22-23 * * 1-5', () => this.executeOverseas(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-night', usNightJob);
     usNightJob.start();
 
-    const usMorningJob = new CronJob('*/1 0-5 * * 2-6', () => this.executeOverseas(), null, false, 'Asia/Seoul');
+    const usMorningJob = new CronJob('*/1 0-6 * * 2-6', () => this.executeOverseas(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning', usMorningJob);
     usMorningJob.start();
-    this.logger.log('Trading overseas-us cron registered: every 1min 23:00-05:59 KST');
+    this.logger.log('Trading overseas-us cron registered: every 1min 22:00-06:59 KST (DST aware)');
 
     const asiaOrderSyncJob = new CronJob('*/15 * 9-16 * * 1-5', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-asia-order-sync', asiaOrderSyncJob);
     asiaOrderSyncJob.start();
 
-    const usNightOrderSyncJob = new CronJob('*/15 * 23 * * 1-5', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
+    const usNightOrderSyncJob = new CronJob('*/15 * 22-23 * * 1-5', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-night-order-sync', usNightOrderSyncJob);
     usNightOrderSyncJob.start();
 
-    const usMorningOrderSyncJob = new CronJob('*/15 * 0-5 * * 2-6', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
+    const usMorningOrderSyncJob = new CronJob('*/15 * 0-6 * * 2-6', () => this.syncOverseasOpenOrders(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-order-sync', usMorningOrderSyncJob);
     usMorningOrderSyncJob.start();
     this.logger.log('Trading overseas order sync cron registered: every 15s during overseas sessions');
@@ -128,11 +128,11 @@ export class TradingScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('trading-overseas-asia-portfolio-sync', asiaPortfolioSyncJob);
     asiaPortfolioSyncJob.start();
 
-    const usNightPortfolioSyncJob = new CronJob('*/10 23 * * 1-5', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
+    const usNightPortfolioSyncJob = new CronJob('*/10 22-23 * * 1-5', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-night-portfolio-sync', usNightPortfolioSyncJob);
     usNightPortfolioSyncJob.start();
 
-    const usMorningPortfolioSyncJob = new CronJob('*/10 0-5 * * 2-6', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
+    const usMorningPortfolioSyncJob = new CronJob('*/10 0-6 * * 2-6', () => this.syncOverseasPortfolioState(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-portfolio-sync', usMorningPortfolioSyncJob);
     usMorningPortfolioSyncJob.start();
     this.logger.log('Trading overseas portfolio sync cron registered: every 10min during overseas sessions');
@@ -159,13 +159,13 @@ export class TradingScheduler implements OnModuleInit {
 
     this.logger.log('Regime detect Asia crons registered: 08:50, 10:20 KST');
 
-    // 미국 개장 (23:30)
-    const regimeUsJob = new CronJob('20 23 * * 1-5', () => {
+    // 미국 개장 전 리짐 판별 (DST 포함)
+    const regimeUsJob = new CronJob('20 22,23 * * 1-5', () => {
       this.detectRegimeForExchanges(['NASD', 'NYSE', 'AMEX']);
     }, null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('regime-detect-us', regimeUsJob);
     regimeUsJob.start();
-    this.logger.log('Regime detect US cron registered: 23:20 KST');
+    this.logger.log('Regime detect US cron registered: 22:20 and 23:20 KST (DST aware)');
   }
 
   // ========== 통합 실행 루프 ==========
@@ -681,7 +681,7 @@ export class TradingScheduler implements OnModuleInit {
     exchangeCode: string,
     overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
   ): number {
-    const hours = MARKET_HOURS[exchangeCode];
+    const hours = getMarketHours(exchangeCode);
     if (!hours) return (0 + overseas.offsetHours) % 24;
     if (overseas.basis === 'afterOpen') {
       return (hours.open.hour + overseas.offsetHours) % 24;
@@ -1006,7 +1006,7 @@ export class TradingScheduler implements OnModuleInit {
   }
 
   isMarketOpen(exchangeCode: string): boolean {
-    const hours = MARKET_HOURS[exchangeCode];
+    const hours = getMarketHours(exchangeCode);
     if (!hours) return false;
 
     const now = new Date();

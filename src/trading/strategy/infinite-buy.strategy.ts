@@ -118,6 +118,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '',
     '【매수 방식】',
     '- 모든 구간에서 Buy1(현재가) 70% + Buy2(현재가 아래 지정가) 30%로 분할 매수',
+    '- 한쪽 주문 수량이 0주면 남는 예산을 반대쪽 주문으로 재배분해 총 매수 수량을 최대화',
     '- 매수금액이 1주 가격 미만이면 다음 사이클로 이월, 누적 후 매수',
     '- Buy2 지정가: ATR% 기반 할인폭의 50%를 적용하되, 0.5%~1.5% 범위로 제한 (기본 1.0%)',
     '- Buy1은 즉시 체결, Buy2는 장중 가격 하락 시 체결',
@@ -167,7 +168,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     expectedReturn: '1차 +6.8~15%, 2차 +7.9~18%',
     maxLoss: '-50% (손절 기본값)',
     investmentPeriod: '3개월~1년',
-    tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 02시)',
+    tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 장 시작 2시간 후)',
     suitableFor: ['장기 분할매수 선호 투자자', '하락장 대응', '적립식 투자'],
     tags: ['분할매수', 'DCA', '장기투자', '국내/해외'],
   };
@@ -374,10 +375,41 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       const buy2Quota = adjustedQuota * 0.3;
       let buy1Qty = Math.floor(buy1Quota / buy1Price);
       let buy2Qty = Math.floor(buy2Quota / buy2Price);
+      let buy1ReasonShare = '70%';
+      let buy2ReasonShare = '30%';
 
       // 분할 매수 불가 시 전액으로 단일 매수 (고가주 대응)
       if (buy1Qty === 0 && buy2Qty === 0) {
         buy1Qty = Math.floor(adjustedQuota / buy1Price);
+        if (buy1Qty > 0) {
+          buy1ReasonShare = '100%';
+        }
+      }
+
+      const spentBySplit = buy1Qty * buy1Price + buy2Qty * buy2Price;
+      let remainingBudget = Math.max(0, adjustedQuota - spentBySplit);
+
+      // 한쪽 주문이 0주가 되면 남은 예산을 반대쪽 주문으로 재배분해 총 수량 낭비를 줄인다.
+      if (buy1Qty > 0 && buy2Qty === 0 && buy1Price > 0) {
+        const extraBuy1Qty = Math.floor(remainingBudget / buy1Price);
+        if (extraBuy1Qty > 0) {
+          buy1Qty += extraBuy1Qty;
+          remainingBudget -= extraBuy1Qty * buy1Price;
+          buy1ReasonShare = '70%+잔여재배분';
+          details.buyQuotaReallocatedTo = 'Buy1';
+          details.reallocatedQuantity = extraBuy1Qty;
+          details.remainingBudgetAfterReallocation = remainingBudget;
+        }
+      } else if (buy1Qty === 0 && buy2Qty > 0 && buy2Price > 0) {
+        const extraBuy2Qty = Math.floor(remainingBudget / buy2Price);
+        if (extraBuy2Qty > 0) {
+          buy2Qty += extraBuy2Qty;
+          remainingBudget -= extraBuy2Qty * buy2Price;
+          buy2ReasonShare = '30%+잔여재배분';
+          details.buyQuotaReallocatedTo = 'Buy2';
+          details.reallocatedQuantity = extraBuy2Qty;
+          details.remainingBudgetAfterReallocation = remainingBudget;
+        }
       }
 
       if (buy1Qty > 0 && buy1Price > 0) {
@@ -388,7 +420,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buy1Qty,
           price: buy1Price,
-          reason: `Buy1: T=${T.toFixed(1)}, 70%, ${buy1Qty}주 @ ${buy1Price}`,
+          reason: `Buy1: T=${T.toFixed(1)}, ${buy1ReasonShare}, ${buy1Qty}주 @ ${buy1Price}`,
           orderDivision: '00',
         });
         buySignalCount++;
@@ -402,7 +434,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           side: 'BUY',
           quantity: buy2Qty,
           price: buy2Price,
-          reason: `Buy2: T=${T.toFixed(1)}, dip=${(dipRate * 100).toFixed(2)}%, 30%, ${buy2Qty}주 @ ${buy2Price}`,
+          reason: `Buy2: T=${T.toFixed(1)}, dip=${(dipRate * 100).toFixed(2)}%, ${buy2ReasonShare}, ${buy2Qty}주 @ ${buy2Price}`,
           orderDivision: '00',
         });
         buySignalCount++;

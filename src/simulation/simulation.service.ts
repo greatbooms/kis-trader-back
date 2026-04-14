@@ -23,7 +23,7 @@ import { CreateSimulationInput } from './dto';
 import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
-import { MARKET_HOURS } from '../kis/types/kis-config.types';
+import { getMarketHours } from '../kis/types/kis-config.types';
 
 @Injectable()
 export class SimulationService {
@@ -577,7 +577,7 @@ export class SimulationService {
     exchangeCode: string,
     overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
   ): number {
-    const hours = MARKET_HOURS[exchangeCode];
+    const hours = getMarketHours(exchangeCode);
     if (!hours) return (0 + overseas.offsetHours) % 24;
 
     if (overseas.basis === 'afterOpen') {

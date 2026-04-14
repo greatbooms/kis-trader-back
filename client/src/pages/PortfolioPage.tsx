@@ -352,7 +352,6 @@ function AccountSummaryCard({ countryFilter }: { countryFilter: string | null })
                 label="마지막 갱신"
                 tooltip="전체 탭은 통화 혼합 총액 대신 계좌 전반 상태만 보여줍니다."
                 value={summary.lastSyncedAt ? formatDate(summary.lastSyncedAt) : '-'}
-                subValue="혼합 통화 총액은 의도적으로 표시하지 않습니다."
                 tone="default"
               />
             </div>

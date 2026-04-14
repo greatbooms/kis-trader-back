@@ -69,9 +69,9 @@ export class SimulationScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('sim-overseas-asia', simAsiaJob);
     simAsiaJob.start();
 
-    // 해외 미국 시장: 23:00-05:59 KST
+    // 해외 미국 시장: 22:00-06:59 KST 범위에서 실행 후 실제 장시간으로 필터링 (DST 포함)
     const simUsJob = new CronJob(
-      '*/1 23 * * 1-5',
+      '*/1 22-23 * * 1-5',
       () => this.executeSimulationsOverseas(),
       null, false, 'Asia/Seoul',
     );
@@ -79,7 +79,7 @@ export class SimulationScheduler implements OnModuleInit {
     simUsJob.start();
 
     const simUsJob2 = new CronJob(
-      '*/1 0-5 * * 2-6',
+      '*/1 0-6 * * 2-6',
       () => this.executeSimulationsOverseas(),
       null, false, 'Asia/Seoul',
     );
