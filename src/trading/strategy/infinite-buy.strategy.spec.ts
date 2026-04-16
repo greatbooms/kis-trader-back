@@ -226,6 +226,90 @@ describe('InfiniteBuyStrategy', () => {
       const sells = signals.filter((s) => s.side === 'SELL');
       expect(sells).toHaveLength(1);
     });
+
+    it('should hard-cap buy budget to the remaining quota before the final cycle', async () => {
+      const ctx = createContext({
+        watchStock: {
+          id: 'ws-tqqq',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 10000,
+          cycle: 39,
+          maxCycles: 40,
+          stopLossRate: 0.3,
+          maxPortfolioRate: 0.15,
+        },
+        price: {
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          currentPrice: 30,
+          openPrice: 30,
+          highPrice: 31,
+          lowPrice: 29,
+          volume: 1000000,
+        },
+        position: {
+          stockCode: 'TQQQ',
+          quantity: 198,
+          avgPrice: 20,
+          currentPrice: 30,
+          totalInvested: 9950,
+        },
+        buyableAmount: 1000,
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+      const totalBuyAmount = buys.reduce((sum, signal) => sum + signal.quantity * (signal.price || 0), 0);
+
+      expect(Number(details?.adjustedQuota)).toBe(50);
+      expect(totalBuyAmount).toBeLessThanOrEqual(50);
+    });
+
+    it('should treat leftover quota below one share as terminal instead of carry-over', async () => {
+      const ctx = createContext({
+        watchStock: {
+          id: 'ws-tqqq',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 10000,
+          cycle: 39,
+          maxCycles: 40,
+          stopLossRate: 0.3,
+          maxPortfolioRate: 0.15,
+        },
+        price: {
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          currentPrice: 55,
+          openPrice: 55,
+          highPrice: 56,
+          lowPrice: 54,
+          volume: 1000000,
+        },
+        position: {
+          stockCode: 'TQQQ',
+          quantity: 198,
+          avgPrice: 50,
+          currentPrice: 55,
+          totalInvested: 9950,
+        },
+        buyableAmount: 1000,
+      });
+
+      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((signal) => signal.side === 'BUY');
+
+      expect(buys).toHaveLength(0);
+      expect(skipReasons).toContain('최대 사이클 도달: 잔여 투자한도 50 < 기준가 54.45');
+      expect(skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'))).toBe(false);
+    });
   });
 
   describe('stop loss', () => {
@@ -292,7 +376,7 @@ describe('InfiniteBuyStrategy', () => {
       // buyQty = floor(100000 / 200000) = 0
       expect(signals).toHaveLength(0);
       expect(skipReasons).toContain(
-        '매수 수량 부족: 조정 할당금 2500 < 기준가 198000 (1주 매수 가능 기준가 2500 이하)',
+        '최대 사이클 도달: 잔여 투자한도 100000 < 기준가 198000',
       );
     });
   });

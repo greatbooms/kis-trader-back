@@ -207,6 +207,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const quota = watchStock.quota;
     const totalInvested = position?.totalInvested || 0;
     const perCycleQuota = quota / watchStock.maxCycles;
+    const remainingQuota = Math.max(0, quota - totalInvested);
     const T = totalInvested > 0 ? totalInvested / perCycleQuota : 0; // T = 완료 사이클 수
     const avgPrice = position?.avgPrice || curPrice;
     const holdQty = position?.quantity || 0;
@@ -220,6 +221,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.avgPrice = avgPrice;
     details.holdQty = holdQty;
     details.perCycleQuota = perCycleQuota;
+    details.remainingQuota = remainingQuota;
 
     // 가격 반올림 함수
     const roundPrice = isOverseas
@@ -310,16 +312,17 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     }
 
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
-    const maxCyclesReached = T >= watchStock.maxCycles;
+    const maxCyclesReached = T >= watchStock.maxCycles || remainingQuota <= 0;
     if (maxCyclesReached) {
       this.logger.log(`[${watchStock.stockCode}] Max cycles reached (T=${T.toFixed(1)}), buy stopped`);
     }
 
     // --- 1회 매수금액 ---
     const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
-    let adjustedQuota = maxCyclesReached ? 0 : perCycleQuota + accumulatedQuota;
+    const baseQuota = perCycleQuota + accumulatedQuota;
+    let adjustedQuota = maxCyclesReached ? 0 : Math.min(baseQuota, remainingQuota);
     details.accumulatedQuota = accumulatedQuota;
-    details.baseQuota = adjustedQuota;
+    details.baseQuota = baseQuota;
 
     // RSI 과매도/과열 구간별 조정
     if (stockIndicators.rsi14 !== undefined) {
@@ -470,11 +473,18 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       if (buySignalCount === 0) {
         const referencePrice = Math.min(buy1Price, buy2Price);
-        details.minimumExecutablePrice = adjustedQuota;
-        skipReasons.push(
-          `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)} ` +
-          `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
-        );
+        details.minimumExecutablePrice = roundPrice(referencePrice);
+        if (remainingQuota > 0 && remainingQuota < referencePrice) {
+          details.terminalQuotaReached = true;
+          skipReasons.push(
+            `최대 사이클 도달: 잔여 투자한도 ${remainingQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)}`,
+          );
+        } else {
+          skipReasons.push(
+            `매수 수량 부족: 조정 할당금 ${adjustedQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)} ` +
+            `(1주 매수 가능 기준가 ${roundPrice(adjustedQuota)} 이하)`,
+          );
+        }
       }
     }
 

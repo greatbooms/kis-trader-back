@@ -39,6 +39,7 @@ describe('TradingService', () => {
     },
     watchStock: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     watchStockExecutionLog: {
       create: jest.fn(),
@@ -210,6 +211,83 @@ describe('TradingService', () => {
             buy2Qty: 0,
           }),
         }),
+      });
+    });
+
+    it('should clear accumulated quota when terminal quota exhaustion is reached without a buy', async () => {
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [
+            {
+              market: 'OVERSEAS',
+              exchangeCode: 'NASD',
+              stockCode: 'TQQQ',
+              side: 'SELL',
+              quantity: 1,
+              price: 70,
+              reason: 'Take profit',
+              orderDivision: '00',
+            },
+          ],
+          skipReasons: ['최대 사이클 도달: 잔여 투자한도 50 < 기준가 54.45'],
+          details: {
+            remainingQuota: 50,
+            minimumExecutablePrice: 54.45,
+          },
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(undefined);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: 'TQQQ',
+        strategyParams: {
+          accumulatedQuota: 200,
+          lastAccumulatedDate: '2026-04-15',
+        },
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 39.8,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {
+              accumulatedQuota: 200,
+            },
+          },
+          position: {
+            stockCode: 'TQQQ',
+            quantity: 3,
+            avgPrice: 50,
+            currentPrice: 55,
+            totalInvested: 9950,
+          },
+          price: { currentPrice: 55 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 1000,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith({
+        where: { id: 'ws-1' },
+        data: {
+          strategyParams: {
+            lastAccumulatedDate: '2026-04-15',
+          },
+        },
       });
     });
   });

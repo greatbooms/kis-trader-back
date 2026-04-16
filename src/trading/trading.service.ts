@@ -275,10 +275,15 @@ export class TradingService {
     for (const ctx of contexts) {
       try {
         const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
+        const terminalQuotaReached = this.isTerminalQuotaExhaustedSkip(skipReasons);
 
         if (signals.length === 0) {
           if (this.isQuotaCarryEligible(skipReasons)) {
             quotaCarryEligibleIds.add(ctx.watchStock.id);
+          }
+
+          if (['infinite-buy', 'daily-dca'].includes(strategy.name) && terminalQuotaReached) {
+            await this.clearAccumulatedQuota(ctx.watchStock.id, 'terminal quota exhaustion');
           }
 
           if (this.isRoutineAlreadyExecutedSkip(skipReasons)) {
@@ -341,6 +346,10 @@ export class TradingService {
           && signals.some((signal) => signal.metadata?.phase === 'take-profit-2')
         ) {
           skipQuotaAccumulationIds.add(ctx.watchStock.id);
+        }
+
+        if (['infinite-buy', 'daily-dca'].includes(strategy.name) && terminalQuotaReached) {
+          await this.clearAccumulatedQuota(ctx.watchStock.id, 'terminal quota exhaustion');
         }
 
         // 분할매수 전략: 매수 시그널 성공 시 누적 quota 리셋
@@ -836,6 +845,26 @@ export class TradingService {
     }
   }
 
+  /** 추가 매수가 불가능한 마지막 잔여 한도 상태에서는 누적 quota 정리 */
+  private async clearAccumulatedQuota(watchStockId: string, reason: string): Promise<void> {
+    try {
+      const ws = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+      if (!ws) return;
+
+      const params = (ws.strategyParams as Record<string, any>) || {};
+      if (!params.accumulatedQuota) return;
+
+      const { accumulatedQuota: _accumulatedQuota, ...rest } = params;
+      await this.prisma.watchStock.update({
+        where: { id: watchStockId },
+        data: { strategyParams: rest },
+      });
+      this.logger.log(`[${ws.stockCode}] Accumulated quota cleared (${reason})`);
+    } catch (e) {
+      this.logger.warn(`Failed to clear accumulated quota: ${e.message}`);
+    }
+  }
+
   /** 매수 시그널이 없었던 종목에 대해 quota 누적 (1주 가격 부족 시 이월) */
   private async accumulateUnusedQuotas(
     strategyName: string,
@@ -887,6 +916,10 @@ export class TradingService {
 
   private isQuotaCarryEligible(skipReasons: string[]): boolean {
     return skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'));
+  }
+
+  private isTerminalQuotaExhaustedSkip(skipReasons: string[]): boolean {
+    return skipReasons.some((reason) => reason.startsWith('최대 사이클 도달:'));
   }
 
   private isRoutineAlreadyExecutedSkip(skipReasons: string[]): boolean {
