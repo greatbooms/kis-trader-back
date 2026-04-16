@@ -367,7 +367,7 @@ export function WatchStockDetailPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className={`grid gap-4 sm:grid-cols-2 ${supportsCycles ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">투자금</CardTitle></CardHeader>
           <CardContent className="text-xl font-semibold">
@@ -382,6 +382,19 @@ export function WatchStockDetailPage() {
           <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
           <CardContent className="text-xl font-semibold">{formatCycleValue(stock.cycle)} / {stock.maxCycles}</CardContent>
         </Card>
+        {supportsCycles && (
+          <Card>
+            <CardHeader><CardTitle className="text-sm text-muted-foreground">이월금</CardTitle></CardHeader>
+            <CardContent className="space-y-1">
+              <div className="text-xl font-semibold">
+                {formatCurrency(accumulatedQuota, stock.market, stock.exchangeCode)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                오늘 못 산 금액이 다음 회차에 합산됩니다.
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">최근 상태</CardTitle></CardHeader>
           <CardContent className="space-y-1">

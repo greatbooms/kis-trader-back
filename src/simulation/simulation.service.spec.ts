@@ -36,6 +36,10 @@ describe('SimulationService', () => {
     getPrice: jest.fn(),
   };
 
+  const mockKisOverseas = {
+    getPrice: jest.fn(),
+  };
+
   const mockMarketDataCache = {
     getOpenDartDomesticSignals: jest.fn(),
     getSecFundamentals: jest.fn(),
@@ -55,7 +59,7 @@ describe('SimulationService', () => {
       mockMarketAnalysis as any,
       mockMarketRegimeService as any,
       mockKisDomestic as any,
-      {} as any,
+      mockKisOverseas as any,
       mockMarketDataCache as any,
     );
   });
@@ -231,7 +235,7 @@ describe('SimulationService', () => {
   });
 
   describe('execution timing', () => {
-    it('should skip once-daily strategy outside configured domestic hour', async () => {
+    it('should skip once-daily strategy outside configured domestic time', async () => {
       mockPrisma.simulationSession.findUnique.mockResolvedValue({
         id: 'session-1',
         status: 'RUNNING',
@@ -249,7 +253,7 @@ describe('SimulationService', () => {
         },
         evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
       });
-      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(9);
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 1 });
 
       await service.executeSimulationTick('session-1');
 
@@ -257,7 +261,7 @@ describe('SimulationService', () => {
       expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
     });
 
-    it('should execute once-daily strategy during configured domestic hour', async () => {
+    it('should execute once-daily strategy at configured domestic time', async () => {
       mockPrisma.simulationSession.findUnique.mockResolvedValue({
         id: 'session-1',
         status: 'RUNNING',
@@ -278,7 +282,7 @@ describe('SimulationService', () => {
         },
         evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
       });
-      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
       jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
@@ -288,6 +292,32 @@ describe('SimulationService', () => {
         where: { sessionId: 'session-1' },
       });
       expect(mockKisDomestic.getPrice).toHaveBeenCalledWith('005930');
+    });
+
+    it('should skip overseas once-daily strategy before configured minute in the same hour', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        id: 'session-1',
+        status: 'RUNNING',
+        strategyName: 'infinite-buy',
+        market: 'OVERSEAS',
+        exchangeCode: 'AMEX',
+      });
+      mockStrategyRegistry.getStrategy.mockReturnValue({
+        executionMode: {
+          type: 'once-daily',
+          hours: {
+            domestic: 11,
+            overseas: { basis: 'afterOpen', offsetHours: 2 },
+          },
+        },
+        evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
+      });
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 0, minute: 29 });
+
+      await service.executeSimulationTick('session-1');
+
+      expect(mockPrisma.simulationPosition.findMany).not.toHaveBeenCalled();
+      expect(mockKisOverseas.getPrice).not.toHaveBeenCalled();
     });
 
     it('should accumulate quota only when no buy signal is caused by insufficient quantity', async () => {
@@ -317,7 +347,7 @@ describe('SimulationService', () => {
           skipReasons: ['매수 수량 부족: 조정 할당금 2500 < 현재가 70000'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
       jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
@@ -362,7 +392,7 @@ describe('SimulationService', () => {
           skipReasons: ['투자유의 종목'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
       jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
@@ -411,7 +441,7 @@ describe('SimulationService', () => {
           skipReasons: ['매수 수량 부족: 주문가능금액 0으로 1주 매수 불가'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTHour').mockReturnValue(10);
+      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
       jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 

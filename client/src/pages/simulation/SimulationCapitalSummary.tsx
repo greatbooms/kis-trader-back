@@ -1,9 +1,13 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Tooltip } from '@/components/ui/tooltip'
-import { Wallet, PiggyBank, BarChart3, CircleDollarSign, Info } from 'lucide-react'
+import { Wallet, PiggyBank, BarChart3, CircleDollarSign, Info, Layers3, Coins, ArrowRightLeft } from 'lucide-react'
 import { useGetSimulationPositionsQuery } from '@/graphql/generated'
 import { formatCurrency } from '@/lib/utils'
 import type { SimulationCapitalSummaryProps } from '@/pages/simulation/types'
+
+function supportsCarrySummary(strategyName: string): boolean {
+  return strategyName === 'infinite-buy' || strategyName === 'daily-dca'
+}
 
 export function SimulationCapitalSummary({
   sessionId,
@@ -12,6 +16,9 @@ export function SimulationCapitalSummary({
   market,
   exchangeCode,
   quota,
+  strategyName,
+  maxCycles,
+  accumulatedQuota = 0,
 }: SimulationCapitalSummaryProps) {
   const { data } = useGetSimulationPositionsQuery({
     variables: { sessionId },
@@ -21,6 +28,12 @@ export function SimulationCapitalSummary({
   const totalInvested = positions.reduce((sum, p) => sum + p.totalInvested, 0)
   const totalPortfolioValue = positions.reduce((sum, p) => sum + (p.quantity * p.currentPrice), 0)
   const totalAssets = currentCash + totalPortfolioValue
+  const showCarrySummary = supportsCarrySummary(strategyName) && maxCycles > 0
+  const perCycleQuota = showCarrySummary ? quota / maxCycles : 0
+  const remainingQuota = showCarrySummary ? Math.max(0, quota - totalInvested) : 0
+  const nextCycleBudget = showCarrySummary
+    ? Math.min(remainingQuota, perCycleQuota + accumulatedQuota)
+    : 0
 
   return (
     <Card>
@@ -33,7 +46,7 @@ export function SimulationCapitalSummary({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className={showCarrySummary ? 'grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4' : 'grid grid-cols-2 gap-4 md:grid-cols-4'}>
           <div className="flex items-start gap-3">
             <Wallet className="h-5 w-5 text-primary-500 mt-0.5 shrink-0" />
             <div>
@@ -65,6 +78,47 @@ export function SimulationCapitalSummary({
             </div>
           </div>
         </div>
+
+        {showCarrySummary && (
+          <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-3">
+            <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <ArrowRightLeft className="mt-0.5 h-4.5 w-4.5 shrink-0 text-warning" />
+                <div>
+                  <p className="text-xs text-muted-foreground">이월금</p>
+                  <p className="text-sm font-semibold">{formatCurrency(accumulatedQuota, market, exchangeCode)}</p>
+                  <p className="text-xs text-muted-foreground">오늘 못 산 금액이 다음 회차로 누적됩니다.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-info/30 bg-info/5 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <Layers3 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-info" />
+                <div>
+                  <p className="text-xs text-muted-foreground">1회 기본분</p>
+                  <p className="text-sm font-semibold">{formatCurrency(perCycleQuota, market, exchangeCode)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    총 투자금 ÷ {maxCycles}회 기준입니다.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <Coins className="mt-0.5 h-4.5 w-4.5 shrink-0 text-primary-500" />
+                <div>
+                  <p className="text-xs text-muted-foreground">다음 회차 예산</p>
+                  <p className="text-sm font-semibold">{formatCurrency(nextCycleBudget, market, exchangeCode)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    기본분 + 이월금, 남은 투자한도 반영 전/후 기준
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {stockName && (
           <div className="mt-4 pt-4 border-t">

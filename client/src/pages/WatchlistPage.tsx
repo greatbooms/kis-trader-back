@@ -448,6 +448,9 @@ function WatchStockRow({
   onToggleActive: () => Promise<void>
   onDelete: () => void
 }) {
+  const strategyParams = parseStrategyParams(stock.strategyParams)
+  const accumulatedQuota = Number(strategyParams.accumulatedQuota || 0)
+
   return (
     <div
       className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:border-primary-200 cursor-pointer sm:flex-row sm:items-center sm:justify-between"
@@ -462,10 +465,15 @@ function WatchStockRow({
               {stock.exchangeCode ? (EXCHANGE_LABELS[stock.exchangeCode] ?? stock.exchangeCode) : (stock.market === 'DOMESTIC' ? '국내' : '해외')}
             </Badge>
             <Badge variant={stock.isActive ? 'success' : 'outline'}>
-              {stock.isActive ? '활성' : '비활성'}
+            {stock.isActive ? '활성' : '비활성'}
+          </Badge>
+          {accumulatedQuota > 0 && (
+            <Badge variant="warning">
+              이월 {formatCurrency(accumulatedQuota, stock.market, stock.exchangeCode ?? undefined)}
             </Badge>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          )}
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {stock.strategyName && <span>전략: {strategies.find((s) => s.name === stock.strategyName)?.displayName ?? stock.strategyName}</span>}
             {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
             {['infinite-buy', 'daily-dca'].includes(stock.strategyName ?? '') && <span>사이클: {formatCycleValue(stock.cycle)}/{stock.maxCycles}</span>}

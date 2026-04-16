@@ -25,6 +25,11 @@ import { SecFundamentals } from '../sec/types';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
 
+type KstExecutionTime = {
+  hour: number;
+  minute: number;
+};
+
 @Injectable()
 export class SimulationService {
   private readonly logger = new Logger(SimulationService.name);
@@ -568,32 +573,49 @@ export class SimulationService {
   ): boolean {
     if (executionMode.type === 'continuous') return true;
 
-    const kstHour = this.getKSTHour();
-    if (market === 'DOMESTIC') return kstHour === executionMode.hours.domestic;
-    return kstHour === this.getOverseasExecutionHour(exchangeCode, executionMode.hours.overseas);
+    const now = this.getKSTTime();
+    const target = market === 'DOMESTIC'
+      ? { hour: executionMode.hours.domestic, minute: 0 }
+      : this.getOverseasExecutionTime(exchangeCode, executionMode.hours.overseas);
+
+    return now.hour === target.hour && now.minute === target.minute;
   }
 
-  private getOverseasExecutionHour(
+  private getOverseasExecutionTime(
     exchangeCode: string,
     overseas: { basis: 'afterOpen' | 'beforeClose'; offsetHours: number },
-  ): number {
+  ): KstExecutionTime {
     const hours = getMarketHours(exchangeCode);
-    if (!hours) return (0 + overseas.offsetHours) % 24;
+    if (!hours) {
+      return {
+        hour: ((0 + overseas.offsetHours) % 24 + 24) % 24,
+        minute: 0,
+      };
+    }
 
     if (overseas.basis === 'afterOpen') {
-      return (hours.open.hour + overseas.offsetHours) % 24;
+      return {
+        hour: ((hours.open.hour + overseas.offsetHours) % 24 + 24) % 24,
+        minute: hours.open.minute,
+      };
     }
 
     const closeHour = hours.overnight
       ? hours.close.hour + 24
       : hours.close.hour;
-    return (closeHour - overseas.offsetHours) % 24;
+    return {
+      hour: ((closeHour - overseas.offsetHours) % 24 + 24) % 24,
+      minute: hours.close.minute,
+    };
   }
 
-  private getKSTHour(): number {
+  private getKSTTime(): KstExecutionTime {
     const now = new Date();
     const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    return kst.getUTCHours();
+    return {
+      hour: kst.getUTCHours(),
+      minute: kst.getUTCMinutes(),
+    };
   }
 
   private hasActiveInfiniteBuySecondTarget(strategyParams?: Record<string, any>): boolean {

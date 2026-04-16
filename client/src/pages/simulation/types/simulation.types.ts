@@ -30,6 +30,9 @@ export interface SimulationCapitalSummaryProps {
   market: string
   exchangeCode?: string
   quota: number
+  strategyName: string
+  maxCycles: number
+  accumulatedQuota?: number
 }
 
 export interface SimulationControlsProps {

@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SimulationControls } from '@/pages/simulation/SimulationControls'
+import { SimulationCapitalSummary } from '@/pages/simulation/SimulationCapitalSummary'
 import { SimulationMetricsCards } from '@/pages/simulation/SimulationMetricsCards'
 import { SimulationPositionsTable } from '@/pages/simulation/SimulationPositionsTable'
 import { SimulationTradesTable } from '@/pages/simulation/SimulationTradesTable'
@@ -42,6 +43,17 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
   const [maxCycles, setMaxCycles] = useState('')
   const [error, setError] = useState('')
   const [isEditing, setIsEditing] = useState(false)
+
+  const strategyParams = useMemo(() => {
+    if (!session?.strategyParams) return null
+    try {
+      return JSON.parse(session.strategyParams) as {
+        accumulatedQuota?: number
+      }
+    } catch {
+      return null
+    }
+  }, [session?.strategyParams])
 
   const lastExecutionDetails = useMemo(() => {
     if (!session?.lastExecutionDetails) return null
@@ -312,6 +324,18 @@ export function SimulationDetailSection({ sessionId, onBack }: SimulationDetailS
           )}
         </CardContent>
       </Card>
+
+      <SimulationCapitalSummary
+        sessionId={sessionId}
+        stockName={session.stockName}
+        currentCash={session.currentCash}
+        market={session.market}
+        exchangeCode={primaryExchangeCode}
+        quota={session.quota}
+        strategyName={session.strategyName}
+        maxCycles={session.maxCycles}
+        accumulatedQuota={strategyParams?.accumulatedQuota ?? 0}
+      />
 
       <SimulationMetricsCards sessionId={sessionId} market={session.market} exchangeCode={primaryExchangeCode} />
       <SimulationPositionsTable sessionId={sessionId} />
