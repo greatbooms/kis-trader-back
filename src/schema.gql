@@ -236,7 +236,7 @@ type WatchStockType {
   isActive: Boolean!
   strategyName: String
   quota: Float
-  cycle: Int!
+  cycle: Float!
   maxCycles: Int!
   stopLossRate: Float!
   maxPortfolioRate: Float!

@@ -894,7 +894,7 @@ export type WatchStockExecutionLogType = {
 export type WatchStockType = {
   __typename?: 'WatchStockType';
   createdAt: Scalars['DateTime']['output'];
-  cycle: Scalars['Int']['output'];
+  cycle: Scalars['Float']['output'];
   exchangeCode: Scalars['String']['output'];
   id: Scalars['ID']['output'];
   isActive: Scalars['Boolean']['output'];

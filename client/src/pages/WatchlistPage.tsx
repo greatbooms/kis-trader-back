@@ -22,6 +22,10 @@ import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import type { WatchStockUpdateInput } from '@/pages/types'
 
+function formatCycleValue(value: number): string {
+  return value.toFixed(1)
+}
+
 export function WatchlistPage() {
   const navigate = useNavigate()
   const [countryFilter, setCountryFilter] = useState<string | null>(null)
@@ -464,7 +468,7 @@ function WatchStockRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {stock.strategyName && <span>전략: {strategies.find((s) => s.name === stock.strategyName)?.displayName ?? stock.strategyName}</span>}
             {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
-            {stock.strategyName === 'infinite-buy' && <span>사이클: {stock.cycle}/{stock.maxCycles}</span>}
+            {['infinite-buy', 'daily-dca'].includes(stock.strategyName ?? '') && <span>사이클: {formatCycleValue(stock.cycle)}/{stock.maxCycles}</span>}
             <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>
           </div>
           {stock.lastExecutionStatus && (

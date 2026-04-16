@@ -53,6 +53,10 @@ function eventLabel(eventType: string): string {
   }
 }
 
+function formatCycleValue(value: number): string {
+  return value.toFixed(1)
+}
+
 export function WatchStockDetailPage() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
@@ -71,7 +75,7 @@ export function WatchStockDetailPage() {
   const strategyDisplayName = stock?.strategyName
     ? strategies.find((strategy) => strategy.name === stock.strategyName)?.displayName ?? stock.strategyName
     : undefined
-  const supportsCycles = stock?.strategyName === 'infinite-buy'
+  const supportsCycles = ['infinite-buy', 'daily-dca'].includes(stock?.strategyName ?? '')
   const strategyParams = useMemo(() => {
     if (!stock?.strategyParams) return null
     try {
@@ -376,7 +380,7 @@ export function WatchStockDetailPage() {
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
-          <CardContent className="text-xl font-semibold">{stock.cycle} / {stock.maxCycles}</CardContent>
+          <CardContent className="text-xl font-semibold">{formatCycleValue(stock.cycle)} / {stock.maxCycles}</CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">최근 상태</CardTitle></CardHeader>

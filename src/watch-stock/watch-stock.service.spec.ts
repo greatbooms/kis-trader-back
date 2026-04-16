@@ -17,6 +17,7 @@ describe('WatchStockService', () => {
     },
     position: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
   };
 
@@ -82,6 +83,52 @@ describe('WatchStockService', () => {
 
       const result = await service.findOne('nonexistent');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('findCurrentCycleMap', () => {
+    it('should calculate fractional cycle for cycle-based strategies from total invested', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          totalInvested: 156.1999,
+        },
+      ]);
+
+      const result = await service.findCurrentCycleMap([
+        {
+          id: '1',
+          market: 'OVERSEAS' as any,
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 10000,
+          cycle: 0,
+          maxCycles: 40,
+        },
+      ]);
+
+      expect(result.get('1')).toBe(0.6);
+    });
+
+    it('should keep stored cycle for non-cycle strategies', async () => {
+      const result = await service.findCurrentCycleMap([
+        {
+          id: '1',
+          market: 'OVERSEAS' as any,
+          exchangeCode: 'NASD',
+          stockCode: 'AAPL',
+          strategyName: 'trend-following',
+          quota: 10000,
+          cycle: 3,
+          maxCycles: 40,
+        },
+      ]);
+
+      expect(result.get('1')).toBe(3);
+      expect(mockPrisma.position.findMany).not.toHaveBeenCalled();
     });
   });
 

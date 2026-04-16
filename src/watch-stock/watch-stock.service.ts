@@ -51,6 +51,64 @@ export class WatchStockService {
     return this.prisma.watchStock.findUnique({ where: { id } });
   }
 
+  async findCurrentCycleMap(items: Array<{
+    id: string;
+    market: Market;
+    exchangeCode: string;
+    stockCode: string;
+    strategyName?: string | null;
+    quota?: Prisma.Decimal | number | null;
+    cycle: number;
+    maxCycles: number;
+  }>): Promise<Map<string, number>> {
+    const cycleBasedItems = items.filter((item) => this.isCycleBasedStrategy(item.strategyName));
+    const cycleById = new Map<string, number>();
+
+    if (cycleBasedItems.length === 0) {
+      for (const item of items) {
+        cycleById.set(item.id, item.cycle);
+      }
+      return cycleById;
+    }
+
+    const positions = await this.prisma.position.findMany({
+      where: {
+        OR: cycleBasedItems.map((item) => ({
+          market: item.market,
+          exchangeCode: item.exchangeCode,
+          stockCode: item.stockCode,
+        })),
+      },
+      select: {
+        market: true,
+        exchangeCode: true,
+        stockCode: true,
+        totalInvested: true,
+      },
+    });
+
+    const investedByKey = new Map<string, number>();
+    for (const position of positions) {
+      investedByKey.set(
+        `${position.market}:${position.exchangeCode}:${position.stockCode}`,
+        Number(position.totalInvested ?? 0),
+      );
+    }
+
+    for (const item of items) {
+      if (!this.isCycleBasedStrategy(item.strategyName)) {
+        cycleById.set(item.id, item.cycle);
+        continue;
+      }
+
+      const key = `${item.market}:${item.exchangeCode}:${item.stockCode}`;
+      const totalInvested = investedByKey.get(key) ?? 0;
+      cycleById.set(item.id, this.calculateCurrentCycle(item, totalInvested));
+    }
+
+    return cycleById;
+  }
+
   findExecutionLogs(watchStockId: string, limit = 50) {
     return this.prisma.watchStockExecutionLog.findMany({
       where: { watchStockId },
@@ -141,6 +199,31 @@ export class WatchStockService {
 
   private isUniqueConstraintError(error: unknown): error is { code: string } {
     return !!error && typeof error === 'object' && 'code' in error && error.code === 'P2002';
+  }
+
+  private isCycleBasedStrategy(strategyName?: string | null): boolean {
+    return ['infinite-buy', 'daily-dca'].includes(strategyName || '');
+  }
+
+  private calculateCurrentCycle(
+    item: {
+      quota?: Prisma.Decimal | number | null;
+      cycle: number;
+      maxCycles: number;
+    },
+    totalInvested: number,
+  ): number {
+    const quota = Number(item.quota ?? 0);
+    if (quota <= 0 || item.maxCycles <= 0) {
+      return item.cycle;
+    }
+
+    const perCycleQuota = quota / item.maxCycles;
+    if (perCycleQuota <= 0) {
+      return item.cycle;
+    }
+
+    return Math.round((totalInvested / perCycleQuota) * 10) / 10;
   }
 
   private toStrategyParams(value: Prisma.JsonValue | Record<string, any> | null | undefined): Record<string, any> {

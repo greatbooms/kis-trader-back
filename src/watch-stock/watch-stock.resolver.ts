@@ -34,7 +34,7 @@ export class WatchStockType {
   @Field(() => Float, { nullable: true })
   quota?: number;
 
-  @Field(() => Int)
+  @Field(() => Float)
   cycle: number;
 
   @Field(() => Int)
@@ -140,6 +140,7 @@ export class WatchStockResolver {
   async findAll(@Args('input', { nullable: true }) input?: WatchStocksFilterInput) {
     const items = await this.watchStockService.findAll(input?.market);
     const latestLogs = await this.watchStockService.findLatestExecutionLogs(items.map((item) => item.id));
+    const currentCycles = await this.watchStockService.findCurrentCycleMap(items);
 
     return items.map((item) => {
       const lastLog = latestLogs.get(item.id);
@@ -153,6 +154,7 @@ export class WatchStockResolver {
 
       return {
         ...item,
+        cycle: currentCycles.get(item.id) ?? item.cycle,
         strategyParams: item.strategyParams ? JSON.stringify(item.strategyParams) : undefined,
         lastExecutionStatus,
         lastExecutionDate,
@@ -166,10 +168,12 @@ export class WatchStockResolver {
     if (!item) return null;
 
     const latestLogs = await this.watchStockService.findLatestExecutionLogs([id]);
+    const currentCycles = await this.watchStockService.findCurrentCycleMap([item]);
     const lastLog = latestLogs.get(id);
 
     return {
       ...item,
+      cycle: currentCycles.get(item.id) ?? item.cycle,
       strategyParams: item.strategyParams ? JSON.stringify(item.strategyParams) : undefined,
       lastExecutionStatus: lastLog?.message,
       lastExecutionDate: lastLog?.createdAt?.toISOString().slice(0, 16).replace('T', ' '),
