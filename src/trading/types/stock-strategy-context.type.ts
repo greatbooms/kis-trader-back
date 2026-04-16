@@ -21,6 +21,11 @@ export interface StockStrategyContext {
   stockIndicators: StockIndicators;
   fundamentals?: StockFundamentals;
   buyableAmount: number;
+  buyableMeta?: {
+    source: 'KIS_DOMESTIC_BUYABLE_AMOUNT' | 'KIS_OVERSEAS_INQUIRE_PSAMOUNT';
+    maxQuantity?: number;
+    priceUsed?: number;
+  };
   totalPortfolioValue: number;
   marketRegime?: MarketRegimeLabel;
   riskState?: RiskState;

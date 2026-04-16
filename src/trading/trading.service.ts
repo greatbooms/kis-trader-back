@@ -96,6 +96,55 @@ export class TradingService {
     return skipReasons.join('; ');
   }
 
+  private buildExecutionDiagnostics(
+    ctx: StockStrategyContext | undefined,
+    details?: Record<string, any>,
+  ): Record<string, any> {
+    if (!ctx) return {};
+
+    const preCashCappedQuota = Number(details?.preCashCappedQuota ?? 0);
+    const adjustedQuota = Number(details?.adjustedQuota ?? 0);
+    const quotaAdjustments = Array.isArray(details?.quotaAdjustments)
+      ? details.quotaAdjustments
+      : undefined;
+    const quotaAdjustmentSummary = quotaAdjustments?.map((item: { label?: string; multiplier?: number }) => ({
+      label: item?.label,
+      multiplier: item?.multiplier,
+    }));
+    const cashCapApplied = preCashCappedQuota > 0 && adjustedQuota > 0 && adjustedQuota < preCashCappedQuota;
+    const diagnosticReasons: string[] = [];
+
+    if ((quotaAdjustmentSummary?.length ?? 0) > 0) {
+      diagnosticReasons.push('전략 가감산 적용');
+    }
+    if (cashCapApplied) {
+      diagnosticReasons.push('KIS 주문가능금액 상한 적용');
+    }
+
+    return {
+      buyableAmount: ctx.buyableAmount,
+      buyableAmountSource: ctx.buyableMeta?.source,
+      buyableAmountMaxQuantity: ctx.buyableMeta?.maxQuantity,
+      buyableAmountPriceUsed: ctx.buyableMeta?.priceUsed,
+      preCashCappedQuota: details?.preCashCappedQuota,
+      adjustedQuota: details?.adjustedQuota,
+      minimumExecutablePrice: details?.minimumExecutablePrice,
+      baseQuota: details?.baseQuota,
+      accumulatedQuota: details?.accumulatedQuota,
+      cashCapApplied,
+      cashCapDelta: cashCapApplied ? preCashCappedQuota - adjustedQuota : 0,
+      quotaAdjustments,
+      quotaAdjustmentSummary,
+      diagnosticReasons,
+      buy1Qty: details?.buy1Qty,
+      buy2Qty: details?.buy2Qty,
+      buy1Price: details?.buy1Price,
+      buy2Price: details?.buy2Price,
+      dipRate: details?.dipRate,
+      buy2OnlyMode: details?.buy2OnlyMode,
+    };
+  }
+
   private buildSkipExecutionDetails(
     ctx: StockStrategyContext,
     skipReasons: string[],
@@ -115,10 +164,7 @@ export class TradingService {
       hasPosition: !!ctx.position,
       rsi14: ctx.stockIndicators.rsi14,
       ma200: ctx.stockIndicators.ma200,
-      buyableAmount: ctx.buyableAmount,
-      preCashCappedQuota: details?.preCashCappedQuota,
-      adjustedQuota: details?.adjustedQuota,
-      minimumExecutablePrice: details?.minimumExecutablePrice,
+      ...this.buildExecutionDiagnostics(ctx, details),
       perCycleQuota,
       accumulatedQuota,
       remainingQuota,
@@ -282,11 +328,12 @@ export class TradingService {
               price: signal.price,
               reason: signal.reason,
             })),
+            ...this.buildExecutionDiagnostics(ctx, details),
           },
         );
 
         for (const signal of signals) {
-          await this.executeSignal(signal, strategy.name, ctx);
+          await this.executeSignal(signal, strategy.name, ctx, details);
         }
 
         if (
@@ -384,7 +431,12 @@ export class TradingService {
   }
 
   /** 주문 실행 */
-  private async executeSignal(signal: TradingSignal, strategyName?: string, ctx?: StockStrategyContext): Promise<void> {
+  private async executeSignal(
+    signal: TradingSignal,
+    strategyName?: string,
+    ctx?: StockStrategyContext,
+    executionDetails?: Record<string, any>,
+  ): Promise<void> {
     await this.refreshMarketPositionsBeforeOrder(signal.market as 'DOMESTIC' | 'OVERSEAS');
 
     // OrderType 결정
@@ -480,6 +532,7 @@ export class TradingService {
         reason: signal.reason,
         orderType,
         metadata: signal.metadata,
+        ...this.buildExecutionDiagnostics(ctx, executionDetails),
       },
       record.id,
     );

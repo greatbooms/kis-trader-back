@@ -335,21 +335,50 @@ export class TradingScheduler implements OnModuleInit {
       0,
     );
 
-    // 3. 미체결 주문 정리 (once-daily 전략 실행 시각에만)
-    const hasOnceDailyNow = this.strategyRegistry.getAllStrategies()
-      .some((strategy) => this.shouldExecuteNow(strategy, market, exchangeCode));
-
-    if (hasOnceDailyNow) {
-      await this.cancelUnfilledOrders(market, unfilledOrders);
-    }
-
-    // 4. 전략별 그룹핑
+    // 3. 전략별 그룹핑 및 실행 상태 계산
     const byStrategy = new Map<string, typeof watchStocks>();
     for (const ws of watchStocks) {
       const name = ws.strategyName!;
       if (!byStrategy.has(name)) byStrategy.set(name, []);
       byStrategy.get(name)!.push(ws);
     }
+
+    const strategyStates = new Map<string, {
+      strategy?: PerStockTradingStrategy;
+      shouldExecute: boolean;
+    }>();
+
+    for (const strategyName of byStrategy.keys()) {
+      const strategy = this.strategyRegistry.getStrategy(strategyName);
+      if (!strategy) {
+        strategyStates.set(strategyName, { strategy: undefined, shouldExecute: false });
+        continue;
+      }
+
+      strategyStates.set(strategyName, {
+        strategy,
+        shouldExecute: this.shouldExecuteNow(strategy, market, exchangeCode),
+      });
+    }
+
+    const executableOnceDailyStocks = watchStocks.filter((ws) => {
+      const state = strategyStates.get(ws.strategyName!);
+      return Boolean(
+        state?.strategy
+        && state.shouldExecute
+        && state.strategy.executionMode.type === 'once-daily',
+      );
+    });
+
+    const cancelableUnfilledOrders = executableOnceDailyStocks.length > 0
+      ? await this.filterUnfilledOrdersForWatchStocks(market, executableOnceDailyStocks, unfilledOrders)
+      : [];
+
+    if (cancelableUnfilledOrders.length > 0) {
+      await this.cancelUnfilledOrders(market, cancelableUnfilledOrders);
+    }
+
+    const hasOnceDailyNow = executableOnceDailyStocks.length > 0;
 
     const today = this.getKSTDate();
     const investorTradeCache = new Map<string, Promise<any[] | undefined>>();
@@ -360,14 +389,15 @@ export class TradingScheduler implements OnModuleInit {
     const secFundamentalsCache = new Map<string, Promise<SecFundamentals | undefined>>();
 
     for (const [strategyName, stocks] of byStrategy) {
-      const strategy = this.strategyRegistry.getStrategy(strategyName);
+      const state = strategyStates.get(strategyName);
+      const strategy = state?.strategy;
       if (!strategy) {
         this.logger.warn(`Unknown strategy: ${strategyName}`);
         continue;
       }
 
       // 실행 타이밍 체크
-      if (!this.shouldExecuteNow(strategy, market, exchangeCode)) continue;
+      if (!state?.shouldExecute) continue;
 
       // 5. 종목별 컨텍스트 빌드
       const contexts: StockStrategyContext[] = [];
@@ -407,10 +437,14 @@ export class TradingScheduler implements OnModuleInit {
           stockIndicators.shortSellable = price.shortSellable;
 
           let buyableAmount = 0;
+          let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
           if (market === 'DOMESTIC') {
             try {
               const buyable = await this.kisDomestic.getBuyableAmount();
               buyableAmount = buyable.cashAvailable;
+              buyableMeta = {
+                source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
+              };
             } catch (e) {
               this.logger.warn(`Failed to get domestic buyable amount: ${e.message}`);
             }
@@ -420,6 +454,11 @@ export class TradingScheduler implements OnModuleInit {
                 ws.exchangeCode, ws.stockCode, price.currentPrice,
               );
               buyableAmount = buyable.foreignCurrencyAvailable;
+              buyableMeta = {
+                source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+                maxQuantity: buyable.maxQuantity,
+                priceUsed: price.currentPrice,
+              };
             } catch (e) {
               this.logger.warn(`Failed to get buyable amount for ${ws.stockCode}: ${e.message}`);
             }
@@ -542,6 +581,7 @@ export class TradingScheduler implements OnModuleInit {
             stockIndicators,
             fundamentals,
             buyableAmount,
+            buyableMeta,
             totalPortfolioValue,
             marketRegime: regime,
             riskState,
@@ -814,6 +854,55 @@ export class TradingScheduler implements OnModuleInit {
 
   private async getUnfilledOrders(marketType: 'DOMESTIC' | 'OVERSEAS'): Promise<UnfilledOrder[]> {
     return this.orderSyncService.getMarketUnfilledOrders(marketType);
+  }
+
+  private async filterUnfilledOrdersForWatchStocks(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    watchStocks: Array<{
+      exchangeCode: string;
+      stockCode: string;
+      strategyName: string | null;
+    }>,
+    orders: UnfilledOrder[],
+  ): Promise<UnfilledOrder[]> {
+    const orderNos = orders
+      .map((order) => order.orderNo)
+      .filter((orderNo): orderNo is string => Boolean(orderNo));
+
+    if (orderNos.length === 0 || watchStocks.length === 0) {
+      return [];
+    }
+
+    const openRecords = await this.prisma.tradeRecord.findMany({
+      where: {
+        market: market as Market,
+        status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
+        orderNo: { in: orderNos },
+        OR: watchStocks
+          .filter(
+            (
+              watchStock,
+            ): watchStock is { exchangeCode: string; stockCode: string; strategyName: string } =>
+              Boolean(watchStock.strategyName),
+          )
+          .map((watchStock) => ({
+            exchangeCode: watchStock.exchangeCode,
+            stockCode: watchStock.stockCode,
+            strategyName: watchStock.strategyName,
+          })),
+      },
+      select: {
+        orderNo: true,
+      },
+    });
+
+    const cancelableOrderNos = new Set(
+      openRecords
+        .map((record) => record.orderNo)
+        .filter((orderNo): orderNo is string => Boolean(orderNo)),
+    );
+
+    return orders.filter((order) => cancelableOrderNos.has(order.orderNo));
   }
 
   private async cancelUnfilledOrders(
@@ -1148,9 +1237,13 @@ export class TradingScheduler implements OnModuleInit {
     stockIndicators.shortSellable = price.shortSellable;
 
     let buyableAmount = 0;
+    let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
       const buyable = await this.kisDomestic.getBuyableAmount();
       buyableAmount = buyable.cashAvailable;
+      buyableMeta = {
+        source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
+      };
     } else {
       const buyable = await this.kisOverseas.getBuyableAmount(
         ws.exchangeCode,
@@ -1158,6 +1251,11 @@ export class TradingScheduler implements OnModuleInit {
         price.currentPrice,
       );
       buyableAmount = buyable.foreignCurrencyAvailable;
+      buyableMeta = {
+        source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+        maxQuantity: buyable.maxQuantity,
+        priceUsed: price.currentPrice,
+      };
     }
 
     let fundamentals: StockFundamentals | undefined;
@@ -1243,6 +1341,7 @@ export class TradingScheduler implements OnModuleInit {
       stockIndicators,
       fundamentals,
       buyableAmount,
+      buyableMeta,
       totalPortfolioValue,
       marketRegime: regime,
       riskState,

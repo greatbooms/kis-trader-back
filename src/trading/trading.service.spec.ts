@@ -35,6 +35,7 @@ describe('TradingService', () => {
       upsert: jest.fn(),
       deleteMany: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     watchStock: {
       findUnique: jest.fn(),
@@ -130,6 +131,162 @@ describe('TradingService', () => {
           currentPrice: 200,
         }),
       );
+    });
+
+    it('should include buyable diagnostics in signal created logs', async () => {
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [
+            {
+              market: 'OVERSEAS',
+              exchangeCode: 'NASD',
+              stockCode: 'TQQQ',
+              side: 'BUY',
+              quantity: 1,
+              price: 54.6,
+              reason: 'Buy1',
+              orderDivision: '00',
+            },
+          ],
+          skipReasons: [],
+          details: {
+            preCashCappedQuota: 212.5,
+            adjustedQuota: 109.2,
+            quotaAdjustments: [{ label: 'RSI 72.0 ≥ 70', multiplier: 0.6 }],
+            buy1Qty: 1,
+            buy2Qty: 0,
+            buy1Price: 54.6,
+            buy2Price: 54.05,
+            dipRate: 0.01,
+            buy2OnlyMode: true,
+          },
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(undefined);
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 0,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          price: { currentPrice: 54.6 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 109.2,
+          buyableMeta: {
+            source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+            maxQuantity: 1,
+            priceUsed: 54.6,
+          },
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SIGNAL_CREATED',
+          details: expect.objectContaining({
+            buyableAmount: 109.2,
+            buyableAmountSource: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+            buyableAmountMaxQuantity: 1,
+            preCashCappedQuota: 212.5,
+            adjustedQuota: 109.2,
+            cashCapApplied: true,
+            diagnosticReasons: expect.arrayContaining(['전략 가감산 적용', 'KIS 주문가능금액 상한 적용']),
+            buy1Qty: 1,
+            buy2Qty: 0,
+          }),
+        }),
+      });
+    });
+  });
+
+  describe('executeSignal diagnostics logging', () => {
+    it('should include buyable diagnostics in order submitted logs', async () => {
+      jest.spyOn(service as any, 'refreshMarketPositionsBeforeOrder').mockResolvedValue(undefined);
+      mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'trade-1' });
+      mockPrisma.tradeRecord.update.mockResolvedValue({});
+      mockKisOverseas.orderBuy.mockResolvedValue({
+        success: true,
+        orderNo: '1001',
+        message: 'BUY order placed',
+      });
+
+      await (service as any).executeSignal(
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          quantity: 1,
+          price: 54.6,
+          reason: 'Buy1',
+          orderDivision: '00',
+        },
+        'infinite-buy',
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 0,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          price: { currentPrice: 54.6 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 109.2,
+          buyableMeta: {
+            source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+            maxQuantity: 1,
+            priceUsed: 54.6,
+          },
+          totalPortfolioValue: 0,
+        },
+        {
+          preCashCappedQuota: 212.5,
+          adjustedQuota: 109.2,
+          quotaAdjustments: [{ label: 'RSI 72.0 ≥ 70', multiplier: 0.6 }],
+          buy1Qty: 1,
+          buy2Qty: 0,
+        },
+      );
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'ORDER_SUBMITTED',
+          message: '주문 제출: BUY 1주',
+          details: expect.objectContaining({
+            buyableAmount: 109.2,
+            buyableAmountSource: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+            buyableAmountMaxQuantity: 1,
+            preCashCappedQuota: 212.5,
+            adjustedQuota: 109.2,
+            cashCapApplied: true,
+          }),
+        }),
+      });
     });
   });
 
