@@ -97,13 +97,105 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('market condition filters', () => {
-    it('should liquidate held position when common risk requests full exit', async () => {
+    it('should liquidate held position when risk triggers and stock loss exceeds threshold', async () => {
+      // P6: MDD 발동 + 종목 손실률 20% 이상 → 청산
       const ctx = createContext({
         position: {
           stockCode: '005930',
           quantity: 10,
           avgPrice: 70000,
-          currentPrice: 65000,
+          currentPrice: 50000, // loss = 28.6% >= 20%
+          totalInvested: 700000,
+        },
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: true,
+          positionCount: 1,
+          investedRate: 0.2,
+          dailyPnlRate: -0.03,
+          drawdown: -0.36,
+          reasons: ['MDD -36%'],
+        },
+      });
+      ctx.price.currentPrice = 50000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0].side).toBe('SELL');
+      expect(signals[0].quantity).toBe(10);
+      expect(signals[0].reason).toContain('리스크 청산');
+      expect(signals[0].reason).toContain('종목 손실');
+    });
+
+    it('should NOT liquidate profitable position even when risk requests full exit (P6)', async () => {
+      // P6: MDD 발동해도 수익 종목은 유지
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 72000, // 수익 중 (+2.9%)
+          totalInvested: 700000,
+        },
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: true,
+          positionCount: 1,
+          investedRate: 0.2,
+          dailyPnlRate: -0.03,
+          drawdown: -0.36,
+          reasons: ['MDD -36%'],
+        },
+      });
+      ctx.price.currentPrice = 72000;
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+
+      // 청산 시그널 없음 (buyBlocked로 매수도 차단됨, 매도 목표가 신호만 있을 수 있음)
+      const liquidations = signals.filter((s) => s.reason?.includes('리스크 청산'));
+      expect(liquidations).toHaveLength(0);
+      expect(details?.mddTriggered).toBe(true);
+    });
+
+    it('should NOT liquidate small-loss position under MDD (P6)', async () => {
+      // P6: MDD 발동해도 손실이 임계값 미만이면 유지
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 63000, // loss = 10%, < 20%
+          totalInvested: 700000,
+        },
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: true,
+          positionCount: 1,
+          investedRate: 0.2,
+          dailyPnlRate: -0.03,
+          drawdown: -0.36,
+          reasons: ['MDD -36%'],
+        },
+      });
+      ctx.price.currentPrice = 63000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const liquidations = signals.filter((s) => s.reason?.includes('리스크 청산'));
+      expect(liquidations).toHaveLength(0);
+    });
+
+    it('should respect per-watch override for mddLiquidateStockLossThreshold (P6)', async () => {
+      const ctx = createContext({
+        watchStock: {
+          ...createContext().watchStock,
+          strategyParams: { mddLiquidateStockLossThreshold: 0.05 }, // 5%로 낮춤
+        },
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 65000, // loss = 7.14% >= 5%
           totalInvested: 700000,
         },
         riskState: {
@@ -119,11 +211,8 @@ describe('InfiniteBuyStrategy', () => {
       ctx.price.currentPrice = 65000;
 
       const { signals } = await strategy.evaluateStock(ctx);
-
-      expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('SELL');
-      expect(signals[0].quantity).toBe(10);
-      expect(signals[0].reason).toContain('리스크 전량청산');
+      const liquidations = signals.filter((s) => s.reason?.includes('리스크 청산'));
+      expect(liquidations).toHaveLength(1);
     });
 
     it('should block new entry when common risk blocks buys', async () => {
@@ -307,7 +396,8 @@ describe('InfiniteBuyStrategy', () => {
       const buys = signals.filter((signal) => signal.side === 'BUY');
 
       expect(buys).toHaveLength(0);
-      expect(skipReasons).toContain('최대 사이클 도달: 잔여 투자한도 50 < 기준가 54.45');
+      // P1: atr-strong 기본값, 사이클 완주 임박 메시지로 변경
+      expect(skipReasons.some((reason) => reason.startsWith('사이클 완주 임박:'))).toBe(true);
       expect(skipReasons.some((reason) => reason.startsWith('매수 수량 부족:'))).toBe(false);
     });
   });
@@ -374,9 +464,10 @@ describe('InfiniteBuyStrategy', () => {
       const { signals, skipReasons } = await strategy.evaluateStock(ctx);
 
       // buyQty = floor(100000 / 200000) = 0
+      // P1: buy2 dip 2.5% (atr-strong 기본) → buy2Price = 195000, 기준가는 min(buy1, buy2)
       expect(signals).toHaveLength(0);
       expect(skipReasons).toContain(
-        '최대 사이클 도달: 잔여 투자한도 100000 < 기준가 198000',
+        '사이클 완주 임박: 잔여 투자한도 100000 < 기준가 195000',
       );
     });
   });
@@ -689,7 +780,8 @@ describe('InfiniteBuyStrategy', () => {
       );
     });
 
-    it('should reduce quota to 0.6x when RSI is between 70 and 80', async () => {
+    it('should reduce quota on overheated RSI with continuous curve (P4)', async () => {
+      // RSI=75 → linear: 1.0 - 15*0.03 = 0.55x
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -709,10 +801,11 @@ describe('InfiniteBuyStrategy', () => {
       expect(buySignals).toHaveLength(1);
       expect(buySignals[0].reason).toContain('Buy2');
       expect(buySignals[0].quantity).toBe(1);
-      expect(buySignals[0].price).toBe(49500);
+      // buy2Price = 50000 * (1 - 0.025) = 48750 (atr-strong, no ATR → 2.5% dip)
+      expect(buySignals[0].price).toBe(48750);
       expect(details?.quotaAdjustments).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ multiplier: 0.6 }),
+          expect.objectContaining({ multiplier: expect.closeTo(0.55, 2) }),
         ]),
       );
       expect(details?.buy2OnlyMode).toBe(true);
@@ -778,7 +871,8 @@ describe('InfiniteBuyStrategy', () => {
       expect(buys).toHaveLength(1);
       expect(buys[0].reason).toContain('Buy2');
       expect(buys[0].reason).not.toContain('Buy1');
-      expect(buys[0].price).toBe(48.84);
+      // P1: atr-strong 기본 (no ATR → 2.5%) → 49.33 * 0.975 = 48.09675 → 48.10 (2 decimal)
+      expect(buys[0].price).toBe(48.10);
       expect(details?.buy2OnlyMode).toBe(true);
     });
 

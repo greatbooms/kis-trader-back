@@ -380,7 +380,14 @@ export function WatchStockDetailPage() {
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
-          <CardContent className="text-xl font-semibold">{formatCycleValue(stock.cycle)} / {stock.maxCycles}</CardContent>
+          <CardContent className="space-y-1">
+            <div className="text-xl font-semibold">
+              {formatCycleValue(stock.cycle)} / {stock.maxCycles}
+            </div>
+            {stock.strategyName === 'infinite-buy' && stock.cycle != null && stock.cycle >= stock.maxCycles && (
+              <Badge variant="outline" className="text-xs">사이클 완주 · 청산 대기</Badge>
+            )}
+          </CardContent>
         </Card>
         {supportsCycles && (
           <Card>

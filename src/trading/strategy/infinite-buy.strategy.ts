@@ -8,8 +8,13 @@ import {
   StrategyMeta,
   InfiniteBuyStrategyParams,
   InfiniteBuySecondaryExitPlan,
+  Buy2DipMode,
   evaluateStrategyMdd,
 } from '../types';
+import { lookupTargetProfitRate, lookupSecondaryBonusRate } from './infinite-buy-target-table';
+import { applyAccumulatedQuota } from './infinite-buy-quota.util';
+
+const MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT = 0.20;
 
 function pushQuotaAdjustment(
   details: Record<string, any>,
@@ -22,43 +27,42 @@ function pushQuotaAdjustment(
   details.quotaAdjustments.push({ label, multiplier });
 }
 
-function getTargetProfitRate(T: number): number {
-  if (T < 2) return 0.16;
-  if (T < 4) return 0.15;
-  if (T < 6) return 0.135;
-  if (T < 8) return 0.12;
-  if (T < 10) return 0.11;
-  if (T < 12) return 0.10;
-  if (T < 14) return 0.095;
-  if (T < 16) return 0.09;
-  if (T < 18) return 0.085;
-  if (T < 20) return 0.08;
-  if (T < 24) return 0.077;
-  if (T < 28) return 0.074;
-  if (T < 32) return 0.072;
-  if (T < 36) return 0.07;
-  return 0.068;
-}
-
-function getSecondaryTargetBonusRate(T: number): number {
-  if (T < 4) return 0.03;
-  if (T < 8) return 0.026;
-  if (T < 12) return 0.022;
-  if (T < 20) return 0.018;
-  if (T < 28) return 0.014;
-  return 0.011;
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function getBuy2DipRate(stockIndicators: StockStrategyContext['stockIndicators']): number {
+function getBuy2DipRate(
+  stockIndicators: StockStrategyContext['stockIndicators'],
+  mode: Buy2DipMode = 'atr-strong',
+): number {
   const atrPercent = stockIndicators.atrPercent;
-  if (atrPercent !== undefined && Number.isFinite(atrPercent) && atrPercent > 0) {
-    return clamp((atrPercent / 100) * 0.5, 0.005, 0.015);
+  const hasAtr = atrPercent !== undefined && Number.isFinite(atrPercent) && atrPercent > 0;
+  switch (mode) {
+    case 'atr-light':
+      return hasAtr ? clamp((atrPercent! / 100) * 0.5, 0.005, 0.015) : 0.01;
+    case 'atr-strong':
+      return hasAtr ? clamp((atrPercent! / 100) * 1.0, 0.015, 0.05) : 0.025;
+    case 'fixed-3pct':
+      return 0.03;
+    case 'fixed-5pct':
+      return 0.05;
+    default:
+      return hasAtr ? clamp((atrPercent! / 100) * 1.0, 0.015, 0.05) : 0.025;
   }
-  return 0.01;
+}
+
+// RSI 기반 매수금액 배수 (P4)
+// 의도: 과열 구간에서만 매수금액 축소 + 하드 임계값(60/70/80) 경계 점프 제거
+//  - RSI < 30: 1.25x (과매도 부스트)
+//  - 30 ≤ RSI < 60: 1.0x (건전 구간, 조정 없음)
+//  - 60 ≤ RSI < 80: 1.0 → 0.4 연속 선형 하향
+//  - RSI ≥ 80: 0.4x (극단 과열)
+export function getRsiMultiplier(rsi: number | undefined): number {
+  if (rsi === undefined || !Number.isFinite(rsi)) return 1.0;
+  if (rsi < 30) return 1.25;
+  if (rsi < 60) return 1.0;
+  if (rsi >= 80) return 0.4;
+  return clamp(1.0 - (rsi - 60) * (0.6 / 20), 0.4, 1.0);
 }
 
 function shouldUseSameDaySecondTarget(ctx: StockStrategyContext): boolean {
@@ -246,18 +250,32 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
       : (p: number) => Math.round(p);              // 정수
 
+    // P6: MDD 발동 시에도 종목 손실률이 임계값 이상인 경우만 청산.
+    // 수익 종목 / 소폭 손실 종목은 유지하여 건강한 종목이 함께 휩쓸리지 않도록 한다.
     if ((riskState?.liquidateAll || mddCheck?.liquidateAll) && hasPosition) {
-      signals.push({
-        market,
-        exchangeCode,
-        stockCode: watchStock.stockCode,
-        side: 'SELL',
-        quantity: holdQty,
-        price: roundPrice(curPrice),
-        reason: `리스크 전량청산: ${riskReason}`,
-        orderDivision: '00',
-      });
-      return { signals, skipReasons };
+      const stockLossThreshold = Number.isFinite(strategyParams.mddLiquidateStockLossThreshold as number)
+        ? Number(strategyParams.mddLiquidateStockLossThreshold)
+        : MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT;
+      const stockLossRate = avgPrice > 0 ? (avgPrice - curPrice) / avgPrice : 0;
+      details.mddTriggered = true;
+      details.mddStockLossRate = stockLossRate;
+      details.mddStockLossThreshold = stockLossThreshold;
+      if (stockLossRate >= stockLossThreshold) {
+        signals.push({
+          market,
+          exchangeCode,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: holdQty,
+          price: roundPrice(curPrice),
+          reason:
+            `리스크 청산: ${riskReason}, 종목 손실 ${(stockLossRate * 100).toFixed(1)}% ` +
+            `≥ ${(stockLossThreshold * 100).toFixed(0)}%`,
+          orderDivision: '00',
+        });
+        return { signals, skipReasons };
+      }
+      // 수익 또는 소폭 손실 종목 → 청산하지 않고 통상 로직 진행. 아래 buyBlocked로 매수는 자동 차단됨.
     }
 
     // --- 손절: 포지션 보유 중이면 항상 체크 (alreadyExecutedToday, maxCycles 무관) ---
@@ -331,35 +349,37 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     // T >= maxCycles → 매수 중단 (매도 시그널은 계속 생성)
     const maxCyclesReached = T >= watchStock.maxCycles || remainingQuota <= 0;
+    const cycleCompleted = maxCyclesReached;
+    details.cycleCompleted = cycleCompleted;
     if (maxCyclesReached) {
-      this.logger.log(`[${watchStock.stockCode}] Max cycles reached (T=${T.toFixed(1)}), buy stopped`);
+      this.logger.log(`[${watchStock.stockCode}] Cycle completed (T=${T.toFixed(1)}/${watchStock.maxCycles}), buy stopped`);
     }
 
-    // --- 1회 매수금액 ---
-    const accumulatedQuota = (watchStock.strategyParams?.accumulatedQuota as number) || 0;
-    const baseQuota = perCycleQuota + accumulatedQuota;
-    let adjustedQuota = maxCyclesReached ? 0 : Math.min(baseQuota, remainingQuota);
+    // --- 1회 매수금액 (P3: accumulatedQuota 유틸 사용) ---
+    const quotaResult = applyAccumulatedQuota({
+      baseQuota: perCycleQuota,
+      params: strategyParams,
+      remainingQuota,
+    });
+    const accumulatedQuota = quotaResult.carriedIn;
+    const baseQuota = quotaResult.combinedQuota;
+    let adjustedQuota = maxCyclesReached ? 0 : quotaResult.cappedQuota;
     details.accumulatedQuota = accumulatedQuota;
+    details.accumulatedQuotaCarriedIn = quotaResult.carriedIn;
     details.baseQuota = baseQuota;
 
-    // RSI 과매도/과열 구간별 조정
+    // RSI 기반 매수금액 조정 (P4: 선형 연속 곡선)
     if (stockIndicators.rsi14 !== undefined) {
-      if (stockIndicators.rsi14 < 30) {
-        adjustedQuota *= 1.25;
+      const rsi = stockIndicators.rsi14;
+      const rsiMultiplier = getRsiMultiplier(rsi);
+      if (rsiMultiplier !== 1.0) {
+        adjustedQuota *= rsiMultiplier;
         details.quotaAdjust_rsi = true;
-        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} < 30`, 1.25);
-      } else if (stockIndicators.rsi14 >= 80) {
-        adjustedQuota *= 0.4;
-        details.quotaAdjust_rsi = true;
-        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 80`, 0.4);
-      } else if (stockIndicators.rsi14 >= 70) {
-        adjustedQuota *= 0.6;
-        details.quotaAdjust_rsi = true;
-        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 70`, 0.6);
-      } else if (stockIndicators.rsi14 >= 60) {
-        adjustedQuota *= 0.85;
-        details.quotaAdjust_rsi = true;
-        pushQuotaAdjustment(details, `RSI ${stockIndicators.rsi14.toFixed(1)} ≥ 60`, 0.85);
+        pushQuotaAdjustment(
+          details,
+          `RSI ${rsi.toFixed(1)} → ${rsiMultiplier.toFixed(2)}x`,
+          rsiMultiplier,
+        );
       }
     }
 
@@ -395,7 +415,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     if (buyAllowed) {
       // --- 매수 시그널 ---
-      const dipRate = getBuy2DipRate(stockIndicators);
+      const dipRate = getBuy2DipRate(stockIndicators, strategyParams.buy2DipMode);
+      details.buy2DipMode = strategyParams.buy2DipMode ?? 'atr-strong';
       const buy1Price = roundPrice(curPrice);
       const buy2Price = roundPrice(curPrice * (1 - dipRate));
 
@@ -495,7 +516,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         if (remainingQuota > 0 && remainingQuota < referencePrice) {
           details.terminalQuotaReached = true;
           skipReasons.push(
-            `최대 사이클 도달: 잔여 투자한도 ${remainingQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)}`,
+            `사이클 완주 임박: 잔여 투자한도 ${remainingQuota.toFixed(0)} < 기준가 ${roundPrice(referencePrice)}`,
           );
         } else {
           skipReasons.push(
@@ -508,11 +529,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
     if (holdQty > 0) {
-        const targetProfitRate = getTargetProfitRate(T);
+        const tableOverride = strategyParams.targetTableOverride;
+        const targetProfitRate = lookupTargetProfitRate(T, tableOverride);
         const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
         const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
         const secondSellQty = holdQty - firstSellQty;
-        const secondaryTargetRate = targetProfitRate + getSecondaryTargetBonusRate(T);
+        const secondaryTargetRate = targetProfitRate + lookupSecondaryBonusRate(T, tableOverride);
         const secondaryTargetPrice = roundPrice(avgPrice * (1 + secondaryTargetRate));
 
         if (targetPrice > 0) {
@@ -543,10 +565,14 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     if (!hasPosition && !buyAllowed) {
       // 포지션 없고 매수 불가
       if (maxCyclesReached) {
-        skipReasons.push(`최대 사이클 도달: T=${T.toFixed(1)} ≥ ${watchStock.maxCycles}`);
+        skipReasons.push(`사이클 완주 (T=${T.toFixed(1)}/${watchStock.maxCycles}), 청산 대기 중`);
       } else if (riskBuyBlocked) {
         skipReasons.push(`리스크 매수 차단: ${riskReason}`);
       }
+    }
+
+    if (hasPosition && cycleCompleted && holdQty > 0) {
+      skipReasons.push(`사이클 완주 (T=${T.toFixed(1)}/${watchStock.maxCycles}), 매수 중단`);
     }
 
     const quotaAdjustments = Array.isArray(details.quotaAdjustments)

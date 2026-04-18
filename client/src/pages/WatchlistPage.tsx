@@ -477,6 +477,9 @@ function WatchStockRow({
             {stock.strategyName && <span>전략: {strategies.find((s) => s.name === stock.strategyName)?.displayName ?? stock.strategyName}</span>}
             {stock.quota && <span>투자금: {formatCurrency(stock.quota, stock.market)}</span>}
             {['infinite-buy', 'daily-dca'].includes(stock.strategyName ?? '') && <span>사이클: {formatCycleValue(stock.cycle)}/{stock.maxCycles}</span>}
+            {stock.strategyName === 'infinite-buy' && stock.cycle != null && stock.cycle >= stock.maxCycles && (
+              <span className="font-medium text-amber-600 dark:text-amber-400">사이클 완주 · 청산 대기</span>
+            )}
             <span>손절: -{(stock.stopLossRate * 100).toFixed(0)}%</span>
           </div>
           {stock.lastExecutionStatus && (

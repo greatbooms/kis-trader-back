@@ -122,7 +122,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(signals[0].reason).toContain('Buy1');
       expect(signals[1].side).toBe('BUY');
       expect(signals[1].quantity).toBe(1);
-      expect(signals[1].price).toBe(49.5);
+      expect(signals[1].price).toBe(48.75);
       expect(signals[1].orderDivision).toBe('00');
       expect(signals[1].reason).toContain('Buy2');
     });
@@ -161,8 +161,8 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy2Price = round(48.50 * 0.99) = round(48.015) = $48.02
       // Buy2Qty = floor(75 / 48.02) = 1
       //
-      // T=1.0 → 1차 목표수익률 +15%
-      // TargetPrice = 50.00 * 1.15 = $57.50
+      // T=1.0 → 1차 목표수익률 +16% (T < 2)
+      // TargetPrice = 50.00 * 1.16 = $58.00
 
       const buys = signals.filter(s => s.side === 'BUY');
       const sells = signals.filter(s => s.side === 'SELL');
@@ -179,15 +179,15 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy2: 현재가 -1% 지정가 (더 떨어져야 체결)
       const buy2 = buys.find(s => s.reason.includes('Buy2'));
       expect(buy2).toBeDefined();
-      expect(buy2!.price).toBe(48.02);
+      expect(buy2!.price).toBe(47.29);
       expect(buy2!.price!).toBeLessThan(48.50); // 반드시 현재가보다 낮음
       expect(buy2!.quantity).toBe(1);
 
       const takeProfit = sells[0];
       expect(takeProfit.reason).toContain('Take profit 1');
-      expect(takeProfit.price).toBe(57.5);
+      expect(takeProfit.price).toBe(58);
       expect(takeProfit.quantity).toBe(3);
-      expect(takeProfit.metadata?.secondaryTargetPrice).toBe(59);
+      expect(takeProfit.metadata?.secondaryTargetPrice).toBe(59.5);
       expect(takeProfit.metadata?.secondaryTargetQuantity).toBe(2);
     });
   });
@@ -221,12 +221,12 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buy1!.price).toBe(45.00);
 
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
-      expect(buy2!.price).toBe(44.55);
+      expect(buy2!.price).toBe(43.88);
       expect(buy2!.price!).toBeLessThan(45.00); // 반드시 현재가보다 낮음
 
-      // T=3.0 → 1차 목표수익률 +14%, 48 * 1.14 = 54.72
+      // T=3.0 → 1차 목표수익률 +15% (T < 4), 48 * 1.15 = 55.20
       const takeProfit = signals.find(s => s.reason.includes('Take profit 1'));
-      expect(takeProfit!.price).toBe(54.72);
+      expect(takeProfit!.price).toBe(55.20);
       expect(takeProfit!.quantity).toBe(8);
     });
   });
@@ -258,7 +258,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy1 = 현재가
       expect(buy1!.price).toBe(45.00);
       // Buy2 < 현재가 (현재가 × 0.99 = $44.55)
-      expect(buy2!.price).toBe(44.55);
+      expect(buy2!.price).toBe(43.88);
       expect(buy2!.price!).toBeLessThan(45.00);
     });
 
@@ -280,7 +280,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
       // Buy2 = 55.00 * 0.99 = $54.45
-      expect(buy2!.price).toBe(54.45);
+      expect(buy2!.price).toBe(53.63);
       expect(buy2!.price!).toBeLessThan(55.00);
     });
   });
@@ -309,9 +309,9 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       const buy2_1 = signals1.find(s => s.reason.includes('Buy2'));
-      expect(buy2_1!.reason).toContain('dip=1.00%');
+      expect(buy2_1!.reason).toContain('dip=2.50%');
       // Buy2 = 46 * 0.99 = $45.54
-      expect(buy2_1!.price).toBe(45.54);
+      expect(buy2_1!.price).toBe(44.85);
 
       const takeProfit1 = signals1.find(s => s.reason.includes('Take profit 1'));
       expect(takeProfit1!.reason).toContain('+11.0%');
@@ -333,9 +333,9 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const { signals: signals2 } = await strategy.evaluateStock(ctx2);
       const buy2_2 = signals2.find(s => s.reason.includes('Buy2'));
-      expect(buy2_2!.reason).toContain('dip=1.00%');
+      expect(buy2_2!.reason).toContain('dip=2.50%');
       // Buy2 = 46 * 0.99 = $45.54
-      expect(buy2_2!.price).toBe(45.54);
+      expect(buy2_2!.price).toBe(44.85);
 
       const takeProfit2 = signals2.find(s => s.reason.includes('Take profit 1'));
       expect(takeProfit2!.reason).toContain('+10.0%');
@@ -390,8 +390,8 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       expect(buys2.some(s => s.reason.includes('Buy2'))).toBe(true);
 
       const buy2 = buys2.find(s => s.reason.includes('Buy2'));
-      expect(buy2!.price).toBe(41.58);
-      expect(buy2!.reason).toContain('dip=1.00%');
+      expect(buy2!.price).toBe(40.95);
+      expect(buy2!.reason).toContain('dip=2.50%');
     });
   });
 
@@ -418,7 +418,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       const buy2 = signals.find(s => s.reason.includes('Buy2'));
       // Buy2 = 38 * 0.99 = $37.62
-      expect(buy2!.price).toBe(37.62);
+      expect(buy2!.price).toBe(37.05);
       expect(buy2!.price!).toBeLessThan(38.00);
 
       // T=30이면 1차 목표수익률 +7.2%, 40 * 1.072 = 42.88
