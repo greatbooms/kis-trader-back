@@ -3,7 +3,7 @@ import { UseGuards } from '@nestjs/common';
 import { WatchStockService } from './watch-stock.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import { Market } from '@prisma/client';
-import { TradingScheduler } from '../trading/trading.scheduler';
+import { TradingOrchestrator } from '../trading/trading-orchestrator.service';
 import { WatchStocksFilterInput, WatchStockExecutionLogType, ManualTriggerResult } from './dto';
 
 registerEnumType(Market, { name: 'Market' });
@@ -133,7 +133,7 @@ export class UpdateWatchStockInput {
 export class WatchStockResolver {
   constructor(
     private watchStockService: WatchStockService,
-    private tradingScheduler: TradingScheduler,
+    private tradingOrchestrator: TradingOrchestrator,
   ) {}
 
   @Query(() => [WatchStockType], { name: 'watchStocks' })
@@ -229,7 +229,7 @@ export class WatchStockResolver {
 
   @Mutation(() => ManualTriggerResult)
   async triggerWatchStockNow(@Args('id', { type: () => ID }) id: string): Promise<ManualTriggerResult> {
-    return this.tradingScheduler.triggerWatchStockNow(id);
+    return this.tradingOrchestrator.triggerWatchStockNow(id);
   }
 
   @Mutation(() => ManualTriggerResult)

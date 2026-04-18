@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TradingService } from './trading.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
+import { TradingOrchestrator } from './trading-orchestrator.service';
+import { MarketStateSyncService } from './market-state-sync.service';
 import { TradingScheduler } from './trading.scheduler';
 import { TradingResolver } from './trading.resolver';
 import { MarketAnalysisService } from './market-analysis.service';
@@ -27,6 +29,8 @@ import { NotificationModule } from '../notification/notification.module';
     TradingPositionSyncService,
     TradingOrderReconciliationService,
     OrderSyncService,
+    TradingOrchestrator,
+    MarketStateSyncService,
     TradingScheduler,
     TradingResolver,
     MarketAnalysisService,
@@ -47,6 +51,8 @@ import { NotificationModule } from '../notification/notification.module';
     TradingPositionSyncService,
     TradingOrderReconciliationService,
     OrderSyncService,
+    TradingOrchestrator,
+    MarketStateSyncService,
     TradingScheduler,
     MarketAnalysisService,
     MarketRegimeService,
