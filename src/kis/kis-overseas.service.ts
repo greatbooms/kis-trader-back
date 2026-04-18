@@ -11,6 +11,7 @@ import {
   OrderResult,
   BalanceItem,
   DailyPrice,
+  IntradayPrice,
   UnfilledOrder,
   HolidayItem,
   BrokerOrderStatus,
@@ -349,6 +350,47 @@ export class KisOverseasService {
     }
 
     return results;
+  }
+
+  /** 해외 분봉 시세 조회 (VWAP 등 장중 판단용) */
+  async getIntradayPrices(
+    exchangeCode: string,
+    stockCode: string,
+    intervalMinutes = 5,
+    count = 120,
+  ): Promise<IntradayPrice[]> {
+    const excd = EXCHANGE_CODE_MAP[exchangeCode] || exchangeCode;
+    const res = await this.kisBase.get(
+      '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice',
+      'HHDFS76950200',
+      {
+        AUTH: '',
+        EXCD: excd,
+        SYMB: stockCode,
+        NMIN: String(intervalMinutes),
+        PINC: '0',
+        NEXT: '',
+        NREC: String(Math.min(count, 120)),
+        FILL: '',
+        KEYB: '',
+      },
+    );
+
+    const output2 = res.output2 as any[];
+    if (!output2 || output2.length === 0) return [];
+
+    return output2
+      .map((item) => ({
+        date: item.xymd,
+        time: item.xhms,
+        open: parseFloat(item.open) || 0,
+        high: parseFloat(item.high) || 0,
+        low: parseFloat(item.low) || 0,
+        close: parseFloat(item.last) || 0,
+        volume: parseInt(item.evol, 10) || 0,
+        amount: item.eamt ? parseFloat(item.eamt) || undefined : undefined,
+      }))
+      .filter((item) => item.close > 0 && item.volume > 0);
   }
 
   /** 해외 지수 일별 시세 조회 (시장 상황 판단용) */

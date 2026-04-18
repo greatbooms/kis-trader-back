@@ -20,6 +20,7 @@ export interface StockIndicators {
   atrPercent?: number;
   avgVolume20?: number;
   volumeRatio?: number;
+  intradayVwap?: number;
   prevHigh?: number;
   prevLow?: number;
   prevClose?: number;

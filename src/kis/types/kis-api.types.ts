@@ -218,6 +218,18 @@ export interface DailyPrice {
   volume: number;
 }
 
+/** 분봉/시간대 시세 */
+export interface IntradayPrice {
+  date: string; // YYYYMMDD
+  time: string; // HHMMSS
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  amount?: number;
+}
+
 /** 금리 항목 */
 export interface InterestRateItem {
   name: string;

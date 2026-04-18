@@ -15,6 +15,8 @@ import {
 import { BalanceItem, BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
+import { MarketAnalysisService } from './market-analysis.service';
+import { getMarketHours } from '../kis/types/kis-config.types';
 
 @Injectable()
 export class TradingService {
@@ -24,6 +26,7 @@ export class TradingService {
   constructor(
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private marketAnalysis: MarketAnalysisService,
     private prisma: PrismaService,
     private configService: ConfigService,
     @Optional() private slackService?: SlackService,
@@ -445,7 +448,7 @@ export class TradingService {
     strategyName?: string,
     ctx?: StockStrategyContext,
     executionDetails?: Record<string, any>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     await this.refreshMarketPositionsBeforeOrder(signal.market as 'DOMESTIC' | 'OVERSEAS');
 
     // OrderType 결정
@@ -511,7 +514,7 @@ export class TradingService {
       );
 
       this.logger.log(`Stop-loss alert registered for ${signal.stockCode}; awaiting manual sell`);
-      return;
+      return false;
     }
 
     const record = await this.prisma.tradeRecord.create({
@@ -595,6 +598,7 @@ export class TradingService {
       } else {
         this.logger.error(`Order failed: ${result.message}`);
       }
+      return result.success;
     } catch (e) {
       await this.prisma.tradeRecord.update({
         where: { id: record.id },
@@ -614,6 +618,7 @@ export class TradingService {
         record.id,
       );
       this.logger.error(`Order exception: ${e.message}`);
+      return false;
     }
   }
 
@@ -1294,9 +1299,27 @@ export class TradingService {
     }
 
     if (signal.metadata?.phase === 'take-profit-1') {
-      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
+      const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+      const position = watchStock
+        ? await this.prisma.position.findFirst({
+            where: {
+              market: watchStock.market,
+              exchangeCode: watchStock.exchangeCode,
+              stockCode: watchStock.stockCode,
+            },
+          })
+        : null;
+      const remainingQty = position?.quantity ?? Math.max(0, currentPositionQty - signal.quantity);
       if (remainingQty > 0) {
-        await this.persistInfiniteBuySecondaryExitPlan(watchStockId, signal);
+        const submittedSameDay = await this.trySubmitInfiniteBuySameDaySecondTarget(
+          watchStock,
+          position,
+          signal,
+          remainingQty,
+        );
+        if (!submittedSameDay) {
+          await this.persistInfiniteBuySecondaryExitPlan(watchStockId, signal);
+        }
       } else {
         await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
       }
@@ -1310,6 +1333,257 @@ export class TradingService {
     ) {
       await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
     }
+  }
+
+  private async trySubmitInfiniteBuySameDaySecondTarget(
+    watchStock:
+      | {
+          id: string;
+          market: Market;
+          exchangeCode: string;
+          stockCode: string;
+          stockName: string;
+          strategyName: string | null;
+          quota: Prisma.Decimal | null;
+          cycle: number;
+          maxCycles: number;
+          stopLossRate: Prisma.Decimal;
+          maxPortfolioRate: Prisma.Decimal;
+          strategyParams: Prisma.JsonValue | null;
+        }
+      | null,
+    position:
+      | {
+          stockCode: string;
+          quantity: number;
+          avgPrice: Prisma.Decimal;
+          currentPrice: Prisma.Decimal;
+          totalInvested: Prisma.Decimal;
+        }
+      | null,
+    signal: TradingSignal,
+    remainingQty: number,
+  ): Promise<boolean> {
+    if (!watchStock) return false;
+
+    const secondTargetPrice = Number(signal.metadata?.secondaryTargetPrice);
+    const secondTargetRate = Number(signal.metadata?.secondaryTargetRate);
+    const secondTargetQuantity = Math.min(
+      remainingQty,
+      Number(signal.metadata?.secondaryTargetQuantity || 0),
+    );
+
+    if (!secondTargetPrice || !secondTargetRate || secondTargetQuantity <= 0) return false;
+
+    const latestCtx = await this.buildInfiniteBuyFollowUpContext(watchStock, position, secondTargetPrice);
+    if (!latestCtx) return false;
+
+    if (
+      !this.shouldSubmitInfiniteBuySameDaySecondTarget(
+        watchStock.market as 'DOMESTIC' | 'OVERSEAS',
+        watchStock.exchangeCode,
+        latestCtx,
+      )
+    ) {
+      return false;
+    }
+
+    const followUpSignal: TradingSignal = {
+      market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
+      exchangeCode: watchStock.exchangeCode,
+      stockCode: watchStock.stockCode,
+      side: 'SELL',
+      quantity: secondTargetQuantity,
+      price: secondTargetPrice,
+      reason:
+        `Take profit 2: same-day trend, +${(secondTargetRate * 100).toFixed(1)}%, ` +
+        `${secondTargetQuantity}주 @ ${secondTargetPrice}`,
+      orderDivision: '00',
+      metadata: {
+        phase: 'take-profit-2',
+        sameDayTriggered: true,
+      },
+    };
+
+    const ctx: StockStrategyContext = {
+      watchStock: {
+        id: watchStock.id,
+        market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
+        exchangeCode: watchStock.exchangeCode,
+        stockCode: watchStock.stockCode,
+        stockName: watchStock.stockName,
+        strategyName: watchStock.strategyName || undefined,
+        quota: watchStock.quota ? Number(watchStock.quota) : undefined,
+        cycle: watchStock.cycle,
+        maxCycles: watchStock.maxCycles,
+        stopLossRate: Number(watchStock.stopLossRate),
+        maxPortfolioRate: Number(watchStock.maxPortfolioRate),
+        strategyParams: (watchStock.strategyParams as Record<string, any>) || undefined,
+      },
+      price: latestCtx.price,
+      position: position
+        ? {
+            stockCode: position.stockCode,
+            quantity: position.quantity,
+            avgPrice: Number(position.avgPrice),
+            currentPrice: Number(position.currentPrice),
+            totalInvested: Number(position.totalInvested),
+          }
+        : undefined,
+      alreadyExecutedToday: true,
+      marketCondition: latestCtx.marketCondition,
+      stockIndicators: latestCtx.stockIndicators,
+      buyableAmount: 0,
+      totalPortfolioValue: 0,
+    };
+
+    return this.executeSignal(followUpSignal, 'infinite-buy', ctx);
+  }
+
+  private async buildInfiniteBuyFollowUpContext(
+    watchStock: {
+      market: Market;
+      exchangeCode: string;
+      stockCode: string;
+      stockName: string;
+    },
+    position:
+      | {
+          currentPrice: Prisma.Decimal;
+        }
+      | null,
+    fallbackPrice: number,
+  ): Promise<Pick<StockStrategyContext, 'price' | 'stockIndicators' | 'marketCondition'> | null> {
+    try {
+      const market = watchStock.market as 'DOMESTIC' | 'OVERSEAS';
+      const price = market === 'DOMESTIC'
+        ? await this.kisDomestic.getPrice(watchStock.stockCode)
+        : await this.kisOverseas.getPrice(watchStock.exchangeCode, watchStock.stockCode);
+      const stockIndicators = await this.marketAnalysis.getStockIndicators(
+        market,
+        watchStock.exchangeCode,
+        watchStock.stockCode,
+        price.currentPrice,
+      );
+      const intradayVwap = await this.marketAnalysis.getIntradayVwap(
+        market,
+        watchStock.exchangeCode,
+        watchStock.stockCode,
+        price,
+      );
+      if (intradayVwap !== undefined) {
+        stockIndicators.intradayVwap = intradayVwap;
+      }
+
+      return {
+        price,
+        stockIndicators,
+        marketCondition: {
+          referenceIndexAboveMA200: true,
+          referenceIndexName: 'FOLLOW_UP_EXIT',
+          interestRateRising: false,
+        },
+      };
+    } catch (e) {
+      this.logger.warn(
+        `Failed to refresh same-day second target context for ${watchStock.stockCode}: ${e.message}`,
+      );
+
+      const currentPrice = Number(position?.currentPrice ?? fallbackPrice);
+      return {
+        price: {
+          stockCode: watchStock.stockCode,
+          stockName: watchStock.stockName,
+          currentPrice,
+          openPrice: currentPrice,
+          highPrice: currentPrice,
+          lowPrice: currentPrice,
+          volume: 0,
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+        },
+        marketCondition: {
+          referenceIndexAboveMA200: true,
+          referenceIndexName: 'FOLLOW_UP_EXIT',
+          interestRateRising: false,
+        },
+      };
+    }
+  }
+
+  private shouldSubmitInfiniteBuySameDaySecondTarget(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode: string,
+    ctx: Pick<StockStrategyContext, 'price' | 'stockIndicators'>,
+  ): boolean {
+    const currentPrice = Number(ctx.price.currentPrice);
+    const openPrice = Number(ctx.stockIndicators.todayOpen ?? ctx.price.openPrice);
+    const ma20 = ctx.stockIndicators.ma20;
+    const adx14 = ctx.stockIndicators.adx14;
+    const rsi14 = ctx.stockIndicators.rsi14;
+    const volumeRatio = ctx.stockIndicators.volumeRatio;
+    const intradayVwap = ctx.stockIndicators.intradayVwap;
+    const highPrice = Number(ctx.price.highPrice || currentPrice);
+    const atrPercent = ctx.stockIndicators.atrPercent;
+    const macdHistogram = ctx.stockIndicators.macdHistogram;
+    const macdPrevHistogram = ctx.stockIndicators.macdPrevHistogram;
+    const minutesToClose = this.getMinutesUntilMarketClose(market, exchangeCode);
+
+    const aboveOpen = Number.isFinite(openPrice) ? currentPrice >= openPrice : true;
+    const aboveIntradayVwap = intradayVwap === undefined ? true : currentPrice >= intradayVwap;
+    const aboveMa20 = ma20 === undefined ? true : currentPrice >= ma20;
+    const strongAdx = adx14 === undefined ? true : adx14 >= 20;
+    const healthyMomentum = rsi14 !== undefined && rsi14 >= 55 && rsi14 < 78;
+    const pullbackLimit = atrPercent !== undefined
+      ? Math.min(Math.max((atrPercent / 100) * 0.75, 0.008), 0.02)
+      : 0.015;
+    const shallowPullback = highPrice <= 0 ? true : currentPrice >= highPrice * (1 - pullbackLimit);
+    const volumeHealthy = volumeRatio === undefined ? true : volumeRatio >= 0.8;
+    const momentumNotFading = (
+      macdHistogram === undefined
+      || macdPrevHistogram === undefined
+      || macdHistogram >= macdPrevHistogram * 0.85
+    );
+    const enoughTime = minutesToClose === undefined ? true : minutesToClose >= 60;
+
+    return (
+      aboveOpen
+      && aboveIntradayVwap
+      && aboveMa20
+      && strongAdx
+      && healthyMomentum
+      && shallowPullback
+      && volumeHealthy
+      && momentumNotFading
+      && enoughTime
+    );
+  }
+
+  private getMinutesUntilMarketClose(
+    market?: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode?: string,
+  ): number | undefined {
+    const targetExchange = market === 'DOMESTIC' ? 'KRX' : exchangeCode;
+    if (!targetExchange) return undefined;
+
+    const hours = getMarketHours(targetExchange);
+    if (!hours) return undefined;
+
+    const now = new Date();
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const currentMinutes = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    let closeMinutes = hours.close.hour * 60 + hours.close.minute;
+
+    if (hours.overnight && currentMinutes > closeMinutes) {
+      closeMinutes += 24 * 60;
+    }
+
+    const normalizedCurrentMinutes = hours.overnight && currentMinutes < hours.open.hour * 60 + hours.open.minute
+      ? currentMinutes + 24 * 60
+      : currentMinutes;
+
+    return closeMinutes - normalizedCurrentMinutes;
   }
 
   private async handleMomentumBreakoutSignalFill(

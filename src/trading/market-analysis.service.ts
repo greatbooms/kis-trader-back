@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
-import { DailyPrice } from '../kis/types/kis-api.types';
+import { DailyPrice, StockPriceResult } from '../kis/types/kis-api.types';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import {
@@ -21,6 +21,7 @@ interface CacheEntry<T> {
 
 const MA_PERIODS = [10, 20, 30, 50, 100, 200] as const;
 const TECHNICAL_RATINGS_HISTORY_COUNT = 650;
+const INTRADAY_VWAP_CACHE_TTL_MS = 30 * 1000;
 
 @Injectable()
 export class MarketAnalysisService {
@@ -215,6 +216,46 @@ export class MarketAnalysisService {
 
     this.setCache(cacheKey, result);
     return result;
+  }
+
+  async getIntradayVwap(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode: string,
+    stockCode: string,
+    quote?: StockPriceResult,
+  ): Promise<number | undefined> {
+    if (market === 'DOMESTIC') {
+      const tradingValue = Number(quote?.tradingValue ?? 0);
+      const volume = Number(quote?.volume ?? 0);
+      return tradingValue > 0 && volume > 0 ? tradingValue / volume : undefined;
+    }
+
+    const cacheKey = `intraday-vwap:${market}:${exchangeCode}:${stockCode}:${this.getKstDate()}`;
+    const cached = this.getCache<number>(cacheKey);
+    if (cached !== null) return cached;
+
+    try {
+      const bars = await this.kisOverseas.getIntradayPrices(exchangeCode, stockCode, 5, 120);
+      if (bars.length === 0) return undefined;
+
+      const latestDate = bars[0].date;
+      const sameDayBars = bars.filter((bar) => bar.date === latestDate && bar.volume > 0);
+      if (sameDayBars.length === 0) return undefined;
+
+      const totalAmount = sameDayBars.reduce(
+        (sum, bar) => sum + (bar.amount ?? (((bar.high + bar.low + bar.close) / 3) * bar.volume)),
+        0,
+      );
+      const totalVolume = sameDayBars.reduce((sum, bar) => sum + bar.volume, 0);
+      if (totalAmount <= 0 || totalVolume <= 0) return undefined;
+
+      const vwap = totalAmount / totalVolume;
+      this.setCache(cacheKey, vwap, INTRADAY_VWAP_CACHE_TTL_MS);
+      return vwap;
+    } catch (e) {
+      this.logger.warn(`Failed to get intraday VWAP for ${stockCode}: ${e.message}`);
+      return undefined;
+    }
   }
 
   /** 일별 시세 조회 (국내/해외 분기) - public for MarketRegimeService */
@@ -1102,6 +1143,10 @@ export class MarketAnalysisService {
     const startDate = start.toISOString().slice(0, 10).replace(/-/g, '');
 
     return { startDate, endDate };
+  }
+
+  private getKstDate(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   getCache<T>(key: string): T | null {

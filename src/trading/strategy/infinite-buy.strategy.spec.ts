@@ -477,6 +477,13 @@ describe('InfiniteBuyStrategy', () => {
           currentPrice: 70000,
           totalInvested: 500000, // T = 5
         },
+        stockIndicators: {
+          currentAboveMA200: true,
+          ma200: 65000,
+          ma20: 68000,
+          adx14: 25,
+          rsi14: 60,
+        },
         totalPortfolioValue: 10000000, // Large portfolio to avoid maxPortfolioRate
       });
 
@@ -484,11 +491,58 @@ describe('InfiniteBuyStrategy', () => {
       const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
 
       expect(takeProfit).toBeDefined();
-      // T=5 → +13.0%
-      expect(takeProfit!.price).toBe(Math.round(70000 * 1.13));
+      // T=5 → +13.5%
+      expect(takeProfit!.price).toBe(Math.round(70000 * 1.135));
       expect(takeProfit!.quantity).toBe(10);
-      expect(takeProfit!.metadata?.secondaryTargetPrice).toBe(Math.round(70000 * 1.156));
+      expect(takeProfit!.metadata?.secondaryTargetPrice).toBe(Math.round(70000 * 1.161));
       expect(takeProfit!.metadata?.secondaryTargetQuantity).toBe(10);
+      expect(takeProfit!.metadata?.sameDaySecondaryEligible).toBe(true);
+    });
+
+    it('should use the raised early take-profit target for low T ranges', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 20,
+          avgPrice: 70000,
+          currentPrice: 70000,
+          totalInvested: 100000, // T = 1
+        },
+        totalPortfolioValue: 10000000,
+      });
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
+
+      expect(takeProfit).toBeDefined();
+      expect(takeProfit!.price).toBe(Math.round(70000 * 1.16));
+      expect(takeProfit!.reason).toContain('+16.0%');
+    });
+
+    it('should keep second target as next-day only when same-day trend is weak', async () => {
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 20,
+          avgPrice: 70000,
+          currentPrice: 70000,
+          totalInvested: 500000, // T = 5
+        },
+        stockIndicators: {
+          currentAboveMA200: true,
+          ma200: 65000,
+          ma20: 70500,
+          adx14: 18,
+          rsi14: 79,
+        },
+        totalPortfolioValue: 10000000,
+      });
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
+
+      expect(takeProfit).toBeDefined();
+      expect(takeProfit!.metadata?.sameDaySecondaryEligible).toBe(false);
     });
 
     it('should emit only second take-profit while secondary exit plan is active', async () => {

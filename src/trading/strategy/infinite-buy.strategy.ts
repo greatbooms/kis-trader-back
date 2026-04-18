@@ -23,9 +23,9 @@ function pushQuotaAdjustment(
 }
 
 function getTargetProfitRate(T: number): number {
-  if (T < 2) return 0.15;
-  if (T < 4) return 0.14;
-  if (T < 6) return 0.13;
+  if (T < 2) return 0.16;
+  if (T < 4) return 0.15;
+  if (T < 6) return 0.135;
   if (T < 8) return 0.12;
   if (T < 10) return 0.11;
   if (T < 12) return 0.10;
@@ -59,6 +59,21 @@ function getBuy2DipRate(stockIndicators: StockStrategyContext['stockIndicators']
     return clamp((atrPercent / 100) * 0.5, 0.005, 0.015);
   }
   return 0.01;
+}
+
+function shouldUseSameDaySecondTarget(ctx: StockStrategyContext): boolean {
+  const currentPrice = ctx.price.currentPrice;
+  const ma20 = ctx.stockIndicators.ma20;
+  const adx14 = ctx.stockIndicators.adx14;
+  const rsi14 = ctx.stockIndicators.rsi14;
+  const todayOpen = ctx.stockIndicators.todayOpen ?? ctx.price.openPrice;
+
+  const aboveOpen = Number.isFinite(todayOpen) ? currentPrice >= Number(todayOpen) : true;
+  const aboveMa20 = Number.isFinite(ma20) ? currentPrice >= Number(ma20) : true;
+  const strongAdx = adx14 === undefined || adx14 >= 20;
+  const healthyMomentum = rsi14 !== undefined && rsi14 >= 55 && rsi14 < 78;
+
+  return aboveOpen && aboveMa20 && strongAdx && healthyMomentum;
 }
 
 function getTodayDate(): string {
@@ -128,16 +143,19 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '',
     '【매도 조건】',
     '- 기본적으로 1차 목표가 1개만 계산하고, 도달 시 보유 수량의 50% 매도',
-    '- 1차 매도 후 남은 50%는 다음 거래일에만 2차 목표가를 시도',
+    '- 1차 매도 후 남은 50%는 체결 시점의 최신 시세/지표를 다시 평가해, 강한 추세면 같은 날 2차 목표가를 즉시 시도',
+    '- 같은 날 2차 조건이 약하거나 주문 제출에 실패하면, 다음 거래일에 2차 목표가를 한 번 더 시도',
+    '- 같은 날 2차 판단은 시가, 장중 VWAP, MA20, ADX, RSI, 고점 대비 눌림, 모멘텀 둔화, 장 마감 여유시간을 함께 확인',
+    '- 국내는 누적 거래대금/거래량 기반 장중 VWAP, 해외는 5분봉 기반 분봉 VWAP를 사용',
     '- 2차 목표가 미체결 시 분할매도 상태를 해제하고 일반 무한매수 모드로 복귀',
     '- 목표수익률은 T가 높을수록 단계적으로 낮아져 탈출 우선',
     '- 손절: 평균단가 대비 설정 손절률(기본 50%) 하회 시 전량 매도',
     '',
     '  T 구간    | 1차 목표 | 2차 추가',
     '  ----------+----------+----------',
-    '   0 ~ <2   | +15.0%   | +3.0%p',
-    '   2 ~ <4   | +14.0%   | +3.0%p',
-    '   4 ~ <6   | +13.0%   | +2.6%p',
+    '   0 ~ <2   | +16.0%   | +3.0%p',
+    '   2 ~ <4   | +15.0%   | +3.0%p',
+    '   4 ~ <6   | +13.5%   | +2.6%p',
     '   6 ~ <8   | +12.0%   | +2.6%p',
     '   8 ~ <10  | +11.0%   | +2.2%p',
     '  10 ~ <12  | +10.0%   | +2.2%p',
@@ -155,7 +173,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
     '- 시초가 변동 안정 후 주문하여 적정 가격에 진입',
     '- Buy2 지정가는 장 마감까지 체결 기회를 가짐',
-    '- 1차 익절 후 다음 거래일에만 추가 상승을 한 번 더 노림',
+    '- 1차 익절 후 강한 장중 추세면 같은 날 2차 익절까지 노리고, 아니면 다음 거래일에 한 번 더 노림',
     '',
     '【안전장치】',
     '- 투자유의/시장경고 종목은 신규 진입 차단',
@@ -167,7 +185,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     riskLevel: 'medium',
     mddBuyBlock: -0.25,
     mddLiquidate: -0.35,
-    expectedReturn: '1차 +6.8~15%, 2차 +7.9~18%',
+    expectedReturn: '1차 +6.8~16%, 2차 +7.9~19%',
     maxLoss: '-50% (손절 기본값)',
     investmentPeriod: '3개월~1년',
     tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 장 시작 2시간 후)',
@@ -516,6 +534,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
                   secondaryTargetPrice,
                   secondaryTargetRate,
                   secondaryTargetQuantity: secondSellQty,
+                  sameDaySecondaryEligible: shouldUseSameDaySecondTarget(ctx),
                 }
               : undefined,
           });

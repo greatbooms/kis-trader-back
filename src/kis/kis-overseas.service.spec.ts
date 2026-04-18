@@ -387,4 +387,56 @@ describe('KisOverseasService', () => {
       }),
     );
   });
+
+  it('should map overseas intraday bars for VWAP calculation', async () => {
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.get.mockResolvedValue({
+      output2: [
+        {
+          xymd: '20260418',
+          xhms: '013000',
+          open: '56.0000',
+          high: '56.4000',
+          low: '55.9000',
+          last: '56.2000',
+          evol: '100',
+          eamt: '5620',
+        },
+      ],
+    });
+
+    const result = await service.getIntradayPrices('NASD', 'TQQQ', 5, 120);
+
+    expect(mockKisBase.get).toHaveBeenCalledWith(
+      '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice',
+      'HHDFS76950200',
+      {
+        AUTH: '',
+        EXCD: 'NAS',
+        SYMB: 'TQQQ',
+        NMIN: '5',
+        PINC: '0',
+        NEXT: '',
+        NREC: '120',
+        FILL: '',
+        KEYB: '',
+      },
+    );
+    expect(result).toEqual([
+      {
+        date: '20260418',
+        time: '013000',
+        open: 56,
+        high: 56.4,
+        low: 55.9,
+        close: 56.2,
+        volume: 100,
+        amount: 5620,
+      },
+    ]);
+  });
 });

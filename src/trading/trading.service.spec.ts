@@ -5,6 +5,7 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
 import { ConfigService } from '@nestjs/config';
+import { MarketAnalysisService } from './market-analysis.service';
 
 describe('TradingService', () => {
   let service: TradingService;
@@ -62,6 +63,11 @@ describe('TradingService', () => {
     }),
   };
 
+  const mockMarketAnalysis = {
+    getStockIndicators: jest.fn(),
+    getIntradayVwap: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -69,6 +75,7 @@ describe('TradingService', () => {
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: SlackService, useValue: mockSlackService },
       ],
@@ -164,7 +171,7 @@ describe('TradingService', () => {
           },
         }),
       };
-      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
 
       await service.executePerStockStrategy(strategy as any, [
         {
@@ -237,7 +244,7 @@ describe('TradingService', () => {
           },
         }),
       };
-      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: 'ws-1',
         stockCode: 'TQQQ',
@@ -365,6 +372,251 @@ describe('TradingService', () => {
           }),
         }),
       });
+    });
+  });
+
+  describe('infinite-buy hybrid second target', () => {
+    it('should submit same-day second target after first take-profit fill when trend stays strong', async () => {
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      const persistPlanSpy = jest
+        .spyOn(service as any, 'persistInfiniteBuySecondaryExitPlan')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getMinutesUntilMarketClose').mockReturnValue(180);
+
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 10000,
+        cycle: 1,
+        maxCycles: 40,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 1,
+        strategyParams: {},
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({
+        stockCode: 'TQQQ',
+        quantity: 2,
+        avgPrice: 52.1,
+        currentPrice: 58.4,
+        totalInvested: 104.2,
+      });
+      mockKisOverseas.getPrice.mockResolvedValue({
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        currentPrice: 58.4,
+        openPrice: 57.8,
+        highPrice: 58.6,
+        lowPrice: 57.2,
+        volume: 1000000,
+      });
+      mockMarketAnalysis.getStockIndicators.mockResolvedValue({
+        currentAboveMA200: true,
+        todayOpen: 57.8,
+        ma20: 56.9,
+        adx14: 28,
+        rsi14: 63,
+        volumeRatio: 1.1,
+        atrPercent: 1.2,
+        macdHistogram: 0.8,
+        macdPrevHistogram: 0.7,
+      });
+      mockMarketAnalysis.getIntradayVwap.mockResolvedValue(58.0);
+
+      await (service as any).handleInfiniteBuySignalFill(
+        'ws-1',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 1,
+          price: 58.42,
+          reason: 'Take profit 1',
+          orderDivision: '00',
+          metadata: {
+            phase: 'take-profit-1',
+            sameDaySecondaryEligible: true,
+            secondaryTargetPrice: 59.88,
+            secondaryTargetRate: 0.19,
+            secondaryTargetQuantity: 2,
+          },
+        },
+        3,
+      );
+
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          side: 'SELL',
+          quantity: 2,
+          price: 59.88,
+          metadata: expect.objectContaining({
+            phase: 'take-profit-2',
+            sameDayTriggered: true,
+          }),
+        }),
+        'infinite-buy',
+        expect.objectContaining({
+          watchStock: expect.objectContaining({
+            stockCode: 'TQQQ',
+          }),
+          position: expect.objectContaining({
+            quantity: 2,
+          }),
+          alreadyExecutedToday: true,
+        }),
+      );
+      expect(persistPlanSpy).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to next-day second target plan when same-day submission fails', async () => {
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(false);
+      const persistPlanSpy = jest
+        .spyOn(service as any, 'persistInfiniteBuySecondaryExitPlan')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getMinutesUntilMarketClose').mockReturnValue(180);
+
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 10000,
+        cycle: 1,
+        maxCycles: 40,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 1,
+        strategyParams: {},
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({
+        stockCode: 'TQQQ',
+        quantity: 2,
+        avgPrice: 52.1,
+        currentPrice: 58.4,
+        totalInvested: 104.2,
+      });
+      mockKisOverseas.getPrice.mockResolvedValue({
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        currentPrice: 58.4,
+        openPrice: 57.8,
+        highPrice: 58.6,
+        lowPrice: 57.2,
+        volume: 1000000,
+      });
+      mockMarketAnalysis.getStockIndicators.mockResolvedValue({
+        currentAboveMA200: true,
+        todayOpen: 57.8,
+        ma20: 56.9,
+        adx14: 28,
+        rsi14: 63,
+        volumeRatio: 1.1,
+        atrPercent: 1.2,
+        macdHistogram: 0.8,
+        macdPrevHistogram: 0.7,
+      });
+      mockMarketAnalysis.getIntradayVwap.mockResolvedValue(58.0);
+
+      const signal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 1,
+        price: 58.42,
+        reason: 'Take profit 1',
+        orderDivision: '00',
+        metadata: {
+          phase: 'take-profit-1',
+          sameDaySecondaryEligible: true,
+          secondaryTargetPrice: 59.88,
+          secondaryTargetRate: 0.19,
+          secondaryTargetQuantity: 2,
+        },
+      };
+
+      await (service as any).handleInfiniteBuySignalFill('ws-1', signal, 3);
+
+      expect(persistPlanSpy).toHaveBeenCalledWith('ws-1', signal);
+    });
+
+    it('should keep next-day second target when latest trend re-check is weak', async () => {
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      const persistPlanSpy = jest
+        .spyOn(service as any, 'persistInfiniteBuySecondaryExitPlan')
+        .mockResolvedValue(undefined);
+
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 10000,
+        cycle: 1,
+        maxCycles: 40,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 1,
+        strategyParams: {},
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({
+        stockCode: 'TQQQ',
+        quantity: 2,
+        avgPrice: 52.1,
+        currentPrice: 58.4,
+        totalInvested: 104.2,
+      });
+      mockKisOverseas.getPrice.mockResolvedValue({
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        currentPrice: 57.4,
+        openPrice: 57.8,
+        highPrice: 58.6,
+        lowPrice: 57.1,
+        volume: 1000000,
+      });
+      mockMarketAnalysis.getStockIndicators.mockResolvedValue({
+        currentAboveMA200: true,
+        todayOpen: 57.8,
+        ma20: 57.9,
+        adx14: 18,
+        rsi14: 51,
+        volumeRatio: 0.7,
+        atrPercent: 1.2,
+        macdHistogram: 0.3,
+        macdPrevHistogram: 0.7,
+      });
+      mockMarketAnalysis.getIntradayVwap.mockResolvedValue(57.5);
+
+      await (service as any).handleInfiniteBuySignalFill(
+        'ws-1',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 1,
+          price: 58.42,
+          reason: 'Take profit 1',
+          orderDivision: '00',
+          metadata: {
+            phase: 'take-profit-1',
+            secondaryTargetPrice: 59.88,
+            secondaryTargetRate: 0.19,
+            secondaryTargetQuantity: 2,
+          },
+        },
+        3,
+      );
+
+      expect(executeSignalSpy).not.toHaveBeenCalled();
+      expect(persistPlanSpy).toHaveBeenCalled();
     });
   });
 

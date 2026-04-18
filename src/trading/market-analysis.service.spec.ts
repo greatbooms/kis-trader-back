@@ -16,6 +16,7 @@ describe('MarketAnalysisService', () => {
 
   const mockKisOverseas = {
     getDailyPrices: jest.fn(),
+    getIntradayPrices: jest.fn(),
     getOverseasIndexDailyPrices: jest.fn(),
   };
 
@@ -355,6 +356,53 @@ describe('MarketAnalysisService', () => {
       await service.getStockIndicators('OVERSEAS', 'NASD', 'AAPL', 150);
 
       expect(mockKisOverseas.getDailyPrices).toHaveBeenCalledWith('NASD', 'AAPL', 650);
+    });
+  });
+
+  describe('getIntradayVwap', () => {
+    it('should calculate domestic intraday VWAP from trading value and volume', async () => {
+      const vwap = await service.getIntradayVwap('DOMESTIC', 'KRX', '005930', {
+        stockCode: '005930',
+        stockName: 'Samsung',
+        currentPrice: 70000,
+        openPrice: 69500,
+        highPrice: 70500,
+        lowPrice: 69000,
+        volume: 2000,
+        tradingValue: 140000000,
+      });
+
+      expect(vwap).toBe(70000);
+    });
+
+    it('should calculate overseas intraday VWAP from minute bars', async () => {
+      mockKisOverseas.getIntradayPrices.mockResolvedValue([
+        {
+          date: '20260418',
+          time: '013000',
+          open: 56,
+          high: 56.4,
+          low: 55.9,
+          close: 56.2,
+          volume: 100,
+          amount: 5620,
+        },
+        {
+          date: '20260418',
+          time: '012500',
+          open: 55.7,
+          high: 56.1,
+          low: 55.6,
+          close: 55.9,
+          volume: 200,
+          amount: 11180,
+        },
+      ]);
+
+      const vwap = await service.getIntradayVwap('OVERSEAS', 'NASD', 'TQQQ');
+
+      expect(mockKisOverseas.getIntradayPrices).toHaveBeenCalledWith('NASD', 'TQQQ', 5, 120);
+      expect(vwap).toBeCloseTo((5620 + 11180) / 300, 10);
     });
   });
 
