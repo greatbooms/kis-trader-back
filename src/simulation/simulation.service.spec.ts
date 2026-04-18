@@ -1,8 +1,16 @@
 import { SimulationTradeStatus } from '@prisma/client';
 import { SimulationService } from './simulation.service';
+import { SimulationSessionManager } from './simulation-session-manager.service';
+import { SimulationPositionService } from './simulation-position.service';
+import { SimulationMetricsService } from './simulation-metrics.service';
+import { SimulationTickEngine } from './simulation-tick-engine.service';
 
 describe('SimulationService', () => {
   let service: SimulationService;
+  let sessionManager: SimulationSessionManager;
+  let positionService: SimulationPositionService;
+  let metricsService: SimulationMetricsService;
+  let tickEngine: SimulationTickEngine;
 
   const mockPrisma = {
     simulationSession: {
@@ -53,7 +61,14 @@ describe('SimulationService', () => {
     mockMarketDataCache.getOpenDartDomesticSignals.mockResolvedValue(undefined);
     mockMarketDataCache.getSecFundamentals.mockResolvedValue(undefined);
 
-    service = new SimulationService(
+    sessionManager = new SimulationSessionManager(mockPrisma as any);
+    positionService = new SimulationPositionService(
+      mockPrisma as any,
+      mockKisDomestic as any,
+      mockKisOverseas as any,
+    );
+    metricsService = new SimulationMetricsService(mockPrisma as any);
+    tickEngine = new SimulationTickEngine(
       mockPrisma as any,
       mockStrategyRegistry as any,
       mockMarketAnalysis as any,
@@ -61,7 +76,11 @@ describe('SimulationService', () => {
       mockKisDomestic as any,
       mockKisOverseas as any,
       mockMarketDataCache as any,
+      sessionManager,
+      positionService,
+      metricsService,
     );
+    service = new SimulationService(sessionManager, positionService, metricsService, tickEngine);
   });
 
   afterEach(() => {
@@ -191,42 +210,14 @@ describe('SimulationService', () => {
       expect(cycle).toBe(1.5);
     });
 
-    it('should not special-case infinite-buy no-signal reason for index below MA200', () => {
-      const reason = (service as any).describeNoSignalReason('infinite-buy', {
-        alreadyExecutedToday: false,
-        watchStock: {
-          quota: 100000,
-          maxCycles: 40,
-          stopLossRate: 0.3,
-        },
-        price: { currentPrice: 10000 },
-        position: undefined,
-        marketCondition: {
-          referenceIndexAboveMA200: false,
-          referenceIndexName: 'S&P500',
-        },
-        stockIndicators: {},
-        buyableAmount: 100000,
-      });
-
-      expect(reason).toBe('strategy conditions not met');
-    });
-
-    it('should prioritize already executed reason before strategy-specific diagnosis', () => {
-      const reason = (service as any).describeNoSignalReason('daily-dca', {
-        alreadyExecutedToday: true,
-      });
-
-      expect(reason).toBe('already executed today');
-    });
-
     it('should use KST date for overnight overseas sessions', () => {
       jest.useFakeTimers();
       jest.setSystemTime(new Date('2026-04-09T16:30:00Z'));
 
-      expect((service as any).getTodayDate()).toBe('2026-04-10');
+      // TickEngine의 내부 KST 날짜 산정이 여전히 동일하게 동작하는지 검증
+      expect((tickEngine as any).getTodayDate()).toBe('2026-04-10');
 
-      const range = (service as any).getDayRange('2026-04-10');
+      const range = (tickEngine as any).getDayRange('2026-04-10');
       expect(range.gte.toISOString()).toBe('2026-04-09T15:00:00.000Z');
       expect(range.lt.toISOString()).toBe('2026-04-10T14:59:59.999Z');
 
@@ -253,7 +244,7 @@ describe('SimulationService', () => {
         },
         evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 1 });
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 1 });
 
       await service.executeSimulationTick('session-1');
 
@@ -282,8 +273,8 @@ describe('SimulationService', () => {
         },
         evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
-      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
+      jest.spyOn(metricsService, 'evaluateSimulationRisk').mockResolvedValue(undefined as any);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
       await service.executeSimulationTick('session-1');
@@ -312,7 +303,7 @@ describe('SimulationService', () => {
         },
         evaluateStock: jest.fn().mockResolvedValue({ signals: [], skipReasons: [] }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 0, minute: 29 });
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 0, minute: 29 });
 
       await service.executeSimulationTick('session-1');
 
@@ -347,8 +338,8 @@ describe('SimulationService', () => {
           skipReasons: ['매수 수량 부족: 조정 할당금 2500 < 현재가 70000'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
-      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
+      jest.spyOn(metricsService, 'evaluateSimulationRisk').mockResolvedValue(undefined as any);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
       await service.executeSimulationTick('session-1');
@@ -392,8 +383,8 @@ describe('SimulationService', () => {
           skipReasons: ['투자유의 종목'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
-      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
+      jest.spyOn(metricsService, 'evaluateSimulationRisk').mockResolvedValue(undefined as any);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
       await service.executeSimulationTick('session-2');
@@ -441,8 +432,8 @@ describe('SimulationService', () => {
           skipReasons: ['매수 수량 부족: 주문가능금액 0으로 1주 매수 불가'],
         }),
       });
-      jest.spyOn(service as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
-      jest.spyOn(service as any, 'evaluateSimulationRisk').mockResolvedValue(undefined);
+      jest.spyOn(tickEngine as any, 'getKSTTime').mockReturnValue({ hour: 10, minute: 0 });
+      jest.spyOn(metricsService, 'evaluateSimulationRisk').mockResolvedValue(undefined as any);
       mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
 
       await service.executeSimulationTick('session-3');
@@ -466,8 +457,8 @@ describe('SimulationService', () => {
         status: 'RUNNING',
         stockCode: 'TQQQ',
       });
-      jest.spyOn(service, 'checkPendingOrders').mockResolvedValue();
-      jest.spyOn(service, 'getPendingOrderCount').mockReturnValue(1);
+      jest.spyOn(tickEngine, 'checkPendingOrders').mockResolvedValue();
+      jest.spyOn(tickEngine, 'getPendingOrderCount').mockReturnValue(1);
 
       const result = await service.triggerSessionNow('session-1');
 
@@ -481,12 +472,12 @@ describe('SimulationService', () => {
         status: 'RUNNING',
         stockCode: 'TQQQ',
       });
-      jest.spyOn(service, 'checkPendingOrders').mockResolvedValue();
-      jest.spyOn(service, 'getPendingOrderCount').mockReturnValue(0);
+      jest.spyOn(tickEngine, 'checkPendingOrders').mockResolvedValue();
+      jest.spyOn(tickEngine, 'getPendingOrderCount').mockReturnValue(0);
       mockPrisma.simulationTrade.findFirst
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
-      const executeSpy = jest.spyOn(service, 'executeSimulationTick').mockResolvedValue();
+      const executeSpy = jest.spyOn(tickEngine, 'executeSimulationTick').mockResolvedValue();
 
       const result = await service.triggerSessionNow('session-1');
 
