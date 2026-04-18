@@ -6,7 +6,7 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PrismaService } from '../prisma.service';
 import { OrderSyncOptions, OrderSyncWindow, PositionQuantitySnapshot } from './types';
-import { TradingService } from './trading.service';
+import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 
 @Injectable()
 export class OrderSyncService {
@@ -15,7 +15,7 @@ export class OrderSyncService {
   private readonly lastSyncedAt = new Map<'DOMESTIC' | 'OVERSEAS', Date>();
 
   constructor(
-    private tradingService: TradingService,
+    private orderReconciliationService: TradingOrderReconciliationService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private prisma: PrismaService,
@@ -36,7 +36,7 @@ export class OrderSyncService {
     const brokerOrders = await this.getBrokerOrders(market, window.startDate, window.endDate);
     const unfilledOrders = await this.mapUnfilledOrders(market, brokerOrders);
 
-    await this.tradingService.reconcileOpenOrders(
+    await this.orderReconciliationService.reconcileOpenOrders(
       market,
       currentPositions,
       unfilledOrders,

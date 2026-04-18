@@ -5,7 +5,15 @@ describe('TradingScheduler', () => {
 
   const mockTradingService = {
     executePerStockStrategy: jest.fn(),
+  };
+
+  const mockPositionSyncService = {
     syncPositions: jest.fn(),
+  };
+
+  const mockOrderReconciliationService = {
+    reconcileOpenOrders: jest.fn(),
+    markOpenOrderCancelled: jest.fn(),
   };
 
   const mockMarketAnalysis = {
@@ -77,7 +85,9 @@ describe('TradingScheduler', () => {
     mockRiskManagement.evaluateRisk.mockResolvedValue({ reasons: [] });
     mockRiskManagement.saveRiskSnapshot.mockResolvedValue(undefined);
     mockTradingService.executePerStockStrategy.mockResolvedValue(undefined);
-    mockTradingService.syncPositions.mockResolvedValue(undefined);
+    mockPositionSyncService.syncPositions.mockResolvedValue(undefined);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue(undefined);
+    mockOrderReconciliationService.markOpenOrderCancelled.mockResolvedValue(undefined);
     mockMarketAnalysis.getMarketCondition.mockResolvedValue({});
     mockMarketAnalysis.getStockIndicators.mockResolvedValue({});
     mockPrisma.position.findMany.mockResolvedValue([]);
@@ -125,6 +135,8 @@ describe('TradingScheduler', () => {
 
     scheduler = new TradingScheduler(
       mockTradingService as any,
+      mockPositionSyncService as any,
+      mockOrderReconciliationService as any,
       mockMarketAnalysis as any,
       mockMarketRegimeService as any,
       mockRiskManagement as any,

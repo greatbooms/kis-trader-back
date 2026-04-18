@@ -132,3 +132,61 @@ src/
 - reviewer는 plan approval을 요구하여, 리드가 승인하기 전까지 read-only 모드로 동작
 - backend과 frontend는 서로 다른 디렉토리에서 작업하므로 파일 충돌 없음
 - tester는 backend/frontend 작업 완료 후 테스트 작성
+
+## Module Documentation (CLAUDE.md per module)
+
+각 모듈 디렉토리(`src/{module}/`)에는 **`CLAUDE.md`**가 존재해야 하며, 해당 모듈이 어떤 책임을 가지는지 기술한다.
+
+**모듈별 CLAUDE.md 템플릿:**
+```markdown
+# {Module Name}
+
+## 책임
+이 모듈이 다루는 핵심 책임 1~3문장 요약.
+
+## 주요 서비스 / 컴포넌트
+- `{file}.ts` — 역할
+- ...
+
+## 외부 의존성
+- `@nestjs/...`, `@prisma/client`, ...
+- 내부 모듈: `KisModule`, `TradingModule`, ...
+
+## 주의사항 / 비자명한 규칙
+- (예) "이 서비스는 public API 호환성을 위해 메서드 시그니처 변경 금지"
+- (예) "Slack 호출은 TradingNotificationService로만 (직접 SlackService 사용 금지)"
+```
+
+- **루트 `CLAUDE.md`(이 파일)**에는 프로젝트 전체 규칙만 담고, 모듈 세부사항은 각 모듈 CLAUDE.md로 이관
+- 모듈 분리/신설 시 `CLAUDE.md`를 함께 작성
+
+## Service Responsibility / Size Rules
+
+서비스/리졸버 파일이 커지면 책임을 분리한다.
+
+**경계선:**
+- **~600줄**: 정상
+- **600~900줄**: 경고. 리팩토링 검토 권장
+- **900줄 이상**: 분리 필수 (신규 파일 작성 시 자제, 기존 파일도 분리 계획 필요)
+
+**책임 분리 기준:**
+1. 하나의 서비스는 **하나의 responsibility** (예: "신호 실행"과 "알림"을 한 서비스에 섞지 말 것)
+2. 의존성이 **8개 초과**하면 조합(composition) 구조로 재설계
+3. public 메서드 **10개 초과**하면 세분화 신호
+4. 한 메서드 **80줄 초과**는 재구성 대상
+
+**예시 — `src/trading/`**:
+- `trading.service.ts` — 신호 → 주문 제출 (signal executor)
+- `trading-notification.service.ts` — Slack 알림 + 실행 로그
+- `trading-position.service.ts` — Broker ↔ DB 포지션 동기화
+- `trading.scheduler.ts` — 크론만 (오케스트레이션은 `trading-orchestrator.service.ts`로)
+
+## Refactoring Principles
+
+기존 코드 리팩토링 시 준수:
+1. **행동 보존**: 공개 API(GraphQL schema, 서비스의 public 메서드 시그니처) 변경 금지가 원칙
+2. **테스트 우선**: 분리 전 최소 회귀 테스트 추가 → 분리 → 테스트 통과 확인
+3. **의존성 최소화**: 새 서비스는 필요한 것만 주입 (상위 서비스 전체 주입 금지)
+4. **순환 의존 방지**: 분리된 서비스 간 상호 참조 금지. 필요 시 인터페이스로 추상화
+5. **한 번에 하나의 모듈**: 동시에 여러 모듈 리팩토링하지 말 것 (커밋 단위 작게)
+6. **커밋**: 리팩토링은 `refactor: ...` type 사용. 기능 변경 없는 순수 이동이면 `refactor: move X to Y`

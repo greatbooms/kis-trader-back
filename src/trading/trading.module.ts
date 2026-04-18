@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TradingService } from './trading.service';
+import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { TradingScheduler } from './trading.scheduler';
 import { TradingResolver } from './trading.resolver';
 import { MarketAnalysisService } from './market-analysis.service';
@@ -22,6 +24,8 @@ import { NotificationModule } from '../notification/notification.module';
   imports: [KisModule, NotificationModule],
   providers: [
     TradingService,
+    TradingPositionSyncService,
+    TradingOrderReconciliationService,
     OrderSyncService,
     TradingScheduler,
     TradingResolver,
@@ -38,6 +42,16 @@ import { NotificationModule } from '../notification/notification.module';
     DailyDcaStrategy,
     PrismaService,
   ],
-  exports: [TradingService, OrderSyncService, TradingScheduler, MarketAnalysisService, MarketRegimeService, StrategyRegistryService, RiskManagementService],
+  exports: [
+    TradingService,
+    TradingPositionSyncService,
+    TradingOrderReconciliationService,
+    OrderSyncService,
+    TradingScheduler,
+    MarketAnalysisService,
+    MarketRegimeService,
+    StrategyRegistryService,
+    RiskManagementService,
+  ],
 })
 export class TradingModule {}

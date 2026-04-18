@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { TradingService } from './trading.service';
+import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { MarketRegimeService } from './market-regime.service';
 import { RiskManagementService } from './risk-management.service';
@@ -48,6 +50,8 @@ export class TradingScheduler implements OnModuleInit {
 
   constructor(
     private tradingService: TradingService,
+    private positionSyncService: TradingPositionSyncService,
+    private orderReconciliationService: TradingOrderReconciliationService,
     private marketAnalysis: MarketAnalysisService,
     private marketRegimeService: MarketRegimeService,
     private riskManagement: RiskManagementService,
@@ -664,7 +668,7 @@ export class TradingScheduler implements OnModuleInit {
       ? await this.kisDomestic.getBalance()
       : await this.kisOverseas.getBalance();
 
-    await this.tradingService.syncPositions(market, balance);
+    await this.positionSyncService.syncPositions(market, balance);
   }
 
   private async hasPortfolioState(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
@@ -923,7 +927,7 @@ export class TradingScheduler implements OnModuleInit {
           );
           if (result.success) {
             cancelledCount += 1;
-            await this.tradingService.markOpenOrderCancelled(
+            await this.orderReconciliationService.markOpenOrderCancelled(
               'OVERSEAS',
               order.orderNo,
               '장중 재실행 전 미체결 주문 취소',
@@ -942,7 +946,7 @@ export class TradingScheduler implements OnModuleInit {
           const result = await this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity);
           if (result.success) {
             cancelledCount += 1;
-            await this.tradingService.markOpenOrderCancelled(
+            await this.orderReconciliationService.markOpenOrderCancelled(
               'DOMESTIC',
               order.orderNo,
               '장중 재실행 전 미체결 주문 취소',
@@ -1193,7 +1197,7 @@ export class TradingScheduler implements OnModuleInit {
     const balance = market === 'DOMESTIC'
       ? await this.kisDomestic.getBalance()
       : await this.kisOverseas.getBalance();
-    await this.tradingService.syncPositions(market, balance);
+    await this.positionSyncService.syncPositions(market, balance);
 
     const positions = await this.prisma.position.findMany({
       where: { market: ws.market },

@@ -3,13 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
-import { TradingService } from './trading.service';
+import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { OrderSyncService } from './order-sync.service';
 
 describe('OrderSyncService', () => {
   let service: OrderSyncService;
 
-  const mockTradingService = {
+  const mockOrderReconciliationService = {
     reconcileOpenOrders: jest.fn(),
   };
 
@@ -43,7 +43,7 @@ describe('OrderSyncService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderSyncService,
-        { provide: TradingService, useValue: mockTradingService },
+        { provide: TradingOrderReconciliationService, useValue: mockOrderReconciliationService },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
@@ -83,7 +83,7 @@ describe('OrderSyncService', () => {
 
     expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledWith('20260407', '20260409');
     expect(mockKisDomestic.getUnfilledOrders).toHaveBeenCalled();
-    expect(mockTradingService.reconcileOpenOrders).toHaveBeenCalledWith(
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledWith(
       'DOMESTIC',
       [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
       [],
@@ -124,7 +124,7 @@ describe('OrderSyncService', () => {
     );
 
     expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledTimes(1);
-    expect(mockTradingService.reconcileOpenOrders).toHaveBeenCalledTimes(1);
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledTimes(1);
   });
 
   it('should always sync when force option is enabled', async () => {
@@ -149,7 +149,7 @@ describe('OrderSyncService', () => {
     );
 
     expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledTimes(2);
-    expect(mockTradingService.reconcileOpenOrders).toHaveBeenCalledTimes(2);
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledTimes(2);
   });
 
   it('should derive overseas paper unfilled orders from broker executions', async () => {
