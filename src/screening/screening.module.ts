@@ -8,16 +8,27 @@ import { DeepAnalysisService } from './deep-analysis.service';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
 import { ScreeningResolver } from './screening.resolver';
+import { ScreeningCandidateCollector } from './screening-candidate-collector.service';
+import { ScreeningAnalyzer } from './screening-analyzer.service';
+import { ScreeningRepository } from './screening-repository.service';
 
 @Module({
   imports: [KisModule, NotificationModule, TradingModule, StockMasterModule],
   providers: [
     PrismaService,
     DeepAnalysisService,
+    ScreeningCandidateCollector,
+    ScreeningAnalyzer,
+    ScreeningRepository,
     ScreeningService,
     ScreeningScheduler,
     ScreeningResolver,
   ],
-  exports: [ScreeningService],
+  exports: [
+    ScreeningService,
+    ScreeningCandidateCollector,
+    ScreeningAnalyzer,
+    ScreeningRepository,
+  ],
 })
 export class ScreeningModule {}

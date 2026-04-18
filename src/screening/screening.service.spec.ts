@@ -1,6 +1,6 @@
 import { pickRecommendationsForStorage } from './screening.service';
 import { StockScore, detectEtf } from './types';
-import { ScreeningService } from './screening.service';
+import { ScreeningCandidateCollector } from './screening-candidate-collector.service';
 
 function createScore(rank: number, isEtf: boolean, totalScore: number): StockScore {
   return {
@@ -83,10 +83,9 @@ describe('pickRecommendationsForStorage', () => {
   });
 });
 
-describe('ScreeningService overseas candidate fallback', () => {
+describe('ScreeningCandidateCollector', () => {
   it('aggregates domestic candidates from multiple ranking APIs', async () => {
-    const service = new ScreeningService(
-      {} as any,
+    const collector = new ScreeningCandidateCollector(
       {
         getVolumeRanking: jest.fn().mockResolvedValue([
           { mksc_shrn_iscd: '005930', hts_kor_isnm: '삼성전자', stck_prpr: '60000', prdy_ctrt: '1.2', acml_vol: '1000000' },
@@ -97,24 +96,19 @@ describe('ScreeningService overseas candidate fallback', () => {
         getMarketCapRanking: jest.fn().mockResolvedValue([]),
       } as any,
       {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
       {
         getStocksByExchange: jest.fn().mockReturnValue([]),
       } as any,
     );
 
-    const candidates = await (service as any).collectDomesticCandidates();
+    const candidates = await collector.collectDomesticCandidates();
 
     expect(candidates).toHaveLength(2);
-    expect(candidates.map((item: any) => item.stockCode)).toEqual(['005930', '000660']);
+    expect(candidates.map((item) => item.stockCode)).toEqual(['005930', '000660']);
   });
 
   it('aggregates candidates from multiple overseas ranking APIs', async () => {
-    const service = new ScreeningService(
-      {} as any,
+    const collector = new ScreeningCandidateCollector(
       {} as any,
       {
         searchStocks: jest.fn().mockResolvedValue([]),
@@ -128,24 +122,19 @@ describe('ScreeningService overseas candidate fallback', () => {
         getMarketCapRanking: jest.fn().mockResolvedValue([]),
         getUpDownRanking: jest.fn().mockResolvedValue([]),
       } as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
       {
         getStocksByExchange: jest.fn().mockReturnValue([]),
       } as any,
     );
 
-    const candidates = await (service as any).collectOverseasCandidates('TKSE');
+    const candidates = await collector.collectOverseasCandidates('TKSE');
 
     expect(candidates).toHaveLength(2);
-    expect(candidates.map((item: any) => item.stockCode)).toEqual(['7203', '6758']);
+    expect(candidates.map((item) => item.stockCode)).toEqual(['7203', '6758']);
   });
 
   it('uses stock master fallback for TKSE when KIS candidate APIs return empty', async () => {
-    const service = new ScreeningService(
-      {} as any,
+    const collector = new ScreeningCandidateCollector(
       {} as any,
       {
         searchStocks: jest.fn().mockResolvedValue([]),
@@ -155,10 +144,6 @@ describe('ScreeningService overseas candidate fallback', () => {
         getMarketCapRanking: jest.fn().mockResolvedValue([]),
         getUpDownRanking: jest.fn().mockResolvedValue([]),
       } as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
       {
         getStocksByExchange: jest.fn().mockReturnValue([
           { stockCode: '7203', stockName: '토요타자동차', market: 'OVERSEAS', exchangeCode: 'TKSE' },
@@ -167,7 +152,7 @@ describe('ScreeningService overseas candidate fallback', () => {
       } as any,
     );
 
-    const candidates = await (service as any).collectOverseasCandidates('TKSE');
+    const candidates = await collector.collectOverseasCandidates('TKSE');
 
     expect(candidates).toHaveLength(2);
     expect(candidates[0]).toMatchObject({
