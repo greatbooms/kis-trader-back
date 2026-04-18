@@ -606,8 +606,9 @@ describe('InfiniteBuyStrategy', () => {
       const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
 
       expect(takeProfit).toBeDefined();
-      expect(takeProfit!.price).toBe(Math.round(70000 * 1.16));
-      expect(takeProfit!.reason).toContain('+16.0%');
+      // T=1 → 1차 목표 +17% (초기 최대 수익률 20%에 맞춘 값)
+      expect(takeProfit!.price).toBe(Math.round(70000 * 1.17));
+      expect(takeProfit!.reason).toContain('+17.0%');
     });
 
     it('should keep second target as next-day only when same-day trend is weak', async () => {
@@ -766,6 +767,7 @@ describe('InfiniteBuyStrategy', () => {
     it('should reduce quota to 0.85x when RSI is between 60 and 70', async () => {
       const ctx = createContext({
         stockIndicators: { currentAboveMA200: true, rsi14: 65 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'continuous' } } as any,
       });
 
       const { signals, details } = await strategy.evaluateStock(ctx);
@@ -793,6 +795,7 @@ describe('InfiniteBuyStrategy', () => {
           volume: 1000000,
         },
         stockIndicators: { currentAboveMA200: true, rsi14: 75 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'continuous' } } as any,
       });
 
       const { signals, details } = await strategy.evaluateStock(ctx);
@@ -823,6 +826,7 @@ describe('InfiniteBuyStrategy', () => {
           volume: 1000000,
         },
         stockIndicators: { currentAboveMA200: true, rsi14: 85 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'continuous' } } as any,
       });
 
       const { signals, details } = await strategy.evaluateStock(ctx);
@@ -847,7 +851,8 @@ describe('InfiniteBuyStrategy', () => {
           stockCode: 'TQQQ',
           stockName: 'TQQQ',
           quota: 5000,
-        },
+          strategyParams: { rsiPolicy: 'continuous' },
+        } as any,
         price: {
           stockCode: 'TQQQ',
           stockName: 'TQQQ',

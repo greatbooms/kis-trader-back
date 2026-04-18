@@ -9,6 +9,7 @@ import {
   InfiniteBuyStrategyParams,
   InfiniteBuySecondaryExitPlan,
   Buy2DipMode,
+  RsiPolicy,
   evaluateStrategyMdd,
 } from '../types';
 import { lookupTargetProfitRate, lookupSecondaryBonusRate } from './infinite-buy-target-table';
@@ -57,8 +58,32 @@ function getBuy2DipRate(
 //  - 30 ≤ RSI < 60: 1.0x (건전 구간, 조정 없음)
 //  - 60 ≤ RSI < 80: 1.0 → 0.4 연속 선형 하향
 //  - RSI ≥ 80: 0.4x (극단 과열)
-export function getRsiMultiplier(rsi: number | undefined): number {
+//
+// Backtest에서는 `policy`로 세 정책을 스위칭:
+//  - 'none': 항상 1.0x (순수 DCA 효과)
+//  - 'legacy-hard': 이전 4단계 하드 임계값 (30/60/70/80)
+//  - 'continuous' (기본): 현재 정책
+export function getRsiMultiplier(rsi: number | undefined, policy: RsiPolicy = 'hard-stop-70'): number {
+  if (policy === 'none') return 1.0;
   if (rsi === undefined || !Number.isFinite(rsi)) return 1.0;
+
+  if (policy === 'legacy-hard') {
+    if (rsi < 30) return 1.25;
+    if (rsi >= 80) return 0.4;
+    if (rsi >= 70) return 0.6;
+    if (rsi >= 60) return 0.85;
+    return 1.0;
+  }
+
+  // Hard-stop 정책: 임계값 이상 → 매수 완전 중단 (quota 이월).
+  if (policy === 'hard-stop-70' || policy === 'hard-stop-75' || policy === 'hard-stop-80') {
+    const threshold = policy === 'hard-stop-70' ? 70 : policy === 'hard-stop-75' ? 75 : 80;
+    if (rsi < 30) return 1.25;
+    if (rsi >= threshold) return 0;
+    return 1.0;
+  }
+
+  // continuous (default)
   if (rsi < 30) return 1.25;
   if (rsi < 60) return 1.0;
   if (rsi >= 80) return 0.4;
@@ -122,28 +147,40 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '',
     '【사이클(T) 계산 방식】',
     '- T = 누적 투자금액 / 1회 매수금액 (실제 체결 기준)',
-    '- 40회는 "최대 횟수"가 아니라 "quota를 다 쓰는 기준"',
+    '- maxCycles(기본 40)는 "quota를 다 쓰는 기준"',
     '- Buy1만 체결되고 Buy2 미체결 시 T가 0.5만 증가',
     '- 둘 다 미체결 시 T 변동 없음, 다음 날 재시도',
-    '- quota를 모두 소진하면(T >= maxCycles) 매수 중단',
+    '- quota를 모두 소진하면(T ≥ maxCycles) 매수 중단 → 목표가 +5%로 탈출 가속',
+    '- 사용자가 증권사 앱에서 수동 매수해도 자동 동기화(10분 주기)로 T에 반영됨',
     '',
     '【매수 조건】',
     '- 하루 1회, 장중 실행 (국내 11시, 해외 장 시작 2시간 후)',
-    '- 하락장에서도 분할매수를 이어가되, 가격 과열/과매도와 초고변동성만 최소한으로 반영',
-    '- RSI < 30 과매도 구간에서는 매수금액 1.25배 증가',
-    '- RSI 60 이상 과열 구간에서는 단계적으로 매수금액 축소',
-    '- RSI 60~70: 15% 축소, 70 이상: 눌림목(Buy2)만 허용하며 매수금액 추가 축소',
-    '- RSI 70~80: 40% 축소, 80 이상: 60% 축소',
-    '- 30일 변동성 45% 이상이면 매수금액 15% 축소',
+    '- 하락장에서도 분할매수를 이어가되, RSI 과열/과매도와 초고변동성만 반영',
+    '',
+    '【RSI 과열 정책 (rsiPolicy, 기본: hard-stop-70)】',
+    '- RSI < 30 과매도 구간: 매수금액 1.25배 증가 (모든 정책 공통)',
+    '- hard-stop-70 (기본, 권장): RSI ≥ 70 시 매수 완전 중단 → 누적 이월',
+    '- hard-stop-75: RSI ≥ 75 시 매수 중단 (완화)',
+    '- hard-stop-80: RSI ≥ 80 시 매수 중단 (보수)',
+    '- continuous: 60~80 구간 점진 감산 (RSI 60→1.0x, 80→0.4x 선형)',
+    '- none: RSI 미반영 (순수 DCA)',
+    '- 백테스트 결과 hard-stop-70이 7/8 티커에서 우위 (CAGR +0.5%p, MaxDD 개선)',
     '',
     '【매수 방식】',
     '- 기본적으로 Buy1(현재가) 70% + Buy2(현재가 아래 지정가) 30%로 분할 매수',
-    '- RSI 70 이상 과열 구간에서는 Buy1을 막고 Buy2 눌림 매수만 허용',
     '- 한쪽 주문 수량이 0주면 남는 예산을 반대쪽 주문으로 재배분해 총 매수 수량을 최대화',
     '- 매수금액이 1주 가격 미만이면 다음 사이클로 이월, 누적 후 매수',
-    '- Buy2 지정가: ATR% 기반 할인폭의 50%를 적용하되, 0.5%~1.5% 범위로 제한 (기본 1.0%)',
+    '- Buy2 지정가 할인폭(buy2DipMode, 기본 atr-strong): ATR%×1.0, 범위 1.5%~5% (무 ATR 시 2.5%)',
+    '  · atr-light: 기존 정책 (ATR%×0.5, 0.5~1.5%)',
+    '  · fixed-3pct / fixed-5pct: 고정 할인폭',
     '- Buy1은 즉시 체결, Buy2는 장중 가격 하락 시 체결',
     '- 미체결 시 장 마감 후 자동 취소, 다음 날 새 가격으로 재주문',
+    '',
+    '【누적 이월 + 일일 투입 상한】',
+    '- RSI 과열 스킵이나 1주 미만 이월 시 perCycleQuota가 누적(accumulatedQuota)',
+    '- 다음 매수 기회에 (perCycleQuota + accumulatedQuota) 투입',
+    '- 일일 투입 상한(maxDailyQuotaMultiple, 기본 3): 하루 최대 3×perCycleQuota까지만 투입',
+    '- 초과 누적은 다음 날로 이월되어 장기 과열 후 대량 일괄 투입을 방지',
     '',
     '【매도 조건】',
     '- 기본적으로 1차 목표가 1개만 계산하고, 도달 시 보유 수량의 50% 매도',
@@ -152,12 +189,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 같은 날 2차 판단은 시가, 장중 VWAP, MA20, ADX, RSI, 고점 대비 눌림, 모멘텀 둔화, 장 마감 여유시간을 함께 확인',
     '- 국내는 누적 거래대금/거래량 기반 장중 VWAP, 해외는 5분봉 기반 분봉 VWAP를 사용',
     '- 2차 목표가 미체결 시 분할매도 상태를 해제하고 일반 무한매수 모드로 복귀',
-    '- 목표수익률은 T가 높을수록 단계적으로 낮아져 탈출 우선',
+    '- 목표수익률은 T가 높을수록 단계적으로 낮아져 탈출 우선 (사이클 완주 후 +5%)',
     '- 손절: 평균단가 대비 설정 손절률(기본 50%) 하회 시 전량 매도',
     '',
     '  T 구간    | 1차 목표 | 2차 추가',
     '  ----------+----------+----------',
-    '   0 ~ <2   | +16.0%   | +3.0%p',
+    '   0 ~ <2   | +17.0%   | +3.0%p',
     '   2 ~ <4   | +15.0%   | +3.0%p',
     '   4 ~ <6   | +13.5%   | +2.6%p',
     '   6 ~ <8   | +12.0%   | +2.6%p',
@@ -171,7 +208,8 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '  24 ~ <28  |  +7.4%   | +1.4%p',
     '  28 ~ <32  |  +7.2%   | +1.1%p',
     '  32 ~ <36  |  +7.0%   | +1.1%p',
-    '  36 이상   |  +6.8%   | +1.1%p',
+    '  36 ~ <40  |  +6.8%   | +1.1%p',
+    '  ≥ 40 완주 |  +5.0%   | +1.1%p',
     '',
     '【특징】',
     '- 장기 분할매수에 적합, 하락장에서 평균단가를 낮추는 전략',
@@ -183,18 +221,27 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     '- 투자유의/시장경고 종목은 신규 진입 차단',
     '- 실예수금 한도 내에서만 주문하며, 1주 미만이면 다음 날로 이월',
     '- 초고변동성 구간(30일 변동성 45% 이상)에서는 매수금액 15% 축소',
+    '- 일일 투입 상한: 누적 이월금이 한 번에 투입되는 리스크 차단',
     '- 손절: 평균단가 대비 설정 손절률 하회 시 전량 매도',
+    '- 포트폴리오 단위 MDD 관리 없음 (무한매수법 철학: "하락 시 매수")',
+    '- 대신 종목 단위 방어선으로 리스크 제한:',
+    '  · stopLossRate(기본 -50%): 종목 평단 대비 손실 시 청산',
+    '  · quota 상한: 각 종목 투입 금액이 설정 한도 초과 불가',
+    '  · 수학적으로 최대 손실 = sum(quota × stopLossRate)',
   ].join('\n');
   readonly meta: StrategyMeta = {
     riskLevel: 'medium',
-    mddBuyBlock: -0.25,
-    mddLiquidate: -0.35,
-    expectedReturn: '1차 +6.8~16%, 2차 +7.9~19%',
-    maxLoss: '-50% (손절 기본값)',
+    // 무한매수법은 종목별 손절(stopLossRate, 기본 -50%) + quota 상한으로 리스크 관리.
+    // 포트폴리오 단위 MDD는 "하락 시 매수" 철학과 충돌하므로 사실상 비활성화.
+    // 최대 손실은 수학적으로 sum(quota × stopLossRate)로 자연 제한됨.
+    mddBuyBlock: -0.99,
+    mddLiquidate: -0.99,
+    expectedReturn: '1차 +5.0~17%, 2차 +6.1~20%',
+    maxLoss: '-50% (종목별 손절 기본값)',
     investmentPeriod: '3개월~1년',
-    tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 장 시작 2시간 후)',
+    tradingFrequency: '하루 1회 장중 자동 매수 (국내 11시, 해외 장 시작 2시간 후), RSI 과열 시 스킵',
     suitableFor: ['장기 분할매수 선호 투자자', '하락장 대응', '적립식 투자'],
-    tags: ['분할매수', 'DCA', '장기투자', '국내/해외'],
+    tags: ['분할매수', 'DCA', '장기투자', '국내/해외', 'RSI 필터'],
   };
   private readonly logger = new Logger(InfiniteBuyStrategy.name);
 
@@ -368,10 +415,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.accumulatedQuotaCarriedIn = quotaResult.carriedIn;
     details.baseQuota = baseQuota;
 
-    // RSI 기반 매수금액 조정 (P4: 선형 연속 곡선)
+    // RSI 기반 매수금액 조정 (P4: 선형 연속 곡선, backtest 시 policy 스위칭 지원)
     if (stockIndicators.rsi14 !== undefined) {
       const rsi = stockIndicators.rsi14;
-      const rsiMultiplier = getRsiMultiplier(rsi);
+      const rsiMultiplier = getRsiMultiplier(rsi, strategyParams.rsiPolicy);
       if (rsiMultiplier !== 1.0) {
         adjustedQuota *= rsiMultiplier;
         details.quotaAdjust_rsi = true;
@@ -389,6 +436,21 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       pushQuotaAdjustment(details, `30일 변동성 ${stockIndicators.volatility30d!.toFixed(1)}% ≥ 45%`, 0.85);
     }
 
+    // 일일 투입 상한 (P7: hard-stop 정책 후 누적 quota 일괄 투입 방지)
+    //   baseQuota + accumulatedQuota가 너무 크면 N×perCycleQuota로 제한.
+    //   초과분은 details.dailyCapCarryOut에 기록되어 백테스트/시뮬레이션 엔진이 이월 처리.
+    const maxDailyMultiple = Number(strategyParams.maxDailyQuotaMultiple) > 0
+      ? Number(strategyParams.maxDailyQuotaMultiple)
+      : 3;
+    const dailyCap = maxDailyMultiple * perCycleQuota;
+    if (adjustedQuota > dailyCap) {
+      const carryOut = adjustedQuota - dailyCap;
+      details.dailyCapApplied = true;
+      details.dailyCapCarryOut = carryOut;
+      adjustedQuota = dailyCap;
+      pushQuotaAdjustment(details, `일일 상한 ${maxDailyMultiple}×perCycle → ${dailyCap.toFixed(0)}`, dailyCap / (baseQuota || 1));
+    }
+
     details.preCashCappedQuota = adjustedQuota;
 
     // 개선 D: 가용자금 한도
@@ -403,6 +465,13 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       details.minimumExecutablePrice = 0;
       skipReasons.push(
         `매수 수량 부족: 주문가능금액 ${ctx.buyableAmount.toFixed(0)}으로 1주 매수 불가`,
+      );
+    } else if (!buyAllowed && !maxCyclesReached && !riskBuyBlocked && ctx.buyableAmount > 0) {
+      // RSI policy에 의해 quota가 0이 된 경우 (예: hard-stop-70): 이월 가능한 skip reason 발행
+      const rsi = stockIndicators.rsi14;
+      details.minimumExecutablePrice = 0;
+      skipReasons.push(
+        `매수 수량 부족: RSI 과열 (${rsi !== undefined ? rsi.toFixed(1) : 'n/a'}) 정책에 따른 매수 중단`,
       );
     }
 

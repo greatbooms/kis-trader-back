@@ -297,13 +297,19 @@ export class SimulationService {
         const remainingQuota = Math.max(0, Number(session.quota) - Number(pos?.totalInvested || 0));
 
         if (hasBuySignal) {
-          if (params.accumulatedQuota) {
+          // 일일 상한 (dailyCap) 적용된 경우 미투입 잔액을 다음 날로 이월 (P7)
+          const dailyCapCarryOut = Math.max(
+            0,
+            Math.min(Number(details?.dailyCapCarryOut) || 0, remainingQuota),
+          );
+          const newAccumulatedAfterBuy = dailyCapCarryOut;
+          if ((params.accumulatedQuota || 0) !== newAccumulatedAfterBuy) {
             await this.prisma.simulationSession.update({
               where: { id: session.id },
               data: {
                 strategyParams: this.mergeSimulationStrategyParams(
                   params,
-                  { accumulatedQuota: 0, lastAccumulatedDate: today },
+                  { accumulatedQuota: newAccumulatedAfterBuy, lastAccumulatedDate: today },
                   evaluationStatus,
                   today,
                   evaluationDetails,

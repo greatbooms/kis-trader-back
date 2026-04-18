@@ -7,9 +7,9 @@ import {
 describe('infinite-buy-target-table', () => {
   describe('default table', () => {
     it.each([
-      [0, 0.160],
-      [1, 0.160],
-      [1.9, 0.160],
+      [0, 0.170],
+      [1, 0.170],
+      [1.9, 0.170],
       [2, 0.150],
       [3.5, 0.150],
       [4, 0.135],

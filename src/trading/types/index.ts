@@ -14,7 +14,7 @@ export {
 export { MarketRegimeLabel, RiskLevel, RiskState, evaluateStrategyMdd } from './risk-state.type';
 export { StockFundamentals } from './stock-fundamentals.type';
 export { StockStrategyContext, PerStockTradingStrategy, ExecutionMode, StrategyMeta } from './stock-strategy-context.type';
-export { InfiniteBuyStrategyParams, InfiniteBuySecondaryExitPlan, Buy2DipMode } from './infinite-buy-strategy-params.type';
+export { InfiniteBuyStrategyParams, InfiniteBuySecondaryExitPlan, Buy2DipMode, RsiPolicy } from './infinite-buy-strategy-params.type';
 export { MomentumBreakoutStrategyParams } from './momentum-breakout-strategy-params.type';
 export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-params.type';
 export { PositionQuantitySnapshot } from './order-reconciliation.type';

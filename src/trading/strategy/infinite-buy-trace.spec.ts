@@ -161,8 +161,8 @@ describe('무한매수법 — 실전 데이터 추적', () => {
       // Buy2Price = round(48.50 * 0.99) = round(48.015) = $48.02
       // Buy2Qty = floor(75 / 48.02) = 1
       //
-      // T=1.0 → 1차 목표수익률 +16% (T < 2)
-      // TargetPrice = 50.00 * 1.16 = $58.00
+      // T=1.0 → 1차 목표수익률 +17% (T < 2, 최대 수익률 20%에 맞춤)
+      // TargetPrice = 50.00 * 1.17 = $58.50
 
       const buys = signals.filter(s => s.side === 'BUY');
       const sells = signals.filter(s => s.side === 'SELL');
@@ -185,9 +185,9 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
       const takeProfit = sells[0];
       expect(takeProfit.reason).toContain('Take profit 1');
-      expect(takeProfit.price).toBe(58);
+      expect(takeProfit.price).toBe(58.5);
       expect(takeProfit.quantity).toBe(3);
-      expect(takeProfit.metadata?.secondaryTargetPrice).toBe(59.5);
+      expect(takeProfit.metadata?.secondaryTargetPrice).toBe(60);
       expect(takeProfit.metadata?.secondaryTargetQuantity).toBe(2);
     });
   });

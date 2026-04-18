@@ -7,7 +7,7 @@ export interface TargetTableRow {
 export type TargetTable = readonly TargetTableRow[];
 
 export const INFINITE_BUY_TARGET_TABLE: TargetTable = [
-  { maxT: 2,  primary: 0.160, bonus: 0.030 },
+  { maxT: 2,  primary: 0.170, bonus: 0.030 }, // 초기 최대 수익률 20% (1차 17% + 2차 3%p)
   { maxT: 4,  primary: 0.150, bonus: 0.030 },
   { maxT: 6,  primary: 0.135, bonus: 0.026 },
   { maxT: 8,  primary: 0.120, bonus: 0.026 },
