@@ -39,3 +39,6 @@ client/dist
 
 # duo-agent
 .duo-agent
+
+# Backtest report outputs (generated artifacts, not tracked)
+docs/backtest-reports/

@@ -315,6 +315,27 @@ model SimulationSnapshot {
   @@map("simulation_snapshots")
 }
 
+model HistoricalDailyPrice {
+  id           String   @id @default(uuid())
+  market       Market
+  exchangeCode String   @map("exchange_code")
+  stockCode    String   @map("stock_code")
+  date         String   // YYYYMMDD
+  open         Decimal  @db.Decimal(16, 4)
+  high         Decimal  @db.Decimal(16, 4)
+  low          Decimal  @db.Decimal(16, 4)
+  close        Decimal  @db.Decimal(16, 4)
+  volume       BigInt
+  amount       Decimal? @db.Decimal(20, 2)
+  adjusted     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([market, exchangeCode, stockCode, date])
+  @@index([stockCode, date])
+  @@map("historical_daily_prices")
+}
+
 enum Market {
   DOMESTIC
   OVERSEAS
