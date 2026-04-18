@@ -91,7 +91,14 @@ export function WatchStockDetailPage() {
   const [quota, setQuota] = useState('')
   const [stopLossRate, setStopLossRate] = useState('')
   const [maxCycles, setMaxCycles] = useState('')
+  const [rsiPolicy, setRsiPolicy] = useState<'hard-stop-70' | 'hard-stop-75' | 'hard-stop-80' | 'continuous' | 'none'>('hard-stop-70')
+  const [maxDailyQuotaMultiple, setMaxDailyQuotaMultiple] = useState('3')
   const [error, setError] = useState('')
+  const isInfiniteBuy = stock?.strategyName === 'infinite-buy'
+  const storedRsiPolicy = (strategyParams?.rsiPolicy as string) || 'hard-stop-70'
+  const storedMaxDailyQuota = strategyParams?.maxDailyQuotaMultiple !== undefined
+    ? String(strategyParams.maxDailyQuotaMultiple)
+    : '3'
 
   const { data: logsData, loading: logsLoading, refetch: logsRefetch } = useGetWatchStockExecutionLogsQuery({
     variables: { watchStockId: id ?? '', limit: 50 },
@@ -123,9 +130,11 @@ export function WatchStockDetailPage() {
     setQuota(stock.quota ? String(stock.quota) : '')
     setStopLossRate(String(Math.round(stock.stopLossRate * 100)))
     setMaxCycles(String(stock.maxCycles))
+    setRsiPolicy(storedRsiPolicy as typeof rsiPolicy)
+    setMaxDailyQuotaMultiple(storedMaxDailyQuota)
     setIsEditing(false)
     setError('')
-  }, [stock])
+  }, [stock, storedRsiPolicy, storedMaxDailyQuota])
 
   if (loading) {
     return <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>
@@ -140,6 +149,8 @@ export function WatchStockDetailPage() {
     setQuota(stock.quota ? String(stock.quota) : '')
     setStopLossRate(String(Math.round(stock.stopLossRate * 100)))
     setMaxCycles(String(stock.maxCycles))
+    setRsiPolicy(storedRsiPolicy as typeof rsiPolicy)
+    setMaxDailyQuotaMultiple(storedMaxDailyQuota)
     setError('')
   }
 
@@ -147,7 +158,9 @@ export function WatchStockDetailPage() {
     isActive !== stock.isActive ||
     quota !== (stock.quota ? String(stock.quota) : '') ||
     Number(stopLossRate || 0) !== Math.round(stock.stopLossRate * 100) ||
-    (supportsCycles && Number(maxCycles || 0) !== stock.maxCycles)
+    (supportsCycles && Number(maxCycles || 0) !== stock.maxCycles) ||
+    (isInfiniteBuy && rsiPolicy !== storedRsiPolicy) ||
+    (isInfiniteBuy && maxDailyQuotaMultiple !== storedMaxDailyQuota)
 
   const handleSave = async () => {
     if (!quota || Number(quota) <= 0) {
@@ -168,6 +181,15 @@ export function WatchStockDetailPage() {
     setError('')
 
     try {
+      let strategyParamsJson: string | undefined
+      if (isInfiniteBuy) {
+        const nextParams: Record<string, unknown> = { ...(strategyParams ?? {}) }
+        nextParams.rsiPolicy = rsiPolicy
+        const mdq = Number(maxDailyQuotaMultiple)
+        if (mdq > 0) nextParams.maxDailyQuotaMultiple = mdq
+        else delete nextParams.maxDailyQuotaMultiple
+        strategyParamsJson = JSON.stringify(nextParams)
+      }
       await updateWatchStock({
         variables: {
           id: stock.id,
@@ -176,6 +198,7 @@ export function WatchStockDetailPage() {
             quota: Number(quota),
             stopLossRate: Number(stopLossRate) / 100,
             maxCycles: supportsCycles ? Number(maxCycles) : undefined,
+            strategyParams: strategyParamsJson,
           },
         },
       })
@@ -362,6 +385,36 @@ export function WatchStockDetailPage() {
                 disabled={!isEditing}
               />
             </div>
+          )}
+          {isInfiniteBuy && (
+            <>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-foreground">RSI 과열 정책</label>
+                <Select
+                  value={rsiPolicy}
+                  onChange={(e) => setRsiPolicy(e.target.value as typeof rsiPolicy)}
+                  disabled={!isEditing}
+                >
+                  <option value="hard-stop-70">RSI ≥ 70 매수 중단 (권장)</option>
+                  <option value="hard-stop-75">RSI ≥ 75 매수 중단</option>
+                  <option value="hard-stop-80">RSI ≥ 80 매수 중단</option>
+                  <option value="continuous">RSI 60~80 점진 감산</option>
+                  <option value="none">RSI 미반영</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-foreground">일일 투입 상한 (배수)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={maxDailyQuotaMultiple}
+                  onChange={(e) => setMaxDailyQuotaMultiple(e.target.value)}
+                  readOnly={!isEditing}
+                  disabled={!isEditing}
+                />
+              </div>
+            </>
           )}
           {error && <p className="text-sm text-danger md:col-span-2 xl:col-span-4">{error}</p>}
         </CardContent>

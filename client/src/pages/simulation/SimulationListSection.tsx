@@ -149,11 +149,14 @@ function CreateSimulationModal({
   const [investmentAmount, setInvestmentAmount] = useState('')
   const [stopLossRate, setStopLossRate] = useState('')
   const [strategyParams, setStrategyParams] = useState('')
+  const [rsiPolicy, setRsiPolicy] = useState<'hard-stop-70' | 'hard-stop-75' | 'hard-stop-80' | 'continuous' | 'none'>('hard-stop-70')
+  const [maxDailyQuotaMultiple, setMaxDailyQuotaMultiple] = useState('3')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const selectedCountry = COUNTRY_OPTIONS.find((item) => item.value === country)
   const market = (selectedStock?.market as Market | undefined) ?? selectedCountry?.market ?? 'DOMESTIC'
+  const isInfiniteBuy = strategyName === 'infinite-buy'
 
   const [createMutation] = useCreateSimulationMutation({
     refetchQueries: [{ query: GetSimulationSessionsDocument, variables: { input: statusFilter ? { status: statusFilter } : undefined } }],
@@ -180,6 +183,27 @@ function CreateSimulationModal({
       return
     }
 
+    // 고급 설정 JSON과 RSI 정책을 합쳐서 strategyParams 구성
+    let combinedParams: string | undefined = undefined
+    const existingParams: Record<string, unknown> = {}
+    if (strategyParams.trim()) {
+      try {
+        Object.assign(existingParams, JSON.parse(strategyParams.trim()))
+      } catch {
+        setError('고급 설정이 유효한 JSON이 아닙니다')
+        setSubmitting(false)
+        return
+      }
+    }
+    if (isInfiniteBuy) {
+      existingParams.rsiPolicy = rsiPolicy
+      const mdq = Number(maxDailyQuotaMultiple)
+      if (mdq > 0) existingParams.maxDailyQuotaMultiple = mdq
+    }
+    if (Object.keys(existingParams).length > 0) {
+      combinedParams = JSON.stringify(existingParams)
+    }
+
     try {
       await createMutation({
         variables: {
@@ -193,7 +217,7 @@ function CreateSimulationModal({
             strategyName,
             quota: Number(investmentAmount),
             stopLossRate: stopLossRate ? Number(stopLossRate) / 100 : undefined,
-            strategyParams: strategyParams.trim() || undefined,
+            strategyParams: combinedParams,
           },
         },
       })
@@ -304,6 +328,31 @@ function CreateSimulationModal({
               />
             </div>
           </div>
+
+          {isInfiniteBuy && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">RSI 과열 정책</label>
+                <Select value={rsiPolicy} onChange={(e) => setRsiPolicy(e.target.value as typeof rsiPolicy)}>
+                  <option value="hard-stop-70">RSI ≥ 70 매수 중단 (권장)</option>
+                  <option value="hard-stop-75">RSI ≥ 75 매수 중단</option>
+                  <option value="hard-stop-80">RSI ≥ 80 매수 중단</option>
+                  <option value="continuous">RSI 60~80 점진 감산</option>
+                  <option value="none">RSI 미반영</option>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">일일 투입 상한 (배수)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={maxDailyQuotaMultiple}
+                  onChange={(e) => setMaxDailyQuotaMultiple(e.target.value)}
+                  placeholder="예: 3"
+                />
+              </div>
+            </div>
+          )}
 
           {error && <p className="text-sm text-danger">{error}</p>}
 

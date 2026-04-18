@@ -173,11 +173,14 @@ function AddWatchStockModal({
   const [stopLossRate, setStopLossRate] = useState('30')
   const [sell1Rate, setSell1Rate] = useState('')
   const [sell2Rate, setSell2Rate] = useState('')
+  const [rsiPolicy, setRsiPolicy] = useState<'hard-stop-70' | 'hard-stop-75' | 'hard-stop-80' | 'continuous' | 'none'>('hard-stop-70')
+  const [maxDailyQuotaMultiple, setMaxDailyQuotaMultiple] = useState('3')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === country)
   const meta = STRATEGY_META[strategyName] ?? DEFAULT_STRATEGY_META
+  const isInfiniteBuy = strategyName === 'infinite-buy'
 
   const handleStrategyChange = (value: string) => {
     setStrategyName(value)
@@ -209,9 +212,14 @@ function AddWatchStockModal({
     setSubmitting(true)
     try {
       // strategyParams 구성 (익절률 커스텀)
-      const params: Record<string, number> = {}
+      const params: Record<string, number | string> = {}
       if (sell1Rate && Number(sell1Rate) > 0) params.sell1Rate = Number(sell1Rate) / 100
       if (sell2Rate && Number(sell2Rate) > 0) params.sell2Rate = Number(sell2Rate) / 100
+      if (isInfiniteBuy) {
+        params.rsiPolicy = rsiPolicy
+        const mdq = Number(maxDailyQuotaMultiple)
+        if (mdq > 0) params.maxDailyQuotaMultiple = mdq
+      }
 
       await onSave({
         market: (selectedStock.market as Market) || selectedCountry?.market || 'DOMESTIC',
@@ -397,6 +405,46 @@ function AddWatchStockModal({
                   onChange={(e) => setStopLossRate(e.target.value)}
                 />
               </div>
+
+              {isInfiniteBuy && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      RSI 과열 정책
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">기본: RSI 70 이상 매수 중단 (권장)</span>
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      과열 구간에서 매수를 어떻게 제한할지 결정합니다. "매수 중단" 옵션은 해당 구간 매수금액을 다음 회차로 이월하여 눌림목에서 더 큰 포지션을 잡도록 합니다.
+                    </p>
+                    <Select
+                      value={rsiPolicy}
+                      onChange={(e) => setRsiPolicy(e.target.value as typeof rsiPolicy)}
+                    >
+                      <option value="hard-stop-70">RSI ≥ 70 매수 중단 (권장, 백테스트 CAGR +0.5%p)</option>
+                      <option value="hard-stop-75">RSI ≥ 75 매수 중단 (완화)</option>
+                      <option value="hard-stop-80">RSI ≥ 80 매수 중단 (보수)</option>
+                      <option value="continuous">RSI 60~80 점진적 감산 (이전 정책)</option>
+                      <option value="none">RSI 미반영 (순수 DCA)</option>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      일일 투입 상한 (perCycle 배수)
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">기본: 3</span>
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      이월된 누적 quota가 한 번에 투입되는 것을 방지합니다. 예: 3 = 하루 최대 3회분 투입. 장기 과열 후 점진적으로 포지션을 쌓습니다.
+                    </p>
+                    <Input
+                      placeholder="예: 3"
+                      type="number"
+                      min="1"
+                      value={maxDailyQuotaMultiple}
+                      onChange={(e) => setMaxDailyQuotaMultiple(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
             </>
           )}
 

@@ -119,13 +119,35 @@ export function StrategyGuidePage() {
                           </div>
                         </div>
 
-                        {/* MDD 임계값 */}
-                        <div className="flex items-center gap-3 p-2.5 rounded-md bg-red-50 dark:bg-red-950/20 text-xs">
-                          <ShieldAlert size={14} className="shrink-0 text-danger" />
-                          <span className="text-muted-foreground">MDD 매수차단: <span className="font-medium text-foreground">{(strategy.meta.mddBuyBlock * 100).toFixed(0)}%</span></span>
-                          <span className="text-muted-foreground">|</span>
-                          <span className="text-muted-foreground">MDD 전량청산: <span className="font-medium text-danger">{(strategy.meta.mddLiquidate * 100).toFixed(0)}%</span></span>
-                        </div>
+                        {/* MDD 임계값 — |value| >= 0.99인 경우 "미사용"으로 표시 (전략에서 해당 방어선 비활성화한 경우) */}
+                        {(() => {
+                          const isBuyBlockDisabled = Math.abs(strategy.meta.mddBuyBlock) >= 0.99
+                          const isLiquidateDisabled = Math.abs(strategy.meta.mddLiquidate) >= 0.99
+                          if (isBuyBlockDisabled && isLiquidateDisabled) {
+                            return (
+                              <div className="flex items-center gap-2 p-2.5 rounded-md bg-accent/30 text-xs">
+                                <ShieldAlert size={14} className="shrink-0 text-muted-foreground" />
+                                <span className="text-muted-foreground">포트폴리오 단위 MDD 미사용 — 종목 단위 손절률로 리스크 관리</span>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div className="flex items-center gap-3 p-2.5 rounded-md bg-red-50 dark:bg-red-950/20 text-xs">
+                              <ShieldAlert size={14} className="shrink-0 text-danger" />
+                              <span className="text-muted-foreground">
+                                MDD 매수차단: <span className="font-medium text-foreground">
+                                  {isBuyBlockDisabled ? '미사용' : `${(strategy.meta.mddBuyBlock * 100).toFixed(0)}%`}
+                                </span>
+                              </span>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-muted-foreground">
+                                MDD 전량청산: <span className="font-medium text-danger">
+                                  {isLiquidateDisabled ? '미사용' : `${(strategy.meta.mddLiquidate * 100).toFixed(0)}%`}
+                                </span>
+                              </span>
+                            </div>
+                          )
+                        })()}
 
                         {/* 태그 */}
                         <div className="flex flex-wrap gap-1.5">
