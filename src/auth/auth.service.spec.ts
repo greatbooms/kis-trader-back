@@ -41,7 +41,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return accessToken for valid credentials', async () => {
-      const result = await service.login('admin', 'password123');
+      const result = await service.login('admin', 'password123', 'test-client');
 
       expect(result).toEqual({ accessToken: 'mock-jwt-token' });
       expect(mockJwtService.sign).toHaveBeenCalledWith({
@@ -51,19 +51,19 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException for wrong username', async () => {
-      await expect(service.login('wrong', 'password123')).rejects.toThrow(
+      await expect(service.login('wrong', 'password123', 'test-client')).rejects.toThrow(
         UnauthorizedException,
       );
     });
 
     it('should throw UnauthorizedException for wrong password', async () => {
-      await expect(service.login('admin', 'wrong')).rejects.toThrow(
+      await expect(service.login('admin', 'wrong', 'test-client')).rejects.toThrow(
         UnauthorizedException,
       );
     });
 
     it('should throw UnauthorizedException for both wrong', async () => {
-      await expect(service.login('wrong', 'wrong')).rejects.toThrow(
+      await expect(service.login('wrong', 'wrong', 'test-client')).rejects.toThrow(
         UnauthorizedException,
       );
     });

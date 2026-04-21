@@ -103,11 +103,17 @@ describe('SecService', () => {
       },
     };
 
+    // 8-K 공시는 "최근 30일" 윈도우에 들어와야 recentForm8KCount30d 가 카운트됨.
+    // 테스트를 시간 독립적으로 만들기 위해 "오늘 기준"으로 상대 날짜를 생성.
+    const daysAgoISO = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
     const submissions = {
       filings: {
         recent: {
           form: ['10-K', '8-K', '8-K'],
-          filingDate: ['2026-02-20', '2026-03-15', '2026-03-20'],
+          // 10-K는 최신 연간보고서로 유지, 8-K 두 건은 30일 내에 배치
+          filingDate: ['2026-02-20', daysAgoISO(10), daysAgoISO(5)],
         },
       },
     };
