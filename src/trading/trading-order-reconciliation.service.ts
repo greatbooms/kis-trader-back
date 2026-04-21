@@ -360,17 +360,26 @@ export class TradingOrderReconciliationService {
     });
     if (!watchStock || !watchStock.quota) return;
 
+    const params = (watchStock.strategyParams as Record<string, any>) || {};
+    const today = this.getTodayKstDate();
+
+    // 중복 누적 방지: 같은 날 이미 `executePerStockStrategy` 경로에서 carry 처리됐다면 재적립 금지.
+    // (BUY 제출 전부 실패 시 quotaCarryEligibleIds → accumulateUnusedQuotas가 lastAccumulatedDate=today 기록)
+    if (params.lastAccumulatedDate === today) {
+      this.logger.debug(
+        `[${watchStock.stockCode}] Quota already accumulated today (${today}), skipping restore on ${status}`,
+      );
+      return;
+    }
+
     const perCycleQuota = Number(watchStock.quota) / watchStock.maxCycles;
     if (perCycleQuota <= 0) return;
 
-    const params = (watchStock.strategyParams as Record<string, any>) || {};
-    const position = await this.prisma.position.findUnique({
+    const position = await this.prisma.position.findFirst({
       where: {
-        market_exchangeCode_stockCode: {
-          market: record.market,
-          exchangeCode: record.exchangeCode,
-          stockCode: record.stockCode,
-        },
+        market: record.market,
+        exchangeCode: record.exchangeCode,
+        stockCode: record.stockCode,
       },
     });
     const totalInvested = Number(position?.totalInvested || 0);
@@ -386,7 +395,7 @@ export class TradingOrderReconciliationService {
         strategyParams: {
           ...params,
           accumulatedQuota: nextAccumulated,
-          lastAccumulatedDate: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          lastAccumulatedDate: today,
         },
       },
     });
@@ -394,6 +403,10 @@ export class TradingOrderReconciliationService {
     this.logger.log(
       `[${watchStock.stockCode}] Quota restored after ${status} order: +${perCycleQuota.toFixed(2)} → ${nextAccumulated.toFixed(2)}`,
     );
+  }
+
+  private getTodayKstDate(): string {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   private async logReconciledOrder(

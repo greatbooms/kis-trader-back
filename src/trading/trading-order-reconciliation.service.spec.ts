@@ -461,6 +461,61 @@ describe('TradingOrderReconciliationService', () => {
         }),
       );
     });
+
+    it('does NOT restore quota when cancelling remainder of a PARTIAL order (partial fill already counted)', async () => {
+      // PARTIAL → 잔량 취소는 이미 일부 체결됐으므로 이월금 복구 금지
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-partial-cancel',
+          market: 'OVERSEAS',
+          exchangeCode: 'NAS',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 10,
+          price: 56.87,
+          executedQty: 4,
+          executedPrice: 56.87,
+          orderNo: 'PRT-1',
+          status: 'PARTIAL',
+          strategyName: 'infinite-buy',
+          createdAt: new Date('2026-04-09T01:00:00Z'),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-partial-cancel',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 10,
+        price: 56.87,
+        executedQty: 4,
+        executedPrice: 56.87,
+        status: 'PARTIAL',
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: { accumulatedQuota: 0 },
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({ totalInvested: 332 });
+      (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
+
+      await service.markOpenOrderCancelled('OVERSEAS', 'PRT-1', '잔량 종료');
+
+      // watchStock 가 strategyParams(accumulatedQuota)로 수정되면 안 됨
+      const quotaUpdateCall = ((mockPrisma.watchStock as any).update.mock.calls as any[]).find(
+        (args) => args[0]?.data?.strategyParams?.accumulatedQuota !== undefined,
+      );
+      expect(quotaUpdateCall).toBeUndefined();
+    });
   });
 
   describe('FAILED / CANCELLED carry restore (quota recovery)', () => {
@@ -510,9 +565,7 @@ describe('TradingOrderReconciliationService', () => {
         maxCycles: 40,
         strategyParams: { accumulatedQuota: 0, rsiPolicy: 'hard-stop-70' },
       });
-      mockPrisma.position.findFirst.mockResolvedValue(null);
-      // applyReconciledStrategyFailure 내부에서 position.findUnique도 사용
-      (mockPrisma.position as any).findUnique = jest.fn().mockResolvedValue({ totalInvested: 332 });
+      mockPrisma.position.findFirst.mockResolvedValue({ totalInvested: 332 });
       (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
     };
 
@@ -588,6 +641,78 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
 
+    it('does NOT double-accumulate when executePerStockStrategy already carried today', async () => {
+      // Given: 오늘 `executePerStockStrategy`에서 이미 carry 적립됐음 (lastAccumulatedDate = today)
+      const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-dup',
+          market: 'OVERSEAS',
+          exchangeCode: 'NAS',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 56.87,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'ORD-DUP',
+          status: 'PENDING',
+          strategyName: 'infinite-buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-dup',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 56.87,
+        executedQty: 0,
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: { accumulatedQuota: 250, lastAccumulatedDate: today },
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({ totalInvested: 332 });
+      (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [],
+        [
+          {
+            orderNo: 'ORD-DUP',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            orderQuantity: 2,
+            filledQuantity: 0,
+            remainingQuantity: 0,
+            filledPrice: undefined,
+            exchangeCode: 'NAS',
+            rejected: true,
+            rejectedReason: 'DFD 주문종료 취소',
+          },
+        ],
+      );
+
+      // watchStock.update 가 accumulatedQuota 를 수정하면 안 됨 (이미 오늘 적립됨)
+      const quotaUpdateCall = ((mockPrisma.watchStock as any).update.mock.calls as any[]).find(
+        (args) => args[0]?.data?.strategyParams?.accumulatedQuota !== undefined,
+      );
+      expect(quotaUpdateCall).toBeUndefined();
+    });
+
     it('does NOT restore quota for a SELL order failure', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
@@ -631,7 +756,6 @@ describe('TradingOrderReconciliationService', () => {
         strategyParams: { accumulatedQuota: 0 },
       });
       mockPrisma.position.findFirst.mockResolvedValue(null);
-      (mockPrisma.position as any).findUnique = jest.fn().mockResolvedValue(null);
       (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
 
       await service.reconcileOpenOrders(
