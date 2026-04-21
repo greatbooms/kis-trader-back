@@ -526,7 +526,18 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
             </div>
 
             <div className="hidden md:block">
-              <Table>
+              <Table className="table-fixed [&_th]:px-2 [&_td]:px-2">
+                <colgroup>
+                  <col className="w-44" /> {/* 종목 */}
+                  <col className="w-16" /> {/* 시장 */}
+                  <col className="w-16" /> {/* 수량 */}
+                  <col className="w-24" /> {/* 평균가 */}
+                  <col className="w-24" /> {/* 현재가 */}
+                  <col className="w-28" /> {/* 투자금 */}
+                  <col className="w-24" /> {/* 손익 */}
+                  <col className="w-20" /> {/* 수익률 */}
+                  <col className="w-28" /> {/* 매도 */}
+                </colgroup>
                 <TableHeader>
                   <TableRow className="border-b border-border">
                     <TableHead>종목</TableHead>
@@ -543,26 +554,26 @@ function PositionsCard({ market, countryFilter }: { market: Market | null; count
                 <TableBody>
                   {positions.map((pos) => (
                     <TableRow key={pos.id}>
-                      <TableCell>
-                        <div className="font-medium">{pos.stockName}</div>
-                        <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
+                      <TableCell className="align-top min-w-0">
+                        <div className="font-medium truncate">{pos.stockName}</div>
+                        <div className="text-xs text-muted-foreground truncate">{pos.stockCode}</div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-top">
                         <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
                           {pos.exchangeCode ? (EXCHANGE_LABELS[pos.exchangeCode] ?? pos.exchangeCode) : (pos.market === 'DOMESTIC' ? '한국' : '해외')}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">{formatNumber(pos.quantity)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
-                      <TableCell className={`text-right font-medium ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
+                      <TableCell className="align-top text-right whitespace-nowrap">{formatNumber(pos.quantity)}</TableCell>
+                      <TableCell className="align-top text-right whitespace-nowrap">{formatCurrency(pos.avgPrice, pos.market)}</TableCell>
+                      <TableCell className="align-top text-right whitespace-nowrap">{formatCurrency(pos.currentPrice, pos.market)}</TableCell>
+                      <TableCell className="align-top text-right whitespace-nowrap">{formatCurrency(pos.totalInvested, pos.market)}</TableCell>
+                      <TableCell className={`align-top text-right font-medium whitespace-nowrap ${pos.profitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
                         {formatCurrency(pos.profitLoss, pos.market)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="align-top text-right whitespace-nowrap">
                         <Badge variant={pos.profitRate >= 0 ? 'success' : 'danger'}>{formatPercent(pos.profitRate)}</Badge>
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="align-top text-center">
                         {sellTarget === pos.id ? (
                           <div className="flex flex-col items-center gap-1.5">
                             <div className="flex items-center gap-1">
@@ -775,19 +786,31 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
               })}
             </div>
             <div className="hidden md:block">
-              <Table>
+              <Table className="table-fixed [&_th]:px-2 [&_td]:px-2">
+                <colgroup>
+                  <col className="w-36" /> {/* 일시 */}
+                  <col className="w-32" /> {/* 종목 */}
+                  <col className="w-16" /> {/* 구분 */}
+                  <col className="w-16" /> {/* 수량 */}
+                  <col className="w-24" /> {/* 가격 */}
+                  <col className="w-24" /> {/* 주문 상태 */}
+                  <col className="w-28" /> {/* 상세 */}
+                  <col className="w-24" /> {/* 전략 */}
+                  <col />                  {/* 사유 (남는 공간) */}
+                  <col className="w-16" /> {/* 액션 */}
+                </colgroup>
                 <TableHeader>
                   <TableRow className="border-b border-border">
                     <TableHead>일시</TableHead>
                     <TableHead>종목</TableHead>
                     <TableHead>구분</TableHead>
                     <TableHead className="text-right">수량</TableHead>
-                    <TableHead className="w-[110px] text-right">가격</TableHead>
-                    <TableHead className="w-[110px] text-center">주문 상태</TableHead>
-                    <TableHead className="w-[150px]">상세</TableHead>
+                    <TableHead className="text-right">가격</TableHead>
+                    <TableHead className="text-center">주문 상태</TableHead>
+                    <TableHead>상세</TableHead>
                     <TableHead>전략</TableHead>
                     <TableHead>사유</TableHead>
-                    <TableHead className="w-[100px] text-center">액션</TableHead>
+                    <TableHead className="text-center">액션</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -799,40 +822,40 @@ function TradesCard({ market, countryFilter }: { market: Market | null; countryF
                         key={trade.id}
                         className={trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : undefined}
                       >
-                        <TableCell className="py-2 text-xs">{formatDate(trade.createdAt)}</TableCell>
-                        <TableCell className="py-2">
-                          <div className="font-medium">{trade.stockName}</div>
-                          <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
+                        <TableCell className="align-top py-2 text-xs whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
+                        <TableCell className="align-top py-2 min-w-0">
+                          <div className="font-medium truncate">{trade.stockName}</div>
+                          <div className="text-xs text-muted-foreground truncate">{trade.stockCode}</div>
                         </TableCell>
-                        <TableCell className="py-2">
+                        <TableCell className="align-top py-2">
                           <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>
                             {trade.side === 'BUY' ? '매수' : '매도'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="py-2 text-right">
+                        <TableCell className="align-top py-2 text-right whitespace-nowrap">
                           <div>{formatNumber(trade.quantity)}</div>
                           {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity ? (
                             <div className="text-xs text-muted-foreground">체결 {formatNumber(trade.executedQty ?? 0)}</div>
                           ) : null}
                         </TableCell>
-                        <TableCell className="w-[110px] py-2 text-right">
+                        <TableCell className="align-top py-2 text-right whitespace-nowrap">
                           {formatCurrency(trade.executedPrice ?? trade.price, trade.market)}
                         </TableCell>
-                        <TableCell className="w-[110px] py-2 text-center">
+                        <TableCell className="align-top py-2 text-center">
                           <div className="flex justify-center">
                             <Badge variant={info.variant} className="whitespace-nowrap">
                               {info.label}
                             </Badge>
                           </div>
                         </TableCell>
-                        <TableCell className="w-[150px] py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        <TableCell className="align-top py-2 text-xs text-muted-foreground break-words">
                           {info.detail ?? '-'}
                         </TableCell>
-                        <TableCell className="py-2 text-xs text-muted-foreground">{trade.strategyName ?? '-'}</TableCell>
-                        <TableCell className="py-2 text-xs text-muted-foreground max-w-[260px]">
-                          <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                        <TableCell className="align-top py-2 text-xs text-muted-foreground truncate">{trade.strategyName ?? '-'}</TableCell>
+                        <TableCell className="align-top py-2 text-xs text-muted-foreground min-w-0 border-l border-border/30 pl-3">
+                          <div className="line-clamp-3 break-words" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
                         </TableCell>
-                        <TableCell className="py-2 text-center">
+                        <TableCell className="align-top py-2 text-center">
                           {canCancelTrade(trade) ? (
                             <Button
                               size="sm"

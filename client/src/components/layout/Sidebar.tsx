@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarProps } from '@/components/types'
+import { Logo } from '@/components/Logo'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
@@ -44,25 +45,50 @@ export function Sidebar({ collapsed, mobileOpen, onToggle, onCloseMobile }: Side
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         )}
       >
-        <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
-          <span className={cn('text-lg font-bold text-primary-600', collapsed && 'hidden md:inline')}>
-            KIS Trader
-          </span>
-          <div className="flex items-center gap-1">
+        <div
+          className={cn(
+            'flex h-14 items-center border-b border-sidebar-border',
+            collapsed ? 'md:justify-center md:px-0 px-4 justify-between' : 'justify-between px-4',
+          )}
+        >
+          <div className={cn('flex items-center gap-2 min-w-0', collapsed && 'md:gap-0')}>
+            <Logo size={28} className="shrink-0" />
+            <span
+              className={cn(
+                'text-base font-bold text-primary-700 truncate',
+                collapsed && 'md:hidden',
+              )}
+            >
+              KIS Trader
+            </span>
+          </div>
+          <div className={cn('flex items-center gap-1', collapsed && 'md:hidden')}>
             <button
               onClick={onToggle}
               className="hidden md:flex h-8 w-8 items-center justify-center rounded-md hover:bg-primary-100 text-muted-foreground cursor-pointer"
+              aria-label="사이드바 접기"
             >
-              {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+              <ChevronLeft size={16} />
             </button>
             <button
               onClick={onCloseMobile}
               className="flex md:hidden h-8 w-8 items-center justify-center rounded-md hover:bg-primary-100 text-muted-foreground cursor-pointer"
+              aria-label="메뉴 닫기"
             >
               <X size={16} />
             </button>
           </div>
         </div>
+        {/* collapsed 상태 전용: 로고 하단 펼침 버튼 */}
+        {collapsed && (
+          <button
+            onClick={onToggle}
+            className="hidden md:flex mx-auto mt-1 h-7 w-7 items-center justify-center rounded-md hover:bg-primary-100 text-muted-foreground cursor-pointer"
+            aria-label="사이드바 펼치기"
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
 
         <nav className="flex flex-col gap-1 p-2">
           {navItems.map((item) => (
