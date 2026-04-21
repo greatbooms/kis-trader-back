@@ -490,25 +490,32 @@ export function WatchStockDetailPage() {
                 ))}
               </div>
               <div className="hidden md:block">
-                <Table>
+                <Table className="table-fixed [&_th]:px-2 [&_td]:px-2">
+                  <colgroup>
+                    <col className="w-40" />
+                    <col className="w-24" />
+                    <col />
+                  </colgroup>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>일시</TableHead>
-                      <TableHead>구분</TableHead>
+                      <TableHead className="w-40">일시</TableHead>
+                      <TableHead className="w-24">구분</TableHead>
                       <TableHead>메시지</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {logsData?.watchStockExecutionLogs.map((log) => (
                       <TableRow key={log.id}>
-                        <TableCell className="whitespace-nowrap">{formatDate(log.createdAt)}</TableCell>
-                        <TableCell>
+                        <TableCell className="align-top whitespace-nowrap">{formatDate(log.createdAt)}</TableCell>
+                        <TableCell className="align-top">
                           <Badge variant={eventVariant(log.eventType)}>{eventLabel(log.eventType)}</Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{log.message}</div>
+                        <TableCell className="align-top min-w-0">
+                          <div className="font-medium break-words">{log.message}</div>
                           {log.details && (
-                            <div className="mt-1 text-xs text-muted-foreground break-all">{log.details}</div>
+                            <div className="mt-1 text-xs text-muted-foreground break-words whitespace-pre-wrap">
+                              {log.details}
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
@@ -574,51 +581,53 @@ export function WatchStockDetailPage() {
                 })}
               </div>
               <div className="hidden md:block">
-                <Table>
+                <Table className="table-auto [&_th]:px-2 [&_td]:px-2">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>일시</TableHead>
-                      <TableHead>구분</TableHead>
-                      <TableHead>상태</TableHead>
-                      <TableHead className="text-right">수량</TableHead>
-                      <TableHead className="text-right">가격</TableHead>
-                      <TableHead>사유</TableHead>
-                      <TableHead className="text-center">액션</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap">일시</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap">구분</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap">상태</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap text-right">수량</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap pr-4 text-right">가격</TableHead>
+                      <TableHead className="w-full border-l border-border/40 pl-4">사유</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap text-center">액션</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {actualTrades.map((trade) => (
                       <TableRow key={trade.id}>
-                        <TableCell className="whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
-                        <TableCell>
+                        <TableCell className="align-top whitespace-nowrap pr-3">{formatDate(trade.createdAt)}</TableCell>
+                        <TableCell className="align-top whitespace-nowrap pr-3">
                           <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
                             {trade.side === 'BUY' ? '매수' : '매도'}
                           </Badge>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="align-top whitespace-nowrap pr-3">
                           {(() => {
                             const info = getTradeRecordDisplayInfo(trade)
                             return (
-                              <div className="flex flex-col gap-1">
-                                <Badge variant={info.variant}>{info.label}</Badge>
+                              <div className="flex flex-col items-start gap-1">
+                                <Badge variant={info.variant} className="w-fit">
+                                  {info.label}
+                                </Badge>
                                 {info.detail && <span className="text-xs text-muted-foreground">{info.detail}</span>}
                               </div>
                             )
                           })()}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="align-top whitespace-nowrap pr-3 text-right">
                           <div>{formatNumber(trade.executedQty ?? trade.quantity)}</div>
                           {(trade.executedQty ?? 0) > 0 && (trade.executedQty ?? 0) !== trade.quantity && (
                             <div className="text-xs text-muted-foreground">주문 {formatNumber(trade.quantity)}</div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="align-top whitespace-nowrap pr-4 text-right">
                           {formatCurrency(trade.executedPrice ?? trade.price, trade.market, trade.exchangeCode)}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          <div className="line-clamp-2" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
+                        <TableCell className="align-top min-w-0 border-l border-border/30 pl-4 text-sm text-muted-foreground">
+                          <div className="line-clamp-3 break-words" title={trade.reason ?? undefined}>{trade.reason ?? '-'}</div>
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="align-top text-center">
                           {canCancelTrade(trade) ? (
                             <Button
                               size="sm"
