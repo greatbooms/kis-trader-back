@@ -340,8 +340,15 @@ export class TradingService {
           },
         );
 
+        // 각 시그널 제출 결과를 추적 — 이월금 리셋/복구 판단에 사용
+        const buySubmissionOutcomes: boolean[] = [];
+        let hadBuySignal = false;
         for (const signal of signals) {
-          await this.executeSignal(signal, strategy.name, ctx, details);
+          const submitted = await this.executeSignal(signal, strategy.name, ctx, details);
+          if (signal.side === 'BUY') {
+            hadBuySignal = true;
+            buySubmissionOutcomes.push(submitted);
+          }
         }
 
         if (
@@ -355,11 +362,15 @@ export class TradingService {
           await this.clearAccumulatedQuota(ctx.watchStock.id, 'terminal quota exhaustion');
         }
 
-        // 분할매수 전략: 매수 시그널 성공 시 누적 quota 리셋
-        if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
-          const hasBuySignal = signals.some((s) => s.side === 'BUY');
-          if (hasBuySignal) {
+        // 분할매수 전략: 매수 시그널 **제출 성공 시에만** 누적 quota 리셋.
+        // 모든 BUY 제출이 실패했다면 리셋하지 않고, 아래에서 carry 이월 경로로 처리.
+        if (['infinite-buy', 'daily-dca'].includes(strategy.name) && hadBuySignal) {
+          const anyBuySubmitted = buySubmissionOutcomes.some((ok) => ok === true);
+          if (anyBuySubmitted) {
             await this.resetAccumulatedQuota(ctx.watchStock.id);
+          } else {
+            // 전부 제출 실패 — 오늘치 perCycleQuota를 이월로 적립
+            quotaCarryEligibleIds.add(ctx.watchStock.id);
           }
         }
       } catch (e) {

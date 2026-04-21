@@ -80,6 +80,9 @@ export class TradingOrderReconciliationService {
               ? Math.max(0, currentPositionQty - filledNowQty)
               : currentPositionQty + filledNowQty;
             await this.applyReconciledStrategyFill(record.id, nextStatus, qtyBeforeFill, filledNowQty);
+          } else if (nextStatus === OrderStatus.FAILED || nextStatus === OrderStatus.CANCELLED) {
+            // 체결 없이 실패/취소 확정 — 전략에 실패 통지 (이월금 복구 등)
+            await this.applyReconciledStrategyFailure(record.id, nextStatus);
           }
 
           await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
@@ -104,6 +107,7 @@ export class TradingOrderReconciliationService {
             reason: record.reason ? `${record.reason} | 잔량 미체결 종료` : '잔량 미체결 종료',
           },
         });
+        // PARTIAL의 잔량 취소는 이미 일부 체결됐으므로 전략 측 이월금 복구 불필요
         await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, executedQty);
         continue;
       }
@@ -116,6 +120,8 @@ export class TradingOrderReconciliationService {
             reason: record.reason ? `${record.reason} | 미체결 종료` : '미체결 종료',
           },
         });
+        // 체결 없이 취소 확정 — 전략에 실패 통지 (BUY 주문이었다면 이월금 복구)
+        await this.applyReconciledStrategyFailure(record.id, OrderStatus.CANCELLED);
         await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, executedQty);
       }
     }
@@ -157,6 +163,10 @@ export class TradingOrderReconciliationService {
           reason: nextReason,
         },
       });
+      // 체결 이력 없이 취소 확정 — 전략에 실패 통지
+      if ((record.executedQty || 0) === 0) {
+        await this.applyReconciledStrategyFailure(record.id, OrderStatus.CANCELLED);
+      }
       await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, record.executedQty || 0);
     }
   }
@@ -323,6 +333,69 @@ export class TradingOrderReconciliationService {
     }
   }
 
+  /**
+   * 주문이 체결 없이 FAILED/CANCELLED로 확정된 경우 전략에 실패를 통지.
+   * BUY 주문 실패 시 이월금(accumulatedQuota)을 perCycleQuota만큼 복구한다.
+   * SELL 주문 실패는 포지션/이월금에 영향 없음 (다음 스케줄에서 재평가).
+   */
+  private async applyReconciledStrategyFailure(
+    tradeRecordId: string,
+    status: OrderStatus,
+  ): Promise<void> {
+    const record = await this.prisma.tradeRecord.findUnique({
+      where: { id: tradeRecordId },
+    });
+    if (!record?.strategyName) return;
+    if (record.side !== Side.BUY) return;
+    if (!['infinite-buy', 'daily-dca'].includes(record.strategyName)) return;
+
+    const watchStock = await this.prisma.watchStock.findUnique({
+      where: {
+        market_exchangeCode_stockCode: {
+          market: record.market,
+          exchangeCode: record.exchangeCode,
+          stockCode: record.stockCode,
+        },
+      },
+    });
+    if (!watchStock || !watchStock.quota) return;
+
+    const perCycleQuota = Number(watchStock.quota) / watchStock.maxCycles;
+    if (perCycleQuota <= 0) return;
+
+    const params = (watchStock.strategyParams as Record<string, any>) || {};
+    const position = await this.prisma.position.findUnique({
+      where: {
+        market_exchangeCode_stockCode: {
+          market: record.market,
+          exchangeCode: record.exchangeCode,
+          stockCode: record.stockCode,
+        },
+      },
+    });
+    const totalInvested = Number(position?.totalInvested || 0);
+    const remainingQuota = Math.max(0, Number(watchStock.quota) - totalInvested);
+    if (remainingQuota <= 0) return;
+
+    const currentAccumulated = Number(params.accumulatedQuota || 0);
+    const nextAccumulated = Math.min(currentAccumulated + perCycleQuota, remainingQuota);
+
+    await this.prisma.watchStock.update({
+      where: { id: watchStock.id },
+      data: {
+        strategyParams: {
+          ...params,
+          accumulatedQuota: nextAccumulated,
+          lastAccumulatedDate: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        },
+      },
+    });
+
+    this.logger.log(
+      `[${watchStock.stockCode}] Quota restored after ${status} order: +${perCycleQuota.toFixed(2)} → ${nextAccumulated.toFixed(2)}`,
+    );
+  }
+
   private async logReconciledOrder(
     tradeRecordId: string,
     status: OrderStatus,
@@ -346,16 +419,25 @@ export class TradingOrderReconciliationService {
 
     const remainingQty = Math.max(0, record.quantity - executedQty);
     const isCancelledRemainder = status === OrderStatus.CANCELLED && record.status === OrderStatus.PARTIAL && executedQty > 0;
-    const eventType = status === OrderStatus.CANCELLED
-      ? WatchStockExecutionEventType.ORDER_CANCELLED
-      : WatchStockExecutionEventType.ORDER_FILLED;
-    const message = isCancelledRemainder
-      ? `주문 잔량 취소 확인: ${record.side} ${executedQty}/${record.quantity}주 체결, 잔량 ${remainingQty}주 종료`
-      : status === OrderStatus.CANCELLED
-        ? `주문 취소 확인: ${record.side} ${record.quantity}주`
-      : status === OrderStatus.PARTIAL
-        ? `주문 일부 체결 확인: ${record.side} ${executedQty}/${record.quantity}주`
-        : `주문 체결 확인: ${record.side} ${record.quantity}주`;
+    const eventType =
+      status === OrderStatus.FAILED    ? WatchStockExecutionEventType.ORDER_FAILED :
+      status === OrderStatus.CANCELLED ? WatchStockExecutionEventType.ORDER_CANCELLED :
+                                         WatchStockExecutionEventType.ORDER_FILLED;
+    const message = (() => {
+      if (status === OrderStatus.FAILED) {
+        return `주문 실패 확인: ${record.side} ${record.quantity}주 (브로커 거부)`;
+      }
+      if (isCancelledRemainder) {
+        return `주문 잔량 취소 확인: ${record.side} ${executedQty}/${record.quantity}주 체결, 잔량 ${remainingQty}주 종료`;
+      }
+      if (status === OrderStatus.CANCELLED) {
+        return `주문 취소 확인: ${record.side} ${record.quantity}주`;
+      }
+      if (status === OrderStatus.PARTIAL) {
+        return `주문 일부 체결 확인: ${record.side} ${executedQty}/${record.quantity}주`;
+      }
+      return `주문 체결 확인: ${record.side} ${record.quantity}주`;
+    })();
 
     await this.prisma.watchStockExecutionLog.create({
       data: {

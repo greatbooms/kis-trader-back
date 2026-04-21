@@ -462,4 +462,200 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
   });
+
+  describe('FAILED / CANCELLED carry restore (quota recovery)', () => {
+    const setupFailedBuyReconcile = () => {
+      // 현재 trade_record: infinite-buy BUY 2주 @ 56.87, FAILED로 확정될 것
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-fail-1',
+          market: 'OVERSEAS',
+          exchangeCode: 'NAS',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 56.87,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: '0030301568',
+          status: 'PENDING',
+          strategyName: 'infinite-buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve({
+          id: where.id,
+          market: 'OVERSEAS',
+          exchangeCode: 'NAS',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 56.87,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: '0030301568',
+          status: 'FAILED',
+          strategyName: 'infinite-buy',
+        }),
+      );
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: { accumulatedQuota: 0, rsiPolicy: 'hard-stop-70' },
+      });
+      mockPrisma.position.findFirst.mockResolvedValue(null);
+      // applyReconciledStrategyFailure 내부에서 position.findUnique도 사용
+      (mockPrisma.position as any).findUnique = jest.fn().mockResolvedValue({ totalInvested: 332 });
+      (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
+    };
+
+    it('restores accumulatedQuota when a BUY order is reconciled as FAILED (broker rejected)', async () => {
+      setupFailedBuyReconcile();
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [],
+        [
+          {
+            orderNo: '0030301568',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            orderQuantity: 2,
+            filledQuantity: 0,
+            remainingQuantity: 0,
+            filledPrice: undefined,
+            exchangeCode: 'NAS',
+            rejected: true,
+            rejectedReason: 'DFD 주문종료 취소',
+          },
+        ],
+      );
+
+      // perCycleQuota = 10000 / 40 = 250 → accumulatedQuota 복구
+      expect((mockPrisma.watchStock as any).update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ws-tqqq' },
+          data: expect.objectContaining({
+            strategyParams: expect.objectContaining({
+              accumulatedQuota: 250,
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('logs FAILED order with ORDER_FAILED event type and "주문 실패 확인" message', async () => {
+      setupFailedBuyReconcile();
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [],
+        [
+          {
+            orderNo: '0030301568',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            orderQuantity: 2,
+            filledQuantity: 0,
+            remainingQuantity: 0,
+            filledPrice: undefined,
+            exchangeCode: 'NAS',
+            rejected: true,
+            rejectedReason: 'DFD 주문종료 취소',
+          },
+        ],
+      );
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: 'ORDER_FAILED',
+            message: '주문 실패 확인: BUY 2주 (브로커 거부)',
+            details: expect.objectContaining({
+              status: 'FAILED',
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('does NOT restore quota for a SELL order failure', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-sell-fail',
+          market: 'OVERSEAS',
+          exchangeCode: 'NAS',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'SELL',
+          quantity: 3,
+          price: 63.66,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: '0030301581',
+          status: 'PENDING',
+          strategyName: 'infinite-buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-sell-fail',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'SELL',
+        quantity: 3,
+        price: 63.66,
+        executedQty: 0,
+        executedPrice: null,
+        orderNo: '0030301581',
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        market: 'OVERSEAS',
+        exchangeCode: 'NAS',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: { accumulatedQuota: 0 },
+      });
+      mockPrisma.position.findFirst.mockResolvedValue(null);
+      (mockPrisma.position as any).findUnique = jest.fn().mockResolvedValue(null);
+      (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [],
+        [
+          {
+            orderNo: '0030301581',
+            stockCode: 'TQQQ',
+            side: 'SELL',
+            orderQuantity: 3,
+            filledQuantity: 0,
+            remainingQuantity: 0,
+            filledPrice: undefined,
+            exchangeCode: 'NAS',
+            rejected: true,
+            rejectedReason: 'DFD 주문종료 취소',
+          },
+        ],
+      );
+
+      // SELL 실패 시에는 watchStock 이 업데이트되면 안 됨 (이월금 변동 없음)
+      expect((mockPrisma.watchStock as any).update).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -303,6 +303,91 @@ describe('TradingService', () => {
         },
       });
     });
+
+    it('accumulates quota when all BUY signal submissions fail (orders rejected)', async () => {
+      // Given: 전략이 BUY 시그널을 생성했지만 executeSignal 이 모두 실패한 시나리오
+      // Expected: accumulatedQuota 가 perCycleQuota (10000/40 = 250) 만큼 증가
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [
+            {
+              market: 'OVERSEAS',
+              exchangeCode: 'NASD',
+              stockCode: 'TQQQ',
+              side: 'BUY',
+              quantity: 2,
+              price: 56.87,
+              reason: 'Buy2',
+              orderDivision: '00',
+            },
+          ],
+          skipReasons: [],
+          details: {},
+        }),
+      };
+      // executeSignal false = 주문 제출 실패
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(false);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: {},
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-tqqq',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 1.3,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          position: {
+            stockCode: 'TQQQ',
+            quantity: 6,
+            avgPrice: 55.36,
+            currentPrice: 58.08,
+            totalInvested: 332.16,
+          },
+          price: { currentPrice: 58.08 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 1000,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      // resetAccumulatedQuota 는 호출되지 않아야 함
+      const resetCall = (mockPrisma.watchStock.update as jest.Mock).mock.calls.find(
+        (args) => args[0]?.data?.strategyParams?.accumulatedQuota === 0,
+      );
+      expect(resetCall).toBeUndefined();
+
+      // 대신 accumulateUnusedQuotas 경로로 누적되어야 함
+      // perCycleQuota = 10000 / 40 = 250, remainingQuota = 10000 - 332.16 = 9667.84
+      // newAccumulated = min(0 + 250, 9667.84) = 250
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ws-tqqq' },
+          data: expect.objectContaining({
+            strategyParams: expect.objectContaining({
+              accumulatedQuota: 250,
+            }),
+          }),
+        }),
+      );
+    });
   });
 
   describe('executeSignal diagnostics logging', () => {
