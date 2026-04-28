@@ -316,6 +316,18 @@ model SimulationSnapshot {
   @@map("simulation_snapshots")
 }
 
+model LoginAttempt {
+  id             String    @id @default(uuid())
+  clientKey      String    @unique @map("client_key")
+  count          Int       @default(0)
+  firstAttemptAt DateTime  @map("first_attempt_at")
+  blockedUntil   DateTime? @map("blocked_until")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("login_attempts")
+}
+
 model HistoricalDailyPrice {
   id           String   @id @default(uuid())
   market       Market

@@ -1,12 +1,7 @@
 import { HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-
-type LoginAttemptState = {
-  count: number;
-  firstAttemptAt: number;
-  blockedUntil?: number;
-};
+import { PrismaService } from '../prisma.service';
 
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -16,11 +11,11 @@ const LOGIN_BLOCK_MS = 15 * 60 * 1000;
 export class AuthService {
   private readonly adminUsername: string;
   private readonly adminPassword: string;
-  private readonly loginAttempts = new Map<string, LoginAttemptState>();
 
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
+    private prisma: PrismaService,
   ) {
     this.adminUsername = this.configService.get<string>('auth.adminUsername')!;
     this.adminPassword = this.configService.get<string>('auth.adminPassword')!;
@@ -30,14 +25,15 @@ export class AuthService {
   }
 
   async login(username: string, password: string, clientKey: string): Promise<{ accessToken: string }> {
-    this.assertLoginAllowed(clientKey);
+    await this.assertLoginAllowed(clientKey);
 
     if (username !== this.adminUsername || password !== this.adminPassword) {
-      this.recordFailedLogin(clientKey);
+      await this.recordFailedLogin(clientKey);
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    this.loginAttempts.delete(clientKey);
+    // 성공 시 해당 clientKey의 누적 실패 기록 제거
+    await this.prisma.loginAttempt.deleteMany({ where: { clientKey } });
     const payload = { sub: 'admin', username: this.adminUsername };
     return {
       accessToken: this.jwtService.sign(payload),
@@ -51,36 +47,50 @@ export class AuthService {
     return null;
   }
 
-  private assertLoginAllowed(clientKey: string): void {
-    const attempt = this.loginAttempts.get(clientKey);
+  private async assertLoginAllowed(clientKey: string): Promise<void> {
+    const attempt = await this.prisma.loginAttempt.findUnique({ where: { clientKey } });
     if (!attempt) return;
 
     const now = Date.now();
-    if (attempt.blockedUntil && attempt.blockedUntil > now) {
+    if (attempt.blockedUntil && attempt.blockedUntil.getTime() > now) {
       throw new HttpException('Too many login attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
     }
 
-    if (now - attempt.firstAttemptAt > LOGIN_WINDOW_MS) {
-      this.loginAttempts.delete(clientKey);
+    // 윈도우 만료된 항목은 깨끗하게 정리 (실패 카운트가 다음 호출에서 다시 1부터 시작하도록)
+    if (now - attempt.firstAttemptAt.getTime() > LOGIN_WINDOW_MS) {
+      await this.prisma.loginAttempt.deleteMany({ where: { clientKey } });
     }
   }
 
-  private recordFailedLogin(clientKey: string): void {
-    const now = Date.now();
-    const attempt = this.loginAttempts.get(clientKey);
+  private async recordFailedLogin(clientKey: string): Promise<void> {
+    const now = new Date();
+    const existing = await this.prisma.loginAttempt.findUnique({ where: { clientKey } });
 
-    if (!attempt || now - attempt.firstAttemptAt > LOGIN_WINDOW_MS) {
-      this.loginAttempts.set(clientKey, {
-        count: 1,
-        firstAttemptAt: now,
+    if (!existing || now.getTime() - existing.firstAttemptAt.getTime() > LOGIN_WINDOW_MS) {
+      await this.prisma.loginAttempt.upsert({
+        where: { clientKey },
+        create: {
+          clientKey,
+          count: 1,
+          firstAttemptAt: now,
+        },
+        update: {
+          count: 1,
+          firstAttemptAt: now,
+          blockedUntil: null,
+        },
       });
       return;
     }
 
-    attempt.count += 1;
-    if (attempt.count >= MAX_LOGIN_ATTEMPTS) {
-      attempt.blockedUntil = now + LOGIN_BLOCK_MS;
-    }
-    this.loginAttempts.set(clientKey, attempt);
+    const nextCount = existing.count + 1;
+    const blockedUntil = nextCount >= MAX_LOGIN_ATTEMPTS
+      ? new Date(now.getTime() + LOGIN_BLOCK_MS)
+      : existing.blockedUntil;
+
+    await this.prisma.loginAttempt.update({
+      where: { clientKey },
+      data: { count: nextCount, blockedUntil },
+    });
   }
 }

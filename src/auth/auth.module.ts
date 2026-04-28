@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { AuthResolver } from './auth.resolver';
 import { JwtStrategy } from './jwt.strategy';
 import { GqlAuthGuard } from './auth.guard';
+import { PrismaService } from '../prisma.service';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { GqlAuthGuard } from './auth.guard';
       },
     }),
   ],
-  providers: [AuthService, AuthResolver, JwtStrategy, GqlAuthGuard],
+  providers: [PrismaService, AuthService, AuthResolver, JwtStrategy, GqlAuthGuard],
   exports: [AuthService, GqlAuthGuard],
 })
 export class AuthModule {}
