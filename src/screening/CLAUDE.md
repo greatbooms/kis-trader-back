@@ -12,7 +12,7 @@
 - `screening.scheduler.ts` — 1차/딥 스크리닝 cron 등록 (국가별 시간대 분리, `screening-scheduler-runs` 키로 실행 상태 영속화). Slack 리포트 전송 트리거
 - `screening.resolver.ts` — `recommendations` / `screeningDateSummaries` / `stockDeepAnalysis` 등 조회 query, `runScreening` mutation
 - `multi-factor-scorer.ts` / `strategy-matcher.ts` — 점수화/전략 매칭 순수 유틸
-- `utils/` — `api-data.util.ts`, `consensus.util.ts`, `date.util.ts`, `dividend.util.ts` (재무 데이터 정규화 / KST 날짜 / 배당 시그널 등)
+- `utils/` — `date.util.ts` (스크리닝 전용 KST 날짜 헬퍼). 다른 utility들(`api-data`, `consensus`, `dividend`)은 cross-module 사용으로 `src/common/utils/`로 이전됨
 - `types/screening.type.ts` — `StockScore`, `ScreeningMode`, `CountryConfig`, `detectEtf` 등
 - `dto/` — GraphQL ObjectType/Input (factor score, deep analysis, settings 등)
 
@@ -44,4 +44,4 @@
 - **분석 후보 상한**: 국내 30개, 해외 25개 (`MAX_DOMESTIC_ANALYSIS_CANDIDATES` / `MAX_OVERSEAS_ANALYSIS_CANDIDATES`) — KIS rate limit + 분석 시간 균형
 - **데이터 가용성 필터**: `dataAvailability < 30`인 점수는 결과에서 제외 (재무 데이터 부족 종목 제외)
 - **스케줄러 상태 영속화**: `Setting` 테이블에 `screening-scheduler-runs` 키로 마지막 실행 결과 저장 — UI에서 확인 가능
-- 다른 모듈(`trading`/`simulation`)이 이 모듈의 utils를 직접 import하는 케이스 있음 (`utils/consensus.util.ts`, `utils/dividend.util.ts`, `utils/api-data.util.ts`) — 함수 시그니처 변경 시 cross-module 영향 확인
+- cross-module 공유 utility는 `src/common/utils/`에 위치 — `trading-orchestrator`/`screening-analyzer`/`deep-analysis`가 모두 거기서 import. 시그니처 변경 시 3곳 영향

@@ -17,10 +17,10 @@ import {
   ForeignInstitutionDetail,
   detectEtf,
 } from './types';
-import { pickNumeric } from './utils/api-data.util';
-import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
+import { pickNumeric } from '../common/utils/api-data.util';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from '../common/utils/consensus.util';
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
-import { summarizeDividendSchedule } from './utils/dividend.util';
+import { summarizeDividendSchedule } from '../common/utils/dividend.util';
 import { buildDomesticScore, buildOverseasScore, buildEtfScore } from './multi-factor-scorer';
 import { suggestStrategies } from './strategy-matcher';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';

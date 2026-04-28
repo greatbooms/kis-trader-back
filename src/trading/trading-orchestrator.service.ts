@@ -23,9 +23,9 @@ import {
 } from './types';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
-import { summarizeEstimatePerform, summarizeInvestOpinion } from '../screening/utils/consensus.util';
-import { summarizeDividendSchedule } from '../screening/utils/dividend.util';
-import { pickNumeric } from '../screening/utils/api-data.util';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from '../common/utils/consensus.util';
+import { summarizeDividendSchedule } from '../common/utils/dividend.util';
+import { pickNumeric } from '../common/utils/api-data.util';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import { OpenDartDomesticSignals } from '../opendart/types';
 import { SecFundamentals } from '../sec/types';

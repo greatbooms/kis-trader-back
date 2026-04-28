@@ -5,10 +5,10 @@ import { DailyPrice, StockPriceResult } from '../kis/types/kis-api.types';
 import { EXCHANGE_REFERENCE_INDEX } from '../kis/types/kis-config.types';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { DeepAnalysisResult, DCFValuation, RiskProfile, TechnicalDetail, DividendAnalysis, ConsensusData } from './types';
-import { pickNumeric, pickString } from './utils/api-data.util';
-import { summarizeEstimatePerform, summarizeInvestOpinion } from './utils/consensus.util';
+import { pickNumeric, pickString } from '../common/utils/api-data.util';
+import { summarizeEstimatePerform, summarizeInvestOpinion } from '../common/utils/consensus.util';
 import { kstTodayStr, kstDateNDaysAgo } from './utils/date.util';
-import { summarizeDividendSchedule } from './utils/dividend.util';
+import { summarizeDividendSchedule } from '../common/utils/dividend.util';
 import { MarketDataCacheService } from '../market-data/market-data-cache.service';
 import { SecFundamentals } from '../sec/types';
 
