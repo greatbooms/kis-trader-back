@@ -1,12 +1,13 @@
 # Hooks
 
 ## 책임
-앱 전역에서 재사용되는 커스텀 React 훅. 현재는 인증 훅(`useAuth`) 1개로, GraphQL 뮤테이션과
-모듈 스코프 인증 상태 store(`@/lib/auth`)를 묶어서 컴포넌트가 React 식으로 구독할 수 있게 해준다.
+앱 전역에서 재사용되는 커스텀 React 훅. 인증·필터 등 cross-cutting 관심사를 합성하는 곳.
 
 ## 주요 파일 / 하위 폴더
 - `useAuth.ts` — `useSyncExternalStore`로 `lib/auth` 상태 구독 + `useLoginMutation`/`useLogoutMutation` 래핑.
   성공 시 `setAuthenticated(true)` + `navigate('/')`, 로그아웃 시 `apolloClient.clearStore()`로 캐시 비우고 `/login`으로 이동.
+- `useCountryFilter.ts` — 페이지 상단 국가 칩 필터 상태/파생값(`countryFilter` / `selectedCountry` / `marketFilter`).
+  Watchlist/Portfolio 등 여러 페이지가 동일 모양으로 사용.
 - `types/use-auth-return.type.ts` — `UseAuthReturn` 인터페이스 (1타입 1파일 컨벤션)
 - `types/index.ts` — re-export
 

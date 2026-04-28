@@ -9,9 +9,8 @@ import {
   useDeleteWatchStockMutation,
   useGetAvailableStrategiesQuery,
   GetWatchStocksDocument,
-  type Market,
 } from '@/graphql/generated'
-import { COUNTRY_OPTIONS } from '@/lib/market-constants'
+import { useCountryFilter } from '@/hooks/useCountryFilter'
 import { WatchlistFilters } from '@/pages/watchlist/WatchlistFilters'
 import { WatchlistTable } from '@/pages/watchlist/WatchlistTable'
 import { AddWatchStockModal } from '@/pages/watchlist/AddWatchStockModal'
@@ -20,12 +19,9 @@ import type { WatchStockItem } from '@/pages/watchlist/types'
 
 export function WatchlistPage() {
   const navigate = useNavigate()
-  const [countryFilter, setCountryFilter] = useState<string | null>(null)
+  const { countryFilter, setCountryFilter, selectedCountry, marketFilter } = useCountryFilter()
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingStock, setEditingStock] = useState<WatchStockItem | null>(null)
-
-  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === countryFilter)
-  const marketFilter: Market | undefined = selectedCountry?.market ?? undefined
 
   const { data, loading } = useGetWatchStocksQuery({
     variables: { input: marketFilter ? { market: marketFilter } : undefined },

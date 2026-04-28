@@ -1,15 +1,13 @@
-import { useState } from 'react'
-import { type Market } from '@/graphql/generated'
-import { COUNTRY_OPTIONS } from '@/lib/market-constants'
+import { useCountryFilter } from '@/hooks/useCountryFilter'
 import { PortfolioFilters } from '@/pages/portfolio/PortfolioFilters'
 import { AccountSummaryCard } from '@/pages/portfolio/AccountSummaryCard'
 import { PositionsCard } from '@/pages/portfolio/PositionsCard'
 import { TradesCard } from '@/pages/portfolio/TradesCard'
 
 export function PortfolioPage() {
-  const [countryFilter, setCountryFilter] = useState<string | null>(null)
-  const selectedCountry = COUNTRY_OPTIONS.find((c) => c.value === countryFilter)
-  const marketFilter: Market | null = selectedCountry?.market ?? null
+  const { countryFilter, setCountryFilter, marketFilter } = useCountryFilter()
+  // PositionsCard/TradesCard는 market을 nullable로 받으므로 undefined → null 변환
+  const market = marketFilter ?? null
 
   return (
     <div className="space-y-6">
@@ -21,8 +19,8 @@ export function PortfolioPage() {
       <PortfolioFilters countryFilter={countryFilter} onChange={setCountryFilter} />
 
       <AccountSummaryCard countryFilter={countryFilter} />
-      <PositionsCard market={marketFilter} countryFilter={countryFilter} />
-      <TradesCard market={marketFilter} countryFilter={countryFilter} />
+      <PositionsCard market={market} countryFilter={countryFilter} />
+      <TradesCard market={market} countryFilter={countryFilter} />
     </div>
   )
 }
