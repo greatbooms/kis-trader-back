@@ -7,7 +7,7 @@
 - `watch-stock.module.ts` — `WatchStockService` export. `TradingModule` import (resolver가 `TradingOrchestrator` 사용)
 - `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `recordExecutionEvent`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), `@Cron`로 7일 지난 SKIPPED 로그 정리
 - `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행
-- `dto/` — `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult`. `WatchStockType`/`CreateWatchStockInput`/`UpdateWatchStockInput`은 현재 resolver 파일에 인라인 (리팩토링 대상)
+- `dto/` — `WatchStockType`, `CreateWatchStockInput`, `UpdateWatchStockInput`, `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult` (모두 1타입 1파일로 분리됨)
 
 ## 외부 의존성
 - `@prisma/client` — `WatchStock`, `WatchStockExecutionLog`, `Position`, `Market`, `WatchStockExecutionEventType`, `Prisma.Decimal`
@@ -20,5 +20,4 @@
 - **`cycle` 컬럼은 명목값**: 실제 표시 cycle은 `findCurrentCycleMap`이 계산 (사이클 기반 전략은 포지션 평균가에서 역산). resolver가 `currentCycles` map으로 override
 - **strategyParams는 JSON 컬럼**: resolver에서 `JSON.stringify` ↔ `JSON.parse`로 변환. 내부 타입은 `InfiniteBuyStrategyParams` 등 (전략별 정의는 `src/trading/types/`)
 - 7일 지난 SKIPPED 실행 로그는 `@Cron('0 3 * * *')`에서 정리. FILLED/CANCELLED 등은 영구 보관
-- **DTO 리팩토링 대기**: `WatchStockType`/`CreateWatchStockInput`/`UpdateWatchStockInput`이 아직 resolver에 인라인 (루트 CLAUDE.md 규칙 위반) — 추후 `dto/`로 분리 필요
 - `findLatestExecutionLogs`는 batch 조회로 N+1 회피 — list 쿼리에서 활용
