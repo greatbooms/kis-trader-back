@@ -5,7 +5,7 @@
 
 ## 주요 서비스 / 컴포넌트
 - `watch-stock.module.ts` — `WatchStockService` export. `TradingModule` import (resolver가 `TradingOrchestrator` 사용)
-- `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `recordExecutionEvent`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), `@Cron`로 7일 지난 SKIPPED 로그 정리
+- `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `logExecution`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), `@Cron`로 7일 지난 SKIPPED 로그 정리
 - `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행
 - `dto/` — `WatchStockType`, `CreateWatchStockInput`, `UpdateWatchStockInput`, `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult` (모두 1타입 1파일로 분리됨)
 

@@ -24,7 +24,7 @@
 - **토큰 만료**: KIS 토큰 24시간 유효. `kis-auth.service.ts`가 만료 임박 시 자동 재발급. 단일 동시 발급(`ensureTokenPromise`)으로 race condition 방지
 - **resolver/strategy에서 `axios` 직접 호출 금지**: 모든 KIS API는 `KisDomesticService`/`KisOverseasService` 경유 (루트 CLAUDE.md "Infrastructure는 격리")
 - 해외 daily price는 `from`/`to` 미지원 → `count` 인자만. 호출자가 영업일 추정 필요
-- 잔고 조회는 통화별로 다름: 해외는 `getCurrencyBalance` + `getStandardBalance` 조합. 잔고 검증 차이로 KIS가 standard만 반환하는 경우 `useStandardBalanceOnly` 자동 전환
+- 잔고 조회: 해외는 `getPresentBalanceSnapshot`(통화별 cashBalances 포함) + `getStandardBalance`(stock holdings) 조합. paper 환경 또는 present-balance API 실패 시 `useStandardBalanceOnly`로 fallback (이후 호출은 standard만 사용)
 - `getOrderExecutions(from, to)`는 KST yyyymmdd 포맷 — 호출자에서 timezone 변환 필요
 - 휴장일은 `getHolidays`로 조회 → `MarketStateSyncService`가 캐시
 - **수정주가 일관성**: 백테스트/과거 데이터는 항상 수정주가 기준 (`MODP=1`/`FID_ORG_ADJ_PRC=0`) — 루트 CLAUDE.md

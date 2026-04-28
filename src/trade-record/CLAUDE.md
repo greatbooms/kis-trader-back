@@ -7,7 +7,7 @@
 - `trade-record.module.ts` — `TradeRecordService` export. `TradingModule`은 `forwardRef`(notification ↔ trade-record ↔ trading 순환)
 - `trade-record.service.ts` — `findAll`/`findOne` (TradeRecord 검색), `findPositions`, `getDashboardSummary`, `getAccountSummary`, `getDomesticQuote*`/`getOverseasQuote*` (시세+기술지표), `manualSell`, `cancelTradeOrder`, `refreshAccountState`
 - `trade-record.resolver.ts` — 위 메서드를 wrapping한 GraphQL query/mutation. Decimal → Number 변환, 인증 가드(`GqlAuthGuard`)
-- `dto/` — TradeRecord/Position/StockPrice/AccountSummary/QuoteHistoryPoint 등 GraphQL ObjectType 19개 + filter input 7개
+- `dto/` — TradeRecord/Position/StockPrice/AccountSummary/QuoteHistoryPoint 등 GraphQL ObjectType 12개 + Input 6개 (1타입 1파일)
 - `types/` — `AccountCashBalance`, `AccountStatusCache` (in-memory 캐시 키)
 
 ## 외부 의존성

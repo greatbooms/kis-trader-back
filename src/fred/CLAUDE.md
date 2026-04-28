@@ -16,5 +16,5 @@ St. Louis Fed의 FRED API를 통해 매크로 경제 지표(연방기금 금리,
 - **MarketDataModule(global)에서 import**: `MarketDataCacheService`가 FRED 데이터를 캐싱해 다른 모듈에 노출. 일반 코드는 `MarketDataCacheService` 경유 권장
 - API 키 미설정 시 `isConfigured() === false` → `getLatestRateSnapshot`은 `undefined` 반환 (throw하지 않음)
 - 캐시: 직접 in-memory Map (DB Snapshot은 사용하지 않음). 인스턴스 재시작 시 비워짐
-- 실패 시 `logger.warn` + 30분 짧은 캐시(잘못된 값 반복 호출 방지)는 없음 — 일반 try/catch로 throw 위로 전파됨 (`getLatestRateSnapshot`은 catch에서 `undefined` 반환)
+- 실패 시 `logger.warn` + 30분 짧은 캐시로 `undefined` 저장(잘못된 값 반복 호출 방지). 성공 시 6시간 캐시
 - **고정 series ID**: 호출자가 `'DFF'` (Federal Funds), `'DGS10'` (10Y) 등을 직접 넘김. 매핑은 호출자(주로 `MarketDataCacheService`) 책임

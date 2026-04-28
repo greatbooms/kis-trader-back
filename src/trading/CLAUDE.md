@@ -37,11 +37,12 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 - `TradingOrderReconciliationService`는 전략별 체결 후처리(carry 리셋 등)를 위해 `TradingService.handleStrategySignalFill`을 호출 — `TradingService` → `TradingOrderReconciliationService` 주입 금지 (순환 의존성)
 - `TradingService`는 주문 직전 포지션 재동기화를 위해 `TradingPositionSyncService`에 의존
 - `TradingOrchestrator` → `TradingService`, `MarketStateSyncService` 주입. 반대로 `MarketStateSyncService`는 `TradingOrchestrator`를 참조하지 않음 (순환 의존성 회피)
-- **Slack 호출 게이트웨이**: `TradingOrderReconciliationService.notifyTradeFill` 또는 `TradingService`를 거쳐야 — strategy가 직접 `SlackService` 호출 금지
+- **Slack 호출 게이트웨이**: 체결 알림은 `TradingOrderReconciliationService` 내부의 `reconcileOpenOrders`가 자체 호출(`notifyTradeFill` private). 그 외 거래 흐름의 Slack 호출은 `TradingService`를 거쳐야 — strategy가 직접 `SlackService` 호출 금지
 - **`trading.enabled=false`** 이면 `TradingScheduler.onModuleInit`에서 모든 cron 등록을 건너뜀 (개발/모의 환경 안전망). 단, 직접 mutation으로 호출되는 경로(예: `manualSell`)는 별도 가드
 - **Cron 시간대는 모두 KST**:
   - 국내: 매 1분 09:00-14:59 + 15:00-15:29 (장 마감 부분 분리). 미체결 주문 동기화 매 10초. 포트폴리오 동기화 매 10분
-  - 해외 시간대별 비슷한 패턴 (미국/홍콩/중국/일본/베트남)
+  - 해외 시간대별 비슷한 패턴 (미국 22-23 + 다음날 00-06, 아시아 09-16). 미체결 주문 동기화 매 15초, 포트폴리오 매 10분
+  - 시장 레짐 감지: KR/AsiaEarly 08:50, AsiaLate 10:20, US 22:20·23:20
 - **수정주가 일관성**: `MarketAnalysisService.fetchDailyPrices`로 시세 호출 시 KIS 수정주가 옵션 강제 (백테스트와 동일)
 - **In-memory 상태**:
   - `TradingOrchestrator.isDomesticRunning`/`isOverseasRunning` — 루프 중복 실행 방지 mutex
