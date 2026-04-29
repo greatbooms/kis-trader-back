@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { isChunkLoadError, tryAutoReloadForChunkError } from '@/lib/chunk-error-recovery'
 
 type AppErrorBoundaryProps = {
   children: ReactNode
@@ -20,6 +21,12 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('App render error:', error, errorInfo)
+
+    // 새 배포 후 옛 청크 해시가 사라져서 fetch 실패한 경우 자동 1회 reload.
+    // (vite:preloadError 이벤트가 먼저 잡지만, 일부 경로는 ErrorBoundary로 직접 떨어진다.)
+    if (isChunkLoadError(error)) {
+      tryAutoReloadForChunkError('AppErrorBoundary')
+    }
   }
 
   private handleReload = () => {
