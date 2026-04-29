@@ -1,6 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
+import * as express from 'express';
+import { join } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -9,6 +11,20 @@ async function bootstrap() {
 
   app.use(cookieParser());
   expressApp.disable('x-powered-by');
+
+  // /assets/*는 SPA fallback에서 제외 — 새 배포로 옛 hash 청크가 사라지면 HTML(index.html) 대신
+  // 명시적 404를 돌려야 클라이언트의 vite:preloadError 자동 복구가 정상 트리거된다.
+  // (NestJS ServeStaticModule 기본 동작은 정적 파일 미스 시 index.html SPA fallback이라 MIME 오류 발생.)
+  // 또한 hash가 포함된 immutable 자산이므로 1년 강한 캐시를 부여.
+  const clientAssetsDir = join(__dirname, '..', 'client', 'dist', 'assets');
+  app.use(
+    '/assets',
+    express.static(clientAssetsDir, {
+      fallthrough: false,
+      maxAge: '1y',
+      immutable: true,
+    }),
+  );
   app.use((req, res, next) => {
     const isProduction = process.env.NODE_ENV === 'production';
     res.setHeader('X-Content-Type-Options', 'nosniff');
