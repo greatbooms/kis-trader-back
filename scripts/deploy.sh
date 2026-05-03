@@ -55,8 +55,8 @@ yarn install --frozen-lockfile
 
 echo "[5/8] Generating Prisma client and applying migrations..."
 cd "$CLONE_DIR"
-yarn prisma:generate
-yarn prisma:migrate:prod
+npx prisma generate
+npx prisma migrate deploy
 
 echo "[6/8] Building application..."
 yarn build:all
