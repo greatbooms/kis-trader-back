@@ -90,6 +90,16 @@ export function getRsiMultiplier(rsi: number | undefined, policy: RsiPolicy = 'h
   return clamp(1.0 - (rsi - 60) * (0.6 / 20), 0.4, 1.0);
 }
 
+// buy2OnlyMode (Buy1 차단 + Buy2만 허용) 임계값을 rsiPolicy 와 일치시킴.
+// hard-stop-* 만 활성: getRsiMultiplier 의 quota 차단 임계값과 동일한 RSI.
+// none/continuous/legacy-hard 는 quota 감산만 적용 — buy2 강제 모드 비활성.
+export function getBuy2OnlyThreshold(policy: RsiPolicy = 'hard-stop-70'): number | null {
+  if (policy === 'hard-stop-70') return 70;
+  if (policy === 'hard-stop-75') return 75;
+  if (policy === 'hard-stop-80') return 80;
+  return null;
+}
+
 function shouldUseSameDaySecondTarget(ctx: StockStrategyContext): boolean {
   const currentPrice = ctx.price.currentPrice;
   const ma20 = ctx.stockIndicators.ma20;
@@ -491,7 +501,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
       const buy1Quota = adjustedQuota * 0.7;
       const buy2Quota = adjustedQuota * 0.3;
-      const buy2OnlyMode = (stockIndicators.rsi14 ?? 0) >= 70;
+      const buy2OnlyThreshold = getBuy2OnlyThreshold(strategyParams.rsiPolicy);
+      const buy2OnlyMode =
+        buy2OnlyThreshold !== null
+        && stockIndicators.rsi14 !== undefined
+        && stockIndicators.rsi14 >= buy2OnlyThreshold;
       let buy1Qty = buy2OnlyMode ? 0 : Math.floor(buy1Quota / buy1Price);
       let buy2Qty = Math.floor(buy2Quota / buy2Price);
       let buy1ReasonShare = buy2OnlyMode ? '차단' : '70%';

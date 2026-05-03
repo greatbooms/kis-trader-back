@@ -784,6 +784,7 @@ describe('InfiniteBuyStrategy', () => {
 
     it('should reduce quota on overheated RSI with continuous curve (P4)', async () => {
       // RSI=75 → linear: 1.0 - 15*0.03 = 0.55x
+      // continuous 정책은 buy2OnlyMode 비활성 → Buy1 (현재가 지정가) 활성
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -802,19 +803,19 @@ describe('InfiniteBuyStrategy', () => {
       const buySignals = signals.filter((s) => s.side === 'BUY');
 
       expect(buySignals).toHaveLength(1);
-      expect(buySignals[0].reason).toContain('Buy2');
+      expect(buySignals[0].reason).toContain('Buy1');
       expect(buySignals[0].quantity).toBe(1);
-      // buy2Price = 50000 * (1 - 0.025) = 48750 (atr-strong, no ATR → 2.5% dip)
-      expect(buySignals[0].price).toBe(48750);
+      expect(buySignals[0].price).toBe(50000);
       expect(details?.quotaAdjustments).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ multiplier: expect.closeTo(0.55, 2) }),
         ]),
       );
-      expect(details?.buy2OnlyMode).toBe(true);
+      expect(details?.buy2OnlyMode).toBe(false);
     });
 
     it('should reduce quota to 0.4x when RSI is above 80', async () => {
+      // continuous 정책은 buy2OnlyMode 비활성 → Buy1 (현재가 지정가)로 폴백
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -839,10 +840,11 @@ describe('InfiniteBuyStrategy', () => {
           expect.objectContaining({ multiplier: 0.4 }),
         ]),
       );
-      expect(details?.buy2OnlyMode).toBe(true);
+      expect(details?.buy2OnlyMode).toBe(false);
     });
 
-    it('should allow only Buy2 for overheated overseas entries', async () => {
+    it('should fall back to Buy1 for overheated overseas entries with continuous policy', async () => {
+      // continuous 정책은 buy2OnlyMode 비활성 → Buy1 (현재가 지정가) 활성
       const ctx = createContext({
         watchStock: {
           ...createContext().watchStock,
@@ -874,11 +876,57 @@ describe('InfiniteBuyStrategy', () => {
       const buys = signals.filter((s) => s.side === 'BUY');
 
       expect(buys).toHaveLength(1);
-      expect(buys[0].reason).toContain('Buy2');
-      expect(buys[0].reason).not.toContain('Buy1');
-      // P1: atr-strong 기본 (no ATR → 2.5%) → 49.33 * 0.975 = 48.09675 → 48.10 (2 decimal)
-      expect(buys[0].price).toBe(48.10);
-      expect(details?.buy2OnlyMode).toBe(true);
+      expect(buys[0].reason).toContain('Buy1');
+      expect(buys[0].reason).not.toContain('Buy2');
+      expect(buys[0].price).toBe(49.33);
+      expect(details?.buy2OnlyMode).toBe(false);
+    });
+
+    it('should not enforce buy2OnlyMode when rsiPolicy is none even at high RSI', async () => {
+      // 사용자가 RSI를 무시하도록 설정 → Buy1 (현재가) 활성
+      const ctx = createContext({
+        stockIndicators: { currentAboveMA200: true, rsi14: 85 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'none' } } as any,
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      expect(details?.buy2OnlyMode).toBe(false);
+      expect(buys.length).toBeGreaterThan(0);
+      const buy1 = buys.find((s) => s.reason?.includes('Buy1'));
+      expect(buy1).toBeDefined();
+      expect(buy1!.price).toBe(70000);
+    });
+
+    it('should block buying entirely when hard-stop-70 and RSI exceeds threshold', async () => {
+      // hard-stop-70 정책 + RSI 75 → quota 0 → 매수 시그널 없음
+      // (buy2OnlyMode 임계값도 70 이지만 quota=0 이라 진입 불가)
+      const ctx = createContext({
+        stockIndicators: { currentAboveMA200: true, rsi14: 75 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'hard-stop-70' } } as any,
+      });
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      expect(buys).toHaveLength(0);
+    });
+
+    it('should activate Buy1 with hard-stop-80 when RSI is below threshold', async () => {
+      // hard-stop-80 + RSI 75 → quota 그대로, buy2OnlyMode=false (RSI < 80) → Buy1 활성
+      const ctx = createContext({
+        stockIndicators: { currentAboveMA200: true, rsi14: 75 },
+        watchStock: { ...createContext().watchStock, strategyParams: { rsiPolicy: 'hard-stop-80' } } as any,
+      });
+
+      const { signals, details } = await strategy.evaluateStock(ctx);
+      const buys = signals.filter((s) => s.side === 'BUY');
+
+      expect(details?.buy2OnlyMode).toBe(false);
+      const buy1 = buys.find((s) => s.reason?.includes('Buy1'));
+      expect(buy1).toBeDefined();
+      expect(buy1!.price).toBe(70000);
     });
 
     it('should limit quota to buyable amount', async () => {
