@@ -1,0 +1,114 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<EOF
+          Host ${{ secrets.SERVER_HOST }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            IdentityFile ~/.ssh/deploy_key
+          EOF
+
+      - name: Wait for server
+        run: |
+          echo "Runner Tailscale IPv4:"
+          tailscale ip -4 || true
+          echo "Tailscale status:"
+          tailscale status || true
+
+          echo "Waiting for server connectivity..."
+          for i in $(seq 1 30); do
+            if tailscale ping --timeout=2s ${{ secrets.SERVER_HOST }} >/dev/null 2>&1; then
+              echo "Tailscale ping succeeded"
+              exit 0
+            fi
+            if nc -zvw3 ${{ secrets.SERVER_HOST }} 22 >/dev/null 2>&1; then
+              echo "SSH port is reachable"
+              exit 0
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+          echo "Could not reach deployment server."
+          exit 1
+
+      - name: Upload release archive
+        env:
+          REMOTE_HOST: ${{ secrets.SERVER_HOST }}
+          REMOTE_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ARCHIVE_PATH="${RUNNER_TEMP}/release.tar.gz"
+
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=client/node_modules \
+            --exclude=dist \
+            --exclude=client/dist \
+            -czf "$ARCHIVE_PATH" .
+
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${DEPLOY_PATH}/scripts ${DEPLOY_PATH}/artifacts"
+          scp -o ConnectTimeout=10 scripts/deploy.sh ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/scripts/deploy.sh
+          scp -o ConnectTimeout=10 "$ARCHIVE_PATH" ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/artifacts/release.tar.gz
+
+      - name: Run deployment
+        env:
+          REMOTE_HOST: ${{ secrets.SERVER_HOST }}
+          REMOTE_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
+            "export DEPLOY_DIR=${DEPLOY_PATH} \
+             APP_NAME=${APP_NAME:-my-app} \
+             SOURCE_ARCHIVE=${DEPLOY_PATH}/artifacts/release.tar.gz && \
+             /bin/bash ${DEPLOY_PATH}/scripts/deploy.sh"
+
+      - name: Health check
+        env:
+          REMOTE_HOST: ${{ secrets.SERVER_HOST }}
+          REMOTE_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          sleep 5
+          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
+            "set -a; [ -f ${DEPLOY_PATH}/.env.prod ] && source ${DEPLOY_PATH}/.env.prod; set +a; curl -sf --max-time 10 http://localhost:\${PORT:-8888}/health > /dev/null && echo 'Health check passed'"
+
+      - name: Clean SSH key
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -f "${RUNNER_TEMP}/release.tar.gz"

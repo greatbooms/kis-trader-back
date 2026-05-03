@@ -196,6 +196,30 @@ type RefreshAccountStateResult {
   accountSummary: AccountSummaryType!
 }
 
+type WatchStockType {
+  id: ID!
+  market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  isActive: Boolean!
+  strategyName: String
+  quota: Float
+  cycle: Float!
+  maxCycles: Int!
+  stopLossRate: Float!
+  maxPortfolioRate: Float!
+  strategyParams: String
+
+  """마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단")"""
+  lastExecutionStatus: String
+
+  """마지막 전략 실행 날짜"""
+  lastExecutionDate: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
 type WatchStockExecutionLogType {
   id: ID!
   watchStockId: String!
@@ -225,30 +249,6 @@ enum WatchStockExecutionEventType {
 type ManualTriggerResult {
   success: Boolean!
   message: String!
-}
-
-type WatchStockType {
-  id: ID!
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  isActive: Boolean!
-  strategyName: String
-  quota: Float
-  cycle: Float!
-  maxCycles: Int!
-  stopLossRate: Float!
-  maxPortfolioRate: Float!
-  strategyParams: String
-
-  """마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단")"""
-  lastExecutionStatus: String
-
-  """마지막 전략 실행 날짜"""
-  lastExecutionDate: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
 }
 
 type AuthPayload {
