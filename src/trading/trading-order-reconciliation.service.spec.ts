@@ -95,6 +95,7 @@ describe('TradingOrderReconciliationService', () => {
           side: 'BUY',
           quantity: 10,
           price: 70000,
+          orderDivision: '00',
           reason: 'DCA 매수',
         },
       });
@@ -133,6 +134,7 @@ describe('TradingOrderReconciliationService', () => {
             stockCode: '005930',
             quantity: 10,
             price: 70000,
+            orderDivision: '00',
           }),
           execution: expect.objectContaining({
             quantity: 10,

@@ -635,9 +635,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           text: [
             `${execution ? '*체결:*' : '*주문:*'} ${displayQuantity}주 x ${this.fmtPrice(displayPrice, signal.market, signal.exchangeCode)} (${this.orderTypeLabel(signal.orderDivision)})`,
             execution?.remainingQuantity !== undefined
-              ? `*잔여 수량:* ${execution.remainingQuantity}주`
+              ? `*주문 미체결 잔량:* ${execution.remainingQuantity}주`
               : null,
             `*주문번호:* ${result.orderNo || 'N/A'}`,
+            signal.reason ? `*주문 사유:* ${signal.reason}` : null,
           ].filter(Boolean).join('\n'),
         },
       },
@@ -694,13 +695,13 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         text: {
           type: 'mrkdwn',
           text: [
-            `:bar_chart: *${isBuy ? '현재 보유 현황' : '매도 후 보유 현황'}*`,
+            `:bar_chart: *${isBuy ? '현재 보유 현황' : '매도 후 잔여 보유 현황'}*`,
             `*보유:* ${position.quantity}주`,
             `*평단:* ${this.fmtPrice(position.avgPrice, signal.market, signal.exchangeCode)}`,
             `*현재가:* ${this.fmtPrice(position.currentPrice, signal.market, signal.exchangeCode)}`,
             `*총 투자금:* ${this.fmtMoney(position.totalInvested, signal.market, signal.exchangeCode)}`,
             `*평가금액:* ${this.fmtMoney(evalAmount, signal.market, signal.exchangeCode)}`,
-            `*수익률:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, signal.market, signal.exchangeCode)})`,
+            `*${isBuy ? '평가수익률' : '잔여 보유 평가수익률'}:* ${position.profitRate >= 0 ? '+' : ''}${position.profitRate.toFixed(2)}% (${this.fmtMoney(position.profitLoss, signal.market, signal.exchangeCode)})`,
           ].join('\n'),
         },
       });

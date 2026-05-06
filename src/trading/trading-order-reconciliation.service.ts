@@ -280,6 +280,7 @@ export class TradingOrderReconciliationService {
       side: details.side as 'BUY' | 'SELL',
       quantity: Number(details.quantity),
       price: details.price !== undefined ? Number(details.price) : undefined,
+      orderDivision: details.orderDivision as string | undefined,
       reason: details.reason || executionLog.message,
       metadata: details.metadata as Record<string, any> | undefined,
     };
