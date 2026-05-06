@@ -306,6 +306,12 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
       : (p: number) => Math.round(p);              // 정수
+    const takeProfitOrderPrice = (targetPrice: number) => Math.max(
+      roundPrice(targetPrice),
+      roundPrice(curPrice),
+    );
+    const takeProfitPriceNote = (orderPrice: number, targetPrice: number) =>
+      orderPrice > targetPrice ? ` (목표가 ${targetPrice} 상회)` : '';
 
     // P6: MDD 발동 시에도 종목 손실률이 임계값 이상인 경우만 청산.
     // 수익 종목 / 소폭 손실 종목은 유지하여 건강한 종목이 함께 휩쓸리지 않도록 한다.
@@ -363,21 +369,23 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     if (hasPosition && isActiveSecondaryExitPlan(secondaryExitPlan, today)) {
       const remainingQty = Math.min(holdQty, secondaryExitPlan!.secondTargetQuantity);
       const targetPrice = roundPrice(secondaryExitPlan!.secondTargetPrice);
+      const orderPrice = takeProfitOrderPrice(secondaryExitPlan!.secondTargetPrice);
 
-      if (remainingQty > 0 && targetPrice > 0) {
+      if (remainingQty > 0 && orderPrice > 0) {
         signals.push({
           market,
           exchangeCode,
           stockCode: watchStock.stockCode,
           side: 'SELL',
           quantity: remainingQty,
-          price: targetPrice,
+          price: orderPrice,
           reason:
             `Take profit 2: T=${T.toFixed(1)}, +${(secondaryExitPlan!.secondTargetRate * 100).toFixed(1)}%, ` +
-            `${remainingQty}주 @ ${targetPrice}`,
+            `${remainingQty}주 @ ${orderPrice}${takeProfitPriceNote(orderPrice, targetPrice)}`,
           orderDivision: '00',
           metadata: {
             phase: 'take-profit-2',
+            targetPrice,
           },
         });
       }
@@ -615,27 +623,29 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
         const tableOverride = strategyParams.targetTableOverride;
         const targetProfitRate = lookupTargetProfitRate(T, tableOverride);
         const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
+        const orderPrice = takeProfitOrderPrice(avgPrice * (1 + targetProfitRate));
         const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
         const secondSellQty = holdQty - firstSellQty;
         const secondaryTargetRate = targetProfitRate + lookupSecondaryBonusRate(T, tableOverride);
-        const secondaryTargetPrice = roundPrice(avgPrice * (1 + secondaryTargetRate));
+        const secondaryTargetPrice = takeProfitOrderPrice(avgPrice * (1 + secondaryTargetRate));
 
-        if (targetPrice > 0) {
+        if (orderPrice > 0) {
           signals.push({
             market,
             exchangeCode,
             stockCode: watchStock.stockCode,
             side: 'SELL',
             quantity: firstSellQty,
-            price: targetPrice,
+            price: orderPrice,
             reason:
               secondSellQty > 0
-                ? `Take profit 1: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${targetPrice}`
-                : `Take profit: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${targetPrice}`,
+                ? `Take profit 1: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitPriceNote(orderPrice, targetPrice)}`
+                : `Take profit: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitPriceNote(orderPrice, targetPrice)}`,
             orderDivision: '00',
             metadata: secondSellQty > 0
               ? {
                   phase: 'take-profit-1',
+                  targetPrice,
                   secondaryTargetPrice,
                   secondaryTargetRate,
                   secondaryTargetQuantity: secondSellQty,

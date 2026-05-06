@@ -590,6 +590,36 @@ describe('InfiniteBuyStrategy', () => {
       expect(takeProfit!.metadata?.sameDaySecondaryEligible).toBe(true);
     });
 
+    it('should not place first take-profit below current price', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 82000,
+          openPrice: 81000,
+          highPrice: 83000,
+          lowPrice: 80000,
+          volume: 1000000,
+        },
+        position: {
+          stockCode: '005930',
+          quantity: 20,
+          avgPrice: 70000,
+          currentPrice: 82000,
+          totalInvested: 500000, // T = 5
+        },
+        totalPortfolioValue: 10000000,
+      });
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
+
+      expect(takeProfit).toBeDefined();
+      expect(takeProfit!.price).toBe(82000);
+      expect(takeProfit!.metadata?.targetPrice).toBe(Math.round(70000 * 1.135));
+      expect(takeProfit!.reason).toContain('목표가 79450 상회');
+    });
+
     it('should use the raised early take-profit target for low T ranges', async () => {
       const ctx = createContext({
         position: {
@@ -665,6 +695,45 @@ describe('InfiniteBuyStrategy', () => {
       expect(sells[0].reason).toContain('Take profit 2');
       expect(sells[0].quantity).toBe(10);
       expect(sells[0].price).toBe(80920);
+    });
+
+    it('should not place second take-profit below current price', async () => {
+      const ctx = createContext({
+        price: {
+          stockCode: '005930',
+          stockName: 'Samsung',
+          currentPrice: 82000,
+          openPrice: 81000,
+          highPrice: 83000,
+          lowPrice: 80000,
+          volume: 1000000,
+        },
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 82000,
+          totalInvested: 500000,
+        },
+      });
+      ctx.watchStock.strategyParams = {
+        secondaryExitPlan: {
+          firstTargetDate: '2026-04-08',
+          secondTargetPrice: 80920,
+          secondTargetRate: 0.156,
+          secondTargetQuantity: 10,
+        },
+      };
+
+      const { signals } = await strategy.evaluateStock(ctx);
+
+      const sells = signals.filter((s) => s.side === 'SELL');
+      expect(sells).toHaveLength(1);
+      expect(sells[0].reason).toContain('Take profit 2');
+      expect(sells[0].quantity).toBe(10);
+      expect(sells[0].price).toBe(82000);
+      expect(sells[0].metadata?.targetPrice).toBe(80920);
+      expect(sells[0].reason).toContain('목표가 80920 상회');
     });
 
     it('should resume normal mode after second target attempt day passes', async () => {
