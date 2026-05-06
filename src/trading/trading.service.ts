@@ -325,6 +325,10 @@ export class TradingService {
           `Strategy "${strategy.name}" generated ${signals.length} signal(s) for ${ctx.watchStock.stockCode}`,
         );
 
+        if (this.isQuotaCarryEligible(skipReasons)) {
+          quotaCarryEligibleIds.add(ctx.watchStock.id);
+        }
+
         await this.logWatchStockExecution(
           ctx,
           WatchStockExecutionEventType.SIGNAL_CREATED,
@@ -831,7 +835,11 @@ export class TradingService {
     currentPositionQty: number,
   ): Promise<void> {
     if (signal.side === 'BUY') {
-      await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
+      const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+      const params = (watchStock?.strategyParams as InfiniteBuyStrategyParams | undefined) || {};
+      if (!params.secondaryExitPlan) {
+        await this.clearInfiniteBuySecondaryExitPlan(watchStockId);
+      }
       return;
     }
 
@@ -848,14 +856,21 @@ export class TradingService {
         : null;
       const remainingQty = position?.quantity ?? Math.max(0, currentPositionQty - signal.quantity);
       if (remainingQty > 0) {
+        const remainingSignal = {
+          ...signal,
+          metadata: {
+            ...(signal.metadata || {}),
+            secondaryTargetQuantity: remainingQty,
+          },
+        };
         const submittedSameDay = await this.trySubmitInfiniteBuySameDaySecondTarget(
           watchStock,
           position,
-          signal,
+          remainingSignal,
           remainingQty,
         );
         if (!submittedSameDay) {
-          await this.persistInfiniteBuySecondaryExitPlan(watchStockId, signal);
+          await this.persistInfiniteBuySecondaryExitPlan(watchStockId, remainingSignal);
         }
       } else {
         await this.clearInfiniteBuySecondaryExitPlan(watchStockId);

@@ -133,34 +133,69 @@ describe('KisOverseasService', () => {
       buildConfigService('prod'),
     );
 
-    mockKisBase.get.mockResolvedValue({
-      output1: [
-        {
-          ovrs_pdno: 'AAPL',
-          ovrs_item_name: '애플',
-          ovrs_cblc_qty: '3',
-          pchs_avg_pric: '180.50',
-          now_pric2: '190.25',
-          ovrs_stck_evlu_pfls_amt: '29.25',
-          evlu_pfls_rt: '5.40',
-          ovrs_excg_cd: 'NASD',
-        },
-      ],
-      output2: [
-        {
-          crcy_cd: 'USD',
-          crcy_cd_name: '미국달러',
-          frcr_dncl_amt_2: '1200.50',
-          frcr_drwg_psbl_amt_1: '1000.25',
-        },
-      ],
-      ctx_area_fk200: '   ',
-      ctx_area_nk200: '   ',
-    });
+    mockKisBase.get
+      .mockResolvedValueOnce({
+        output1: [
+          {
+            ovrs_pdno: 'AAPL',
+            ovrs_item_name: '애플',
+            ovrs_cblc_qty: '3',
+            pchs_avg_pric: '180.50',
+            now_pric2: '190.25',
+            ovrs_stck_evlu_pfls_amt: '29.25',
+            evlu_pfls_rt: '5.40',
+            ovrs_excg_cd: 'NASD',
+          },
+        ],
+        output2: [
+          {
+            crcy_cd: 'USD',
+            crcy_cd_name: '미국달러',
+            frcr_dncl_amt_2: '1200.50',
+            frcr_drwg_psbl_amt_1: '1000.25',
+          },
+        ],
+        ctx_area_fk200: '   ',
+        ctx_area_nk200: '   ',
+      })
+      .mockResolvedValueOnce({
+        output: [
+          {
+            natn_name: '미국',
+            crcy_cd: 'USD',
+            frcr_dncl_amt1: '1200.50',
+            ustl_buy_amt: '25.00',
+            ustl_sll_amt: '61.27',
+            frcr_gnrl_ord_psbl_amt: '1236.77',
+            frcr_ord_psbl_amt1: '0.000000',
+            itgr_ord_psbl_amt: '1237.10',
+          },
+          {
+            natn_name: '캐나다',
+            crcy_cd: 'USD',
+            frcr_dncl_amt1: '1200.50',
+            ustl_buy_amt: '0.00',
+            ustl_sll_amt: '0.00',
+            frcr_gnrl_ord_psbl_amt: '0.00',
+            frcr_ord_psbl_amt1: '0.000000',
+            itgr_ord_psbl_amt: '1237.10',
+          },
+          {
+            natn_name: '홍콩',
+            crcy_cd: 'HKD',
+            frcr_dncl_amt1: '0.000000',
+            ustl_buy_amt: '0.00',
+            ustl_sll_amt: '0.00',
+            frcr_gnrl_ord_psbl_amt: '0.00',
+            frcr_ord_psbl_amt1: '0.000000',
+            itgr_ord_psbl_amt: '9632.41',
+          },
+        ],
+      });
 
     const snapshot = await service.getAccountSnapshot();
 
-    expect(mockKisBase.get).toHaveBeenCalledTimes(1);
+    expect(mockKisBase.get).toHaveBeenCalledTimes(2);
     expect(snapshot.balance).toEqual([
       expect.objectContaining({
         stockCode: 'AAPL',
@@ -174,6 +209,11 @@ describe('KisOverseasService', () => {
         currencyName: '미국달러',
         amount: 1200.5,
         withdrawableAmount: 1000.25,
+        orderableAmount: 1236.77,
+        generalOrderableAmount: 1236.77,
+        integratedOrderableAmount: 1237.1,
+        pendingBuyAmount: 25,
+        pendingSellAmount: 61.27,
       },
     ]);
   });
@@ -302,6 +342,17 @@ describe('KisOverseasService', () => {
         ],
         ctx_area_fk200: '',
         ctx_area_nk200: '',
+      })
+      .mockResolvedValueOnce({
+        output: [
+          {
+            crcy_cd: 'USD',
+            frcr_dncl_amt1: '1000.000000',
+            ustl_buy_amt: '0.000000',
+            ustl_sll_amt: '0.000000',
+            frcr_ord_psbl_amt1: '950.550000',
+          },
+        ],
       });
 
     const snapshot = await service.getAccountSnapshot();
@@ -323,6 +374,9 @@ describe('KisOverseasService', () => {
         currencyName: '미국 달러',
         amount: 1000,
         withdrawableAmount: 950.55,
+        orderableAmount: 950.55,
+        pendingBuyAmount: 0,
+        pendingSellAmount: 0,
       },
     ]);
   });

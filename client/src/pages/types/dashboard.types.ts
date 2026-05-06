@@ -6,6 +6,11 @@ export type DashboardPosition = GetPositionsQuery['positions'][number]
 export interface DashboardCapitalSummary {
   currencyCode: string
   cashBalance: number
+  settledCashBalance: number
+  orderableCashBalance: number
+  withdrawableCashBalance: number
+  pendingBuyAmount: number
+  pendingSellAmount: number
   currentValue: number
   costBasis: number
   totalAssets: number

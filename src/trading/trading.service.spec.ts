@@ -388,6 +388,82 @@ describe('TradingService', () => {
         }),
       );
     });
+
+    it('accumulates quota when only sell signals exist and buy quantity was insufficient', async () => {
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [
+            {
+              market: 'OVERSEAS',
+              exchangeCode: 'AMEX',
+              stockCode: 'SOXL',
+              side: 'SELL',
+              quantity: 1,
+              price: 161.91,
+              reason: 'Take profit',
+              orderDivision: '00',
+            },
+          ],
+          skipReasons: ['매수 수량 부족: 조정 할당금 85 < 기준가 153.81'],
+          details: {
+            adjustedQuota: 85,
+            minimumExecutablePrice: 153.81,
+          },
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-soxl',
+        stockCode: 'SOXL',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: {},
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-soxl',
+            market: 'OVERSEAS',
+            exchangeCode: 'AMEX',
+            stockCode: 'SOXL',
+            stockName: 'SOXL',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 0.5,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          position: {
+            stockCode: 'SOXL',
+            quantity: 1,
+            avgPrice: 127.63,
+            currentPrice: 161.91,
+            totalInvested: 127.63,
+          },
+          price: { currentPrice: 161.91 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 4516,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ws-soxl' },
+          data: expect.objectContaining({
+            strategyParams: expect.objectContaining({
+              accumulatedQuota: 250,
+            }),
+          }),
+        }),
+      );
+    });
   });
 
   describe('executeSignal diagnostics logging', () => {
@@ -467,6 +543,38 @@ describe('TradingService', () => {
   });
 
   describe('infinite-buy hybrid second target', () => {
+    it('should not clear pending second target plan when a buy fill is reconciled later', async () => {
+      const clearPlanSpy = jest.spyOn(service as any, 'clearInfiniteBuySecondaryExitPlan');
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        strategyParams: {
+          secondaryExitPlan: {
+            firstTargetDate: '2026-05-06',
+            secondTargetPrice: 70.6,
+            secondTargetRate: 0.2,
+            secondTargetQuantity: 7,
+          },
+        },
+      });
+
+      await (service as any).handleInfiniteBuySignalFill(
+        'ws-1',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          quantity: 1,
+          price: 70.6,
+          reason: 'Buy1',
+          orderDivision: '00',
+        },
+        7,
+      );
+
+      expect(clearPlanSpy).not.toHaveBeenCalled();
+    });
+
     it('should submit same-day second target after first take-profit fill when trend stays strong', async () => {
       const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
       const persistPlanSpy = jest
@@ -586,10 +694,10 @@ describe('TradingService', () => {
       });
       mockPrisma.position.findFirst.mockResolvedValue({
         stockCode: 'TQQQ',
-        quantity: 2,
+        quantity: 7,
         avgPrice: 52.1,
         currentPrice: 58.4,
-        totalInvested: 104.2,
+        totalInvested: 364.7,
       });
       mockKisOverseas.getPrice.mockResolvedValue({
         stockCode: 'TQQQ',
@@ -633,7 +741,14 @@ describe('TradingService', () => {
 
       await (service as any).handleInfiniteBuySignalFill('ws-1', signal, 3);
 
-      expect(persistPlanSpy).toHaveBeenCalledWith('ws-1', signal);
+      expect(persistPlanSpy).toHaveBeenCalledWith(
+        'ws-1',
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            secondaryTargetQuantity: 7,
+          }),
+        }),
+      );
     });
 
     it('should keep next-day second target when latest trend re-check is weak', async () => {
@@ -658,10 +773,10 @@ describe('TradingService', () => {
       });
       mockPrisma.position.findFirst.mockResolvedValue({
         stockCode: 'TQQQ',
-        quantity: 2,
+        quantity: 7,
         avgPrice: 52.1,
         currentPrice: 58.4,
-        totalInvested: 104.2,
+        totalInvested: 364.7,
       });
       mockKisOverseas.getPrice.mockResolvedValue({
         stockCode: 'TQQQ',
@@ -700,14 +815,21 @@ describe('TradingService', () => {
             phase: 'take-profit-1',
             secondaryTargetPrice: 59.88,
             secondaryTargetRate: 0.19,
-            secondaryTargetQuantity: 2,
+            secondaryTargetQuantity: 6,
           },
         },
         3,
       );
 
       expect(executeSignalSpy).not.toHaveBeenCalled();
-      expect(persistPlanSpy).toHaveBeenCalled();
+      expect(persistPlanSpy).toHaveBeenCalledWith(
+        'ws-1',
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            secondaryTargetQuantity: 7,
+          }),
+        }),
+      );
     });
   });
 

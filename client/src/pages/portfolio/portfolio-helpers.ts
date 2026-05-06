@@ -21,8 +21,18 @@ export function getCurrencyCodeByCountry(countryValue: string | null): string | 
 export function getDisplayCashAmount(balance: {
   amount: number
   withdrawableAmount?: number | null
+  pendingBuyAmount?: number | null
+  pendingSellAmount?: number | null
 }): number {
-  return balance.withdrawableAmount ?? balance.amount
+  return balance.amount + (balance.pendingSellAmount ?? 0) - (balance.pendingBuyAmount ?? 0)
+}
+
+export function getOrderableCashAmount(balance: {
+  amount: number
+  orderableAmount?: number | null
+  withdrawableAmount?: number | null
+}): number {
+  return balance.orderableAmount ?? balance.withdrawableAmount ?? balance.amount
 }
 
 export function buildCountryPortfolioSummary(
@@ -34,6 +44,9 @@ export function buildCountryPortfolioSummary(
     currencyName?: string | null
     amount: number
     withdrawableAmount?: number | null
+    orderableAmount?: number | null
+    pendingBuyAmount?: number | null
+    pendingSellAmount?: number | null
   }>,
 ) {
   if (!countryFilter) return null
@@ -50,6 +63,11 @@ export function buildCountryPortfolioSummary(
   const totalProfitLoss = countryPositions.reduce((sum, position) => sum + position.profitLoss, 0)
   const currentValue = costBasis + totalProfitLoss
   const cashBalance = countryCashBalances.reduce((sum, balance) => sum + getDisplayCashAmount(balance), 0)
+  const settledCashBalance = countryCashBalances.reduce((sum, balance) => sum + balance.amount, 0)
+  const orderableCashBalance = countryCashBalances.reduce((sum, balance) => sum + getOrderableCashAmount(balance), 0)
+  const withdrawableCashBalance = countryCashBalances.reduce((sum, balance) => sum + (balance.withdrawableAmount ?? balance.amount), 0)
+  const pendingBuyAmount = countryCashBalances.reduce((sum, balance) => sum + (balance.pendingBuyAmount ?? 0), 0)
+  const pendingSellAmount = countryCashBalances.reduce((sum, balance) => sum + (balance.pendingSellAmount ?? 0), 0)
   const totalAssets = currentValue + cashBalance
   const profitRate = costBasis > 0 ? (totalProfitLoss / costBasis) * 100 : 0
 
@@ -62,6 +80,11 @@ export function buildCountryPortfolioSummary(
     totalProfitLoss,
     currentValue,
     cashBalance,
+    settledCashBalance,
+    orderableCashBalance,
+    withdrawableCashBalance,
+    pendingBuyAmount,
+    pendingSellAmount,
     totalAssets,
     profitRate,
   }

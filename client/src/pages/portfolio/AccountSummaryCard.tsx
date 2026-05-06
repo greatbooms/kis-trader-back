@@ -45,6 +45,9 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
           currencyCode: cash.currencyCode,
           amount: cash.amount,
           withdrawableAmount: cash.withdrawableAmount,
+          orderableAmount: cash.orderableAmount,
+          pendingBuyAmount: cash.pendingBuyAmount,
+          pendingSellAmount: cash.pendingSellAmount,
         })),
       )
     : null
@@ -116,13 +119,20 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
       {!collapsed ? (
         <CardContent className="space-y-5">
           {scopedSummary ? (
-            <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-6">
               <SummaryMetricCard
                 icon={<Wallet className="h-4 w-4 text-muted-foreground" />}
-                label="예수금"
-                tooltip="선택한 국가 탭 기준 현금입니다."
+                label="현금성 자산"
+                tooltip="예수금에 미결제 매도대금을 더하고 미결제 매수대금을 뺀 금액입니다."
                 value={formatCurrencyByCode(scopedSummary.cashBalance, scopedSummary.currencyCode)}
-                subValue={`${scopedSummary.countryCashBalances.length}개 계좌 현금 항목`}
+                subValue={`예수금 ${formatCurrencyByCode(scopedSummary.settledCashBalance, scopedSummary.currencyCode)}`}
+              />
+              <SummaryMetricCard
+                icon={<Wallet className="h-4 w-4 text-muted-foreground" />}
+                label="주문가능"
+                tooltip="KIS 주문가능금액입니다. 매도재사용 가능금액이 반영될 수 있습니다."
+                value={formatCurrencyByCode(scopedSummary.orderableCashBalance, scopedSummary.currencyCode)}
+                subValue={`출금가능 ${formatCurrencyByCode(scopedSummary.withdrawableCashBalance, scopedSummary.currencyCode)}`}
               />
               <SummaryMetricCard
                 icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
@@ -134,7 +144,7 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
               <SummaryMetricCard
                 icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
                 label="평가자산"
-                tooltip="선택한 국가 탭의 현금 + 보유 평가금액입니다."
+                tooltip="선택한 국가 탭의 현금성 자산 + 보유 평가금액입니다."
                 value={formatCurrencyByCode(scopedSummary.totalAssets, scopedSummary.currencyCode)}
                 subValue={`보유 평가금액 ${formatCurrencyByCode(scopedSummary.currentValue, scopedSummary.currencyCode)}`}
               />
@@ -151,7 +161,7 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
                 label="통화 기준"
                 tooltip="선택한 국가 탭의 기준 통화입니다."
                 value={scopedSummary.currencyCode}
-                subValue={`${scopedSummary.country.label} 시장 자산만 표시 중`}
+                subValue={`미결제 매도 ${formatCurrencyByCode(scopedSummary.pendingSellAmount, scopedSummary.currencyCode)} / 매수 ${formatCurrencyByCode(scopedSummary.pendingBuyAmount, scopedSummary.currencyCode)}`}
                 tone="default"
               />
             </div>

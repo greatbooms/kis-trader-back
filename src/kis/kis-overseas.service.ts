@@ -5,6 +5,8 @@ import {
   OverseasPriceOutput,
   OverseasOrderOutput,
   OverseasBalanceItem,
+  OverseasCashBalance,
+  OverseasForeignMarginItem,
   OverseasPresentBalanceCurrencyItem,
   OverseasStandardBalanceItem,
   StockPriceResult,
@@ -462,24 +464,14 @@ export class KisOverseasService {
     };
   }
 
-  async getCashBalances(): Promise<Array<{
-    currencyCode: string;
-    currencyName?: string;
-    amount: number;
-    withdrawableAmount?: number;
-  }>> {
+  async getCashBalances(): Promise<OverseasCashBalance[]> {
     const snapshot = await this.getAccountSnapshot();
     return snapshot.cashBalances;
   }
 
   async getAccountSnapshot(nationCode = '000'): Promise<{
     balance: BalanceItem[];
-    cashBalances: Array<{
-      currencyCode: string;
-      currencyName?: string;
-      amount: number;
-      withdrawableAmount?: number;
-    }>;
+    cashBalances: OverseasCashBalance[];
   }> {
     if (this.isPaper || this.useStandardBalanceOnly) {
       return {
@@ -489,7 +481,21 @@ export class KisOverseasService {
     }
 
     try {
-      return await this.getPresentBalanceSnapshot(nationCode);
+      const snapshot = await this.getPresentBalanceSnapshot(nationCode);
+      try {
+        return {
+          balance: snapshot.balance,
+          cashBalances: this.mergeOverseasCashBalances(
+            snapshot.cashBalances,
+            await this.getForeignMarginCashBalances(),
+          ),
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Failed to enrich overseas cash balances with foreign margin API: ${error.message}`,
+        );
+        return snapshot;
+      }
     } catch (error) {
       if (!this.shouldFallbackToStandardBalance(error)) {
         throw error;
@@ -504,6 +510,103 @@ export class KisOverseasService {
         cashBalances: [],
       };
     }
+  }
+
+  private mergeOverseasCashBalances(
+    baseBalances: OverseasCashBalance[],
+    marginBalances: OverseasCashBalance[],
+  ): OverseasCashBalance[] {
+    const balances = new Map<string, OverseasCashBalance>();
+
+    for (const item of baseBalances) {
+      balances.set(item.currencyCode, { ...item });
+    }
+
+    for (const item of marginBalances) {
+      const existing = balances.get(item.currencyCode);
+      if (!existing) continue;
+      balances.set(item.currencyCode, {
+        ...existing,
+        ...item,
+        currencyName: existing?.currencyName ?? item.currencyName,
+        withdrawableAmount: existing?.withdrawableAmount ?? item.withdrawableAmount,
+      });
+    }
+
+    return Array.from(balances.values());
+  }
+
+  private async getForeignMarginCashBalances(): Promise<OverseasCashBalance[]> {
+    const res = await this.kisBase.get(
+      '/uapi/overseas-stock/v1/trading/foreign-margin',
+      'TTTC2101R',
+      {
+        CANO: this.accountNo.substring(0, 8),
+        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
+      },
+    );
+
+    const output = (res.output as OverseasForeignMarginItem[]) || [];
+    const balances = new Map<string, { balance: OverseasCashBalance; priority: number }>();
+
+    for (const item of output) {
+      if (!item.crcy_cd) continue;
+      const row = item as unknown as Record<string, any>;
+      const amount = this.readNumber(row, 'frcr_dncl_amt1') ?? 0;
+      const pendingBuyAmount = this.readNumber(row, 'ustl_buy_amt');
+      const pendingSellAmount = this.readNumber(row, 'ustl_sll_amt');
+      const generalOrderableAmount = this.readNumber(row, 'frcr_gnrl_ord_psbl_amt');
+      const directOrderableAmount = this.readNumber(row, 'frcr_ord_psbl_amt1');
+      const integratedOrderableAmount = this.readNumber(row, 'itgr_ord_psbl_amt');
+      const orderableAmount =
+        directOrderableAmount && directOrderableAmount > 0
+          ? directOrderableAmount
+          : generalOrderableAmount ?? integratedOrderableAmount;
+      const balance: OverseasCashBalance = {
+        currencyCode: item.crcy_cd,
+        amount,
+      };
+      const optionalFields: Array<[string, number | undefined]> = [
+        ['pendingBuyAmount', pendingBuyAmount],
+        ['pendingSellAmount', pendingSellAmount],
+        ['receivableAmount', this.readNumber(row, 'frcr_rcvb_amt')],
+        ['marginAmount', this.readNumber(row, 'frcr_mgn_amt')],
+        ['generalOrderableAmount', generalOrderableAmount],
+        ['orderableAmount', orderableAmount],
+        ['integratedOrderableAmount', integratedOrderableAmount],
+      ];
+      for (const [key, value] of optionalFields) {
+        if (value !== undefined) {
+          (balance as unknown as Record<string, number>)[key] = value;
+        }
+      }
+
+      const priority = this.getForeignMarginCashPriority(item, balance);
+      const existing = balances.get(item.crcy_cd);
+      if (!existing || priority > existing.priority) {
+        balances.set(item.crcy_cd, { balance, priority });
+      }
+    }
+
+    return Array.from(balances.values()).map((item) => item.balance);
+  }
+
+  private getForeignMarginCashPriority(
+    item: OverseasForeignMarginItem,
+    balance: OverseasCashBalance,
+  ): number {
+    const isPrimaryUsRow = item.natn_name?.trim() === '미국' && item.crcy_cd === 'USD';
+    const pendingActivity = Math.abs(balance.pendingBuyAmount ?? 0) + Math.abs(balance.pendingSellAmount ?? 0);
+    const orderableActivity = Math.abs(balance.generalOrderableAmount ?? 0);
+    const cashActivity = Math.abs(balance.amount);
+
+    return (
+      (isPrimaryUsRow ? 1_000_000_000 : 0) +
+      (pendingActivity > 0 ? 10_000_000 : 0) +
+      (orderableActivity > 0 ? 1_000_000 : 0) +
+      cashActivity +
+      pendingActivity
+    );
   }
 
   /** 해외 미체결 주문 조회 */
@@ -825,22 +928,12 @@ export class KisOverseasService {
 
   private async getPresentBalanceSnapshot(nationCode = '000'): Promise<{
     balance: BalanceItem[];
-    cashBalances: Array<{
-      currencyCode: string;
-      currencyName?: string;
-      amount: number;
-      withdrawableAmount?: number;
-    }>;
+    cashBalances: OverseasCashBalance[];
   }> {
     const trId = this.isPaper ? 'VTRP6504R' : 'CTRP6504R';
     const items: BalanceItem[] = [];
     let rawItemCount = 0;
-    const cashBalances = new Map<string, {
-      currencyCode: string;
-      currencyName?: string;
-      amount: number;
-      withdrawableAmount?: number;
-    }>();
+    const cashBalances = new Map<string, OverseasCashBalance>();
     let ctxAreaFk200 = '';
     let ctxAreaNk200 = '';
     let hasMore = true;
@@ -910,12 +1003,24 @@ export class KisOverseasService {
       const output2 = (res.output2 as OverseasPresentBalanceCurrencyItem[]) || [];
       for (const item of output2) {
         if (!item.crcy_cd) continue;
-        cashBalances.set(item.crcy_cd, {
+        const row = item as unknown as Record<string, any>;
+        const balance: OverseasCashBalance = {
           currencyCode: item.crcy_cd,
           currencyName: item.crcy_cd_name || undefined,
-          amount: parseFloat(item.frcr_dncl_amt_2) || 0,
-          withdrawableAmount: parseFloat(item.frcr_drwg_psbl_amt_1) || 0,
-        });
+          amount: this.readNumber(row, 'frcr_dncl_amt_2', 'frcr_dncl_amt1') ?? 0,
+        };
+        const optionalFields: Array<[string, number | undefined]> = [
+          ['withdrawableAmount', this.readNumber(row, 'frcr_drwg_psbl_amt_1')],
+          ['orderableAmount', this.readNumber(row, 'frcr_use_psbl_amt', 'frcr_ord_psbl_amt1')],
+          ['pendingSellAmount', this.readNumber(row, 'ustl_sll_amt_smtl', 'ustl_sll_amt')],
+          ['pendingBuyAmount', this.readNumber(row, 'ustl_buy_amt_smtl', 'ustl_buy_amt')],
+        ];
+        for (const [key, value] of optionalFields) {
+          if (value !== undefined) {
+            (balance as unknown as Record<string, number>)[key] = value;
+          }
+        }
+        cashBalances.set(item.crcy_cd, balance);
       }
 
       const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();

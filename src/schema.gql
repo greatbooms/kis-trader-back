@@ -160,6 +160,27 @@ type CashBalanceType {
   currencyName: String
   amount: Float!
   withdrawableAmount: Float
+
+  """주문가능금액"""
+  orderableAmount: Float
+
+  """일반 주문가능금액"""
+  generalOrderableAmount: Float
+
+  """통합 주문가능금액"""
+  integratedOrderableAmount: Float
+
+  """미결제 매수금액"""
+  pendingBuyAmount: Float
+
+  """미결제 매도금액"""
+  pendingSellAmount: Float
+
+  """외화 미수금액"""
+  receivableAmount: Float
+
+  """외화 증거금액"""
+  marginAmount: Float
 }
 
 type AccountSummaryType {

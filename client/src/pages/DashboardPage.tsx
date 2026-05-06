@@ -41,8 +41,18 @@ function getCurrencyCodeByExchange(exchangeCode?: string | null): string {
 function getDisplayCashAmount(balance: {
   amount: number
   withdrawableAmount?: number | null
+  pendingBuyAmount?: number | null
+  pendingSellAmount?: number | null
 }): number {
-  return balance.withdrawableAmount ?? balance.amount
+  return balance.amount + (balance.pendingSellAmount ?? 0) - (balance.pendingBuyAmount ?? 0)
+}
+
+function getOrderableCashAmount(balance: {
+  amount: number
+  orderableAmount?: number | null
+  withdrawableAmount?: number | null
+}): number {
+  return balance.orderableAmount ?? balance.withdrawableAmount ?? balance.amount
 }
 
 function buildCountryCapitalSummary(
@@ -64,11 +74,21 @@ function buildCountryCapitalSummary(
   const totalProfitLoss = countryPositions.reduce((sum, position) => sum + position.profitLoss, 0)
   const currentValue = costBasis + totalProfitLoss
   const cashBalance = countryCashBalances.reduce((sum, balance) => sum + getDisplayCashAmount(balance), 0)
+  const settledCashBalance = countryCashBalances.reduce((sum, balance) => sum + balance.amount, 0)
+  const orderableCashBalance = countryCashBalances.reduce((sum, balance) => sum + getOrderableCashAmount(balance), 0)
+  const withdrawableCashBalance = countryCashBalances.reduce((sum, balance) => sum + (balance.withdrawableAmount ?? balance.amount), 0)
+  const pendingBuyAmount = countryCashBalances.reduce((sum, balance) => sum + (balance.pendingBuyAmount ?? 0), 0)
+  const pendingSellAmount = countryCashBalances.reduce((sum, balance) => sum + (balance.pendingSellAmount ?? 0), 0)
   const totalAssets = currentValue + cashBalance
 
   return {
     currencyCode,
     cashBalance,
+    settledCashBalance,
+    orderableCashBalance,
+    withdrawableCashBalance,
+    pendingBuyAmount,
+    pendingSellAmount,
     currentValue,
     costBasis,
     totalAssets,
@@ -273,11 +293,16 @@ function CapitalSummaryCard({ loading, countryLabel, summary }: CapitalSummaryCa
         <CardDescription>{countryLabel} 시장 기준 통화별 자금 요약입니다</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="rounded-lg border border-border/50 p-4">
-            <p className="text-xs text-muted-foreground">예수금</p>
+            <p className="text-xs text-muted-foreground">현금성 자산</p>
             <p className="mt-2 text-xl font-bold">{formatCurrencyByCode(summary.cashBalance, summary.currencyCode)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{summary.cashBalanceCount}개 현금 항목</p>
+            <p className="mt-1 text-xs text-muted-foreground">예수금 {formatCurrencyByCode(summary.settledCashBalance, summary.currencyCode)}</p>
+          </div>
+          <div className="rounded-lg border border-border/50 p-4">
+            <p className="text-xs text-muted-foreground">주문가능</p>
+            <p className="mt-2 text-xl font-bold">{formatCurrencyByCode(summary.orderableCashBalance, summary.currencyCode)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">출금가능 {formatCurrencyByCode(summary.withdrawableCashBalance, summary.currencyCode)} / 미결제 매수 {formatCurrencyByCode(summary.pendingBuyAmount, summary.currencyCode)}</p>
           </div>
           <div className="rounded-lg border border-border/50 p-4">
             <p className="text-xs text-muted-foreground">현재 평가금액</p>
@@ -292,6 +317,9 @@ function CapitalSummaryCard({ loading, countryLabel, summary }: CapitalSummaryCa
             <p className="text-xs text-muted-foreground">평가 손익</p>
             <p className={`mt-2 text-xl font-bold ${summary.totalProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}>
               {formatCurrencyByCode(summary.totalProfitLoss, summary.currencyCode)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              미결제 매도 {formatCurrencyByCode(summary.pendingSellAmount, summary.currencyCode)}
             </p>
           </div>
         </div>

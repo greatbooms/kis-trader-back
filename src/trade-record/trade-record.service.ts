@@ -228,6 +228,7 @@ export class TradeRecordService {
         currencyName: '원화',
         amount: domesticCash.cashAvailable,
         withdrawableAmount: domesticCash.cashAvailable,
+        orderableAmount: domesticCash.cashAvailable,
       });
       hasSuccess = true;
     } catch (e) {
@@ -246,6 +247,13 @@ export class TradeRecordService {
           currencyName: item.currencyName,
           amount: item.amount,
           withdrawableAmount: item.withdrawableAmount,
+          orderableAmount: item.orderableAmount,
+          generalOrderableAmount: item.generalOrderableAmount,
+          integratedOrderableAmount: item.integratedOrderableAmount,
+          pendingBuyAmount: item.pendingBuyAmount,
+          pendingSellAmount: item.pendingSellAmount,
+          receivableAmount: item.receivableAmount,
+          marginAmount: item.marginAmount,
         })),
       );
       hasSuccess = true;
@@ -262,6 +270,13 @@ export class TradeRecordService {
           currencyName: item.currencyName ?? null,
           amount: item.amount,
           withdrawableAmount: item.withdrawableAmount ?? null,
+          orderableAmount: item.orderableAmount ?? null,
+          generalOrderableAmount: item.generalOrderableAmount ?? null,
+          integratedOrderableAmount: item.integratedOrderableAmount ?? null,
+          pendingBuyAmount: item.pendingBuyAmount ?? null,
+          pendingSellAmount: item.pendingSellAmount ?? null,
+          receivableAmount: item.receivableAmount ?? null,
+          marginAmount: item.marginAmount ?? null,
         })),
         lastSyncedAt: new Date().toISOString(),
       } as Prisma.InputJsonValue;

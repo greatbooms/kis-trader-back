@@ -192,6 +192,13 @@ query GetAccountSummary {
       currencyName
       amount
       withdrawableAmount
+      orderableAmount
+      generalOrderableAmount
+      integratedOrderableAmount
+      pendingBuyAmount
+      pendingSellAmount
+      receivableAmount
+      marginAmount
     }
   }
 }
@@ -240,6 +247,13 @@ mutation RefreshAccountState {
         currencyName
         amount
         withdrawableAmount
+        orderableAmount
+        generalOrderableAmount
+        integratedOrderableAmount
+        pendingBuyAmount
+        pendingSellAmount
+        receivableAmount
+        marginAmount
       }
     }
   }

@@ -140,6 +140,38 @@ export interface OverseasPresentBalanceCurrencyItem {
   crcy_cd_name: string;
   frcr_dncl_amt_2: string;
   frcr_drwg_psbl_amt_1: string;
+  frcr_use_psbl_amt?: string;
+  ustl_sll_amt_smtl?: string;
+  ustl_buy_amt_smtl?: string;
+}
+
+/** 해외증거금 통화별조회 응답 항목 */
+export interface OverseasForeignMarginItem {
+  natn_name?: string;
+  crcy_cd: string;
+  frcr_dncl_amt1: string;
+  ustl_buy_amt: string;
+  ustl_sll_amt: string;
+  frcr_rcvb_amt?: string;
+  frcr_mgn_amt?: string;
+  frcr_gnrl_ord_psbl_amt?: string;
+  frcr_ord_psbl_amt1: string;
+  itgr_ord_psbl_amt?: string;
+}
+
+/** 해외 통화별 현금/증거금 요약 */
+export interface OverseasCashBalance {
+  currencyCode: string;
+  currencyName?: string;
+  amount: number;
+  withdrawableAmount?: number;
+  orderableAmount?: number;
+  generalOrderableAmount?: number;
+  integratedOrderableAmount?: number;
+  pendingBuyAmount?: number;
+  pendingSellAmount?: number;
+  receivableAmount?: number;
+  marginAmount?: number;
 }
 
 /** 통합 시세 결과 */
