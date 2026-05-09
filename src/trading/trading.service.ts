@@ -344,10 +344,55 @@ export class TradingService {
           },
         );
 
+        const { executableSignals, blockedBuySignals } = this.preventSameCycleOppositeOrders(signals);
+        if (blockedBuySignals.length > 0) {
+          this.logger.warn(
+            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) because SELL signal exists in the same cycle`,
+          );
+          if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
+            quotaCarryEligibleIds.add(ctx.watchStock.id);
+          }
+          await this.logWatchStockExecution(
+            ctx,
+            WatchStockExecutionEventType.SKIPPED,
+            '동일 사이클 반대 주문 방지: 매도 신호 우선, 매수 스킵',
+            {
+              skipReason: 'SAME_CYCLE_OPPOSITE_ORDER_PREVENTION',
+              selfTradePrevention: true,
+              actionTaken: 'SELL_SUBMITTED_BUY_SKIPPED',
+              carryQueued: ['infinite-buy', 'daily-dca'].includes(strategy.name),
+              strategyName: strategy.name,
+              stockCode: ctx.watchStock.stockCode,
+              exchangeCode: ctx.watchStock.exchangeCode,
+              currentPrice: ctx.price.currentPrice,
+              buyableAmount: ctx.buyableAmount,
+              positionQuantity: ctx.position?.quantity ?? 0,
+              positionAvgPrice: ctx.position?.avgPrice,
+              blockedSignals: blockedBuySignals.map((signal) => ({
+                side: signal.side,
+                quantity: signal.quantity,
+                price: signal.price,
+                reason: signal.reason,
+                orderDivision: signal.orderDivision,
+                metadata: signal.metadata,
+              })),
+              executableSignals: executableSignals.map((signal) => ({
+                side: signal.side,
+                quantity: signal.quantity,
+                price: signal.price,
+                reason: signal.reason,
+                orderDivision: signal.orderDivision,
+                metadata: signal.metadata,
+              })),
+              diagnostics: this.buildExecutionDiagnostics(ctx, details),
+            },
+          );
+        }
+
         // 각 시그널 제출 결과를 추적 — 이월금 리셋/복구 판단에 사용
         const buySubmissionOutcomes: boolean[] = [];
         let hadBuySignal = false;
-        for (const signal of signals) {
+        for (const signal of executableSignals) {
           const submitted = await this.executeSignal(signal, strategy.name, ctx, details);
           if (signal.side === 'BUY') {
             hadBuySignal = true;
@@ -404,6 +449,26 @@ export class TradingService {
   /** 손절 시그널 여부 판별 */
   private isStopLossSignal(signal: TradingSignal): boolean {
     return signal.side === 'SELL' && (signal.reason?.toLowerCase().includes('stop loss') ?? false);
+  }
+
+  private preventSameCycleOppositeOrders(signals: TradingSignal[]): {
+    executableSignals: TradingSignal[];
+    blockedBuySignals: TradingSignal[];
+  } {
+    const hasSellSignal = signals.some((signal) => signal.side === 'SELL');
+    if (!hasSellSignal) {
+      return { executableSignals: signals, blockedBuySignals: [] };
+    }
+
+    const blockedBuySignals = signals.filter((signal) => signal.side === 'BUY');
+    if (blockedBuySignals.length === 0) {
+      return { executableSignals: signals, blockedBuySignals };
+    }
+
+    return {
+      executableSignals: signals.filter((signal) => signal.side !== 'BUY'),
+      blockedBuySignals,
+    };
   }
 
   /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */

@@ -832,7 +832,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `:track_next: *전략 스킵 | ${exchange}:${ctx.stockCode}*`,
+          text: `:warning: *전략 스킵 | ${exchange}:${ctx.stockCode}*`,
         },
       },
       { type: 'divider' },

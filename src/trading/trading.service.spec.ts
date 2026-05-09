@@ -304,6 +304,123 @@ describe('TradingService', () => {
       });
     });
 
+    it('should skip BUY submission and carry quota when BUY and SELL signals exist in the same cycle', async () => {
+      const buySignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 1,
+        price: 70.6,
+        reason: 'Buy1',
+        orderDivision: '00',
+      };
+      const sellSignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 4,
+        price: 70.6,
+        reason: 'Take profit 1',
+        orderDivision: '00',
+      };
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [buySignal, sellSignal],
+          skipReasons: [],
+          details: {},
+        }),
+      };
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: {},
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 1.6,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          position: {
+            stockCode: 'TQQQ',
+            quantity: 8,
+            avgPrice: 60,
+            currentPrice: 70.6,
+            totalInvested: 480,
+          },
+          price: { currentPrice: 70.6 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 4884.92,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(executeSignalSpy).toHaveBeenCalledTimes(1);
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'SELL', quantity: 4 }),
+        'infinite-buy',
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(executeSignalSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'BUY' }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SKIPPED',
+          message: '동일 사이클 반대 주문 방지: 매도 신호 우선, 매수 스킵',
+          details: expect.objectContaining({
+            skipReason: 'SAME_CYCLE_OPPOSITE_ORDER_PREVENTION',
+            selfTradePrevention: true,
+            actionTaken: 'SELL_SUBMITTED_BUY_SKIPPED',
+            carryQueued: true,
+            strategyName: 'infinite-buy',
+            stockCode: 'TQQQ',
+            exchangeCode: 'NASD',
+            currentPrice: 70.6,
+            buyableAmount: 4884.92,
+            positionQuantity: 8,
+            positionAvgPrice: 60,
+            blockedSignals: [expect.objectContaining({ side: 'BUY', quantity: 1 })],
+            executableSignals: [expect.objectContaining({ side: 'SELL', quantity: 4 })],
+            diagnostics: expect.objectContaining({
+              buyableAmount: 4884.92,
+            }),
+          }),
+        }),
+      });
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith({
+        where: { id: 'ws-1' },
+        data: {
+          strategyParams: expect.objectContaining({
+            accumulatedQuota: 250,
+          }),
+        },
+      });
+    });
+
     it('accumulates quota when all BUY signal submissions fail (orders rejected)', async () => {
       // Given: 전략이 BUY 시그널을 생성했지만 executeSignal 이 모두 실패한 시나리오
       // Expected: accumulatedQuota 가 perCycleQuota (10000/40 = 250) 만큼 증가
