@@ -590,7 +590,10 @@ describe('InfiniteBuyStrategy', () => {
       expect(takeProfit!.metadata?.sameDaySecondaryEligible).toBe(true);
     });
 
-    it('should not place first take-profit below current price', async () => {
+    it('should adjust first take-profit to one tick below current price when target is below current (self-trade prevention)', async () => {
+      // target 79450 < current 82000 → SELL을 current 그대로 두면 BUY1(=current)과 가격이 같아져
+      // KIS 자전거래 의심으로 거부됨. current - 1tick(82000원대 호가단위 100원)으로 던져
+      // 매수1호가 영역에서 즉시 매칭되도록 한다.
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -613,11 +616,16 @@ describe('InfiniteBuyStrategy', () => {
 
       const { signals } = await strategy.evaluateStock(ctx);
       const takeProfit = signals.find((s) => s.reason?.includes('Take profit 1'));
+      const buy1 = signals.find((s) => s.reason?.includes('Buy1'));
 
       expect(takeProfit).toBeDefined();
-      expect(takeProfit!.price).toBe(82000);
+      expect(takeProfit!.price).toBe(81900); // 82000 - 100원 호가단위
       expect(takeProfit!.metadata?.targetPrice).toBe(Math.round(70000 * 1.135));
-      expect(takeProfit!.reason).toContain('목표가 79450 상회');
+      expect(takeProfit!.reason).toContain('자전거래 회피');
+      // 자전거래 회피 확인: BUY1 가격과 SELL 가격이 다름
+      if (buy1) {
+        expect(takeProfit!.price).not.toBe(buy1.price);
+      }
     });
 
     it('should use the raised early take-profit target for low T ranges', async () => {
@@ -697,7 +705,7 @@ describe('InfiniteBuyStrategy', () => {
       expect(sells[0].price).toBe(80920);
     });
 
-    it('should not place second take-profit below current price', async () => {
+    it('should adjust second take-profit to one tick below current price when target is below current (self-trade prevention)', async () => {
       const ctx = createContext({
         price: {
           stockCode: '005930',
@@ -731,9 +739,9 @@ describe('InfiniteBuyStrategy', () => {
       expect(sells).toHaveLength(1);
       expect(sells[0].reason).toContain('Take profit 2');
       expect(sells[0].quantity).toBe(10);
-      expect(sells[0].price).toBe(82000);
+      expect(sells[0].price).toBe(81900); // 82000 - 100원 호가단위
       expect(sells[0].metadata?.targetPrice).toBe(80920);
-      expect(sells[0].reason).toContain('목표가 80920 상회');
+      expect(sells[0].reason).toContain('자전거래 회피');
     });
 
     it('should resume normal mode after second target attempt day passes', async () => {
@@ -1079,6 +1087,89 @@ describe('InfiniteBuyStrategy', () => {
       if (buySignal && buySignal.price) {
         expect(Number.isInteger(buySignal.price)).toBe(true);
       }
+    });
+  });
+
+  describe('take-profit price vs current price (self-trade prevention)', () => {
+    // 사용자가 우려한 강세 추세 시나리오를 명시적으로 검증한다.
+    // BUY1은 항상 현재가에 걸리므로 SELL 가격이 현재가와 같으면 KIS가
+    // 자전거래 의심으로 거부한다. takeProfitOrderPrice가 그 충돌을 회피해야 한다.
+    it('overseas: target above current → SELL keeps target price', async () => {
+      const ctx = createContext();
+      ctx.watchStock.market = 'OVERSEAS';
+      ctx.watchStock.exchangeCode = 'NASD';
+      ctx.price.currentPrice = 76.03;
+      ctx.position = {
+        stockCode: '005930',
+        quantity: 2,
+        avgPrice: 65.72, // target = 65.72 * 1.17 ≈ 76.89 > current
+        currentPrice: 76.03,
+        totalInvested: 131.44,
+      };
+      ctx.totalPortfolioValue = 10000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const sell = signals.find((s) => s.side === 'SELL');
+      const buy1 = signals.find((s) => s.reason?.includes('Buy1'));
+
+      expect(sell).toBeDefined();
+      // target ≈ 76.89, current 76.03, tick 0.01 → 76.89 >= 76.04 이므로 target 그대로
+      expect(sell!.price).toBe(76.89);
+      // BUY1과 가격 분리 확인
+      expect(sell!.price).not.toBe(buy1?.price);
+    });
+
+    it('overseas: target equal to current → SELL drops one tick to avoid collision', async () => {
+      const ctx = createContext();
+      ctx.watchStock.market = 'OVERSEAS';
+      ctx.watchStock.exchangeCode = 'NASD';
+      ctx.price.currentPrice = 76.89;
+      ctx.position = {
+        stockCode: '005930',
+        quantity: 2,
+        avgPrice: 65.72, // target ≈ 76.89 == current
+        currentPrice: 76.89,
+        totalInvested: 131.44,
+      };
+      ctx.totalPortfolioValue = 10000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const sell = signals.find((s) => s.side === 'SELL');
+      const buy1 = signals.find((s) => s.reason?.includes('Buy1'));
+
+      expect(sell).toBeDefined();
+      // target == current → current - 1 tick = 76.88
+      expect(sell!.price).toBe(76.88);
+      // BUY1 = current = 76.89, SELL = 76.88 → 가격 분리
+      expect(sell!.price).not.toBe(buy1?.price);
+    });
+
+    it('overseas: target far below current (strong uptrend) → SELL drops one tick below current', async () => {
+      // 5-11 TQQQ 같은 시나리오: 가격이 목표가를 넘어 급등한 강세 추세.
+      // 기존 max(target, current) 로직은 SELL=current로 끌어올려 BUY1과 충돌시켰음.
+      const ctx = createContext();
+      ctx.watchStock.market = 'OVERSEAS';
+      ctx.watchStock.exchangeCode = 'NASD';
+      ctx.price.currentPrice = 80;
+      ctx.position = {
+        stockCode: '005930',
+        quantity: 4,
+        avgPrice: 60, // target = 60 * 1.17 = 70.2 < current 80
+        currentPrice: 80,
+        totalInvested: 240,
+      };
+      ctx.totalPortfolioValue = 10000;
+
+      const { signals } = await strategy.evaluateStock(ctx);
+      const sell = signals.find((s) => s.side === 'SELL');
+      const buy1 = signals.find((s) => s.reason?.includes('Buy1'));
+
+      expect(sell).toBeDefined();
+      // target 70.2 < current 80, tick 0.01 → SELL = 80 - 0.01 = 79.99
+      expect(sell!.price).toBe(79.99);
+      // BUY1 = 80, SELL = 79.99 → 자전거래 회피
+      expect(sell!.price).not.toBe(buy1?.price);
+      expect(sell!.reason).toContain('자전거래 회피');
     });
   });
 

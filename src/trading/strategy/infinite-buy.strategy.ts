@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { lookupTargetProfitRate, lookupSecondaryBonusRate } from './infinite-buy-target-table';
 import { applyAccumulatedQuota } from './infinite-buy-quota.util';
+import { tickSize } from '../../common/utils/tick-size.util';
 
 const MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT = 0.20;
 
@@ -306,12 +307,26 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
       : (p: number) => Math.round(p);              // 정수
-    const takeProfitOrderPrice = (targetPrice: number) => Math.max(
-      roundPrice(targetPrice),
-      roundPrice(curPrice),
-    );
-    const takeProfitPriceNote = (orderPrice: number, targetPrice: number) =>
-      orderPrice > targetPrice ? ` (목표가 ${targetPrice} 상회)` : '';
+    // 익절 매도 주문 가격 결정:
+    // - target이 현재가 1틱 이상 위 → target 그대로 (호가창 위쪽 등록, 정상)
+    // - target이 현재가 이하 → 즉시 청산 의도. 단 BUY1(=현재가)과 가격이 같으면
+    //   KIS 자전거래 의심으로 거부되므로 현재가 -1틱(매수1호가 영역)으로 던져
+    //   즉시 매칭 체결 + BUY1과 가격 분리. 슬리피지는 1틱(해외 0.01 = ~0.013%).
+    const takeProfitOrderPrice = (targetPrice: number) => {
+      const targetRounded = roundPrice(targetPrice);
+      const currentRounded = roundPrice(curPrice);
+      const tick = tickSize(isOverseas, currentRounded);
+      if (targetRounded >= currentRounded + tick) return targetRounded;
+      return roundPrice(currentRounded - tick);
+    };
+    const takeProfitPriceNote = (orderPrice: number, targetPrice: number) => {
+      const currentRounded = roundPrice(curPrice);
+      const tick = tickSize(isOverseas, currentRounded);
+      // 정상: target이 현재가 +1틱 이상 위 → orderPrice = target → 표기 없음
+      if (targetPrice >= currentRounded + tick) return '';
+      // 강세 도달: target이 현재가 이하 → orderPrice = current - tick (즉시 청산 + 자전거래 회피)
+      return ` (목표가 ${targetPrice} ≤ 현재가 → ${orderPrice} 즉시 청산, 자전거래 회피)`;
+    };
 
     // P6: MDD 발동 시에도 종목 손실률이 임계값 이상인 경우만 청산.
     // 수익 종목 / 소폭 손실 종목은 유지하여 건강한 종목이 함께 휩쓸리지 않도록 한다.
