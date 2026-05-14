@@ -304,7 +304,7 @@ describe('TradingService', () => {
       });
     });
 
-    it('should skip BUY submission and carry quota when BUY and SELL signals exist in the same cycle', async () => {
+    it('should skip BUY submission and carry quota when BUY and SELL signals share the same price', async () => {
       const buySignal = {
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
@@ -390,9 +390,9 @@ describe('TradingService', () => {
       expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           eventType: 'SKIPPED',
-          message: '동일 사이클 반대 주문 방지: 매도 신호 우선, 매수 스킵',
+          message: '자전거래 방지: 매수가가 매도가와 동일하여 해당 매수 스킵',
           details: expect.objectContaining({
-            skipReason: 'SAME_CYCLE_OPPOSITE_ORDER_PREVENTION',
+            skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
             selfTradePrevention: true,
             actionTaken: 'SELL_SUBMITTED_BUY_SKIPPED',
             carryQueued: true,
@@ -418,6 +418,115 @@ describe('TradingService', () => {
             accumulatedQuota: 250,
           }),
         },
+      });
+    });
+
+    it('submits BUY and SELL when their prices differ in the same cycle', async () => {
+      const buy1 = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 76.03,
+        reason: 'Buy1',
+        orderDivision: '00',
+      };
+      const buy2 = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 1,
+        price: 73.18,
+        reason: 'Buy2',
+        orderDivision: '00',
+      };
+      const sell = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 1,
+        price: 76.89,
+        reason: 'Take profit 1',
+        orderDivision: '00',
+      };
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [buy1, buy2, sell],
+          skipReasons: [],
+          details: {},
+        }),
+      };
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: 'TQQQ',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: {},
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-1',
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            stockName: 'TQQQ',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 1.2,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          position: {
+            stockCode: 'TQQQ',
+            quantity: 2,
+            avgPrice: 65.72,
+            currentPrice: 76.03,
+            totalInvested: 131.44,
+          },
+          price: { currentPrice: 76.03 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 4867.14,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(executeSignalSpy).toHaveBeenCalledTimes(3);
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'BUY', price: 76.03 }),
+        'infinite-buy',
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'BUY', price: 73.18 }),
+        'infinite-buy',
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'SELL', price: 76.89 }),
+        'infinite-buy',
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SKIPPED',
+          details: expect.objectContaining({
+            skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
+          }),
+        }),
       });
     });
 

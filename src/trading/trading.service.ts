@@ -345,22 +345,27 @@ export class TradingService {
         );
 
         const { executableSignals, blockedBuySignals } = this.preventSameCycleOppositeOrders(signals);
+        const allBuysBlocked =
+          blockedBuySignals.length > 0
+          && !executableSignals.some((signal) => signal.side === 'BUY');
         if (blockedBuySignals.length > 0) {
           this.logger.warn(
-            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) because SELL signal exists in the same cycle`,
+            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) — price collides with SELL signal in same cycle (self-trade prevention)`,
           );
-          if (['infinite-buy', 'daily-dca'].includes(strategy.name)) {
+          // 전부 차단된 경우에만 quota carry 등록. 다른 가격대 BUY가 살아있으면
+          // 그 시도의 성공/실패에 따라 아래에서 reset/carry가 결정된다.
+          if (allBuysBlocked && ['infinite-buy', 'daily-dca'].includes(strategy.name)) {
             quotaCarryEligibleIds.add(ctx.watchStock.id);
           }
           await this.logWatchStockExecution(
             ctx,
             WatchStockExecutionEventType.SKIPPED,
-            '동일 사이클 반대 주문 방지: 매도 신호 우선, 매수 스킵',
+            '자전거래 방지: 매수가가 매도가와 동일하여 해당 매수 스킵',
             {
-              skipReason: 'SAME_CYCLE_OPPOSITE_ORDER_PREVENTION',
+              skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
               selfTradePrevention: true,
-              actionTaken: 'SELL_SUBMITTED_BUY_SKIPPED',
-              carryQueued: ['infinite-buy', 'daily-dca'].includes(strategy.name),
+              actionTaken: allBuysBlocked ? 'SELL_SUBMITTED_BUY_SKIPPED' : 'PARTIAL_BUY_SKIPPED',
+              carryQueued: allBuysBlocked && ['infinite-buy', 'daily-dca'].includes(strategy.name),
               strategyName: strategy.name,
               stockCode: ctx.watchStock.stockCode,
               exchangeCode: ctx.watchStock.exchangeCode,
@@ -451,24 +456,39 @@ export class TradingService {
     return signal.side === 'SELL' && (signal.reason?.toLowerCase().includes('stop loss') ?? false);
   }
 
+  /**
+   * 같은 사이클에서 BUY 가격이 SELL 가격과 정확히 일치하면 KIS 자전거래 의심으로
+   * 거부되므로 그 BUY만 차단한다. take-profit 목표가가 현재가보다 낮을 때 시그널이
+   * 현재가로 보정되면서(BUY1과 동일가) 발생하는 충돌이 실제 차단 대상.
+   * 가격이 다른 BUY(예: dip 매수)는 자전거래 위험이 없으므로 통과시킨다.
+   */
   private preventSameCycleOppositeOrders(signals: TradingSignal[]): {
     executableSignals: TradingSignal[];
     blockedBuySignals: TradingSignal[];
   } {
-    const hasSellSignal = signals.some((signal) => signal.side === 'SELL');
-    if (!hasSellSignal) {
+    const sellPrices = new Set(
+      signals
+        .filter((signal) => signal.side === 'SELL' && typeof signal.price === 'number')
+        .map((signal) => signal.price as number),
+    );
+    if (sellPrices.size === 0) {
       return { executableSignals: signals, blockedBuySignals: [] };
     }
 
-    const blockedBuySignals = signals.filter((signal) => signal.side === 'BUY');
-    if (blockedBuySignals.length === 0) {
-      return { executableSignals: signals, blockedBuySignals };
+    const executableSignals: TradingSignal[] = [];
+    const blockedBuySignals: TradingSignal[] = [];
+    for (const signal of signals) {
+      if (
+        signal.side === 'BUY'
+        && typeof signal.price === 'number'
+        && sellPrices.has(signal.price)
+      ) {
+        blockedBuySignals.push(signal);
+      } else {
+        executableSignals.push(signal);
+      }
     }
-
-    return {
-      executableSignals: signals.filter((signal) => signal.side !== 'BUY'),
-      blockedBuySignals,
-    };
+    return { executableSignals, blockedBuySignals };
   }
 
   /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
