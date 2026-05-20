@@ -1191,7 +1191,10 @@ export class KisOverseasService {
 
   private toLocalCurrencyPrice(rawPrice: string, exchangeRate: number, unitAmount: number): number {
     const parsedPrice = parseFloat(rawPrice) || 0;
-    if (parsedPrice <= 0 || exchangeRate <= 0) return parsedPrice;
+    // 0 또는 환율 미지정이면 변환 불가 — 그대로 반환.
+    // 음수(평가손익 등)도 환율 변환되어야 한다. 이전 `<= 0` 가드는 음수 손익을
+    // KRW 값 그대로 흘려보내 슬랙 알림이 "$-20,374" 같은 단위 오류를 일으켰음.
+    if (parsedPrice === 0 || exchangeRate <= 0) return parsedPrice;
     const currencyUnit = unitAmount > 0 ? unitAmount : 1;
     return (parsedPrice / exchangeRate) * currencyUnit;
   }

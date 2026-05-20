@@ -381,6 +381,69 @@ describe('KisOverseasService', () => {
     ]);
   });
 
+  it('should convert negative KRW-based profit/loss to local currency (regression for $-20,374 slack alert)', async () => {
+    // 회귀 테스트: present-balance 응답에 frcr_evlu_pfls_amt가 없고 evlu_pfls_amt2(KRW)만 있는 경우,
+    // 이전엔 `parsedPrice <= 0` 가드 때문에 음수 값이 환율 변환 없이 KRW 그대로 흘러
+    // 슬랙 알림에 "$-20,374" 같이 단위 오류로 표시됐다. 음수도 정상적으로 USD 환산되어야 한다.
+    const service = new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+    );
+
+    mockKisBase.get
+      .mockResolvedValueOnce({
+        output1: [
+          {
+            prdt_name: 'PROSHARES QQQ 3X',
+            cblc_qty13: '0.00000000',
+            ccld_qty_smtl1: '7.00000000',
+            ord_psbl_qty1: '7.00000000',
+            evlu_pfls_amt2: '-20374.00000', // KRW 평가손익 (음수)
+            evlu_pfls_rt1: '-2.57000000',
+            pdno: 'TQQQ',
+            bass_exrt: '1500.00000000',
+            buy_crcy_cd: 'USD',
+            ovrs_now_pric1: '109965.00000', // KRW 환산 현재가 → 73.31 USD
+            avg_unpr3: '112875.00000', // KRW 환산 평단 → 75.25 USD
+            tr_mket_name: '나스닥',
+            natn_kor_name: '미국',
+            unit_amt: '1',
+            ovrs_excg_cd: 'NASD',
+          },
+        ],
+        output2: [
+          {
+            crcy_cd: 'USD',
+            crcy_cd_name: '미국 달러',
+            frcr_dncl_amt_2: '500.000000',
+            frcr_drwg_psbl_amt_1: '500.000000',
+          },
+        ],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      })
+      .mockResolvedValueOnce({
+        output: [
+          {
+            crcy_cd: 'USD',
+            frcr_dncl_amt1: '500.000000',
+            ustl_buy_amt: '0.000000',
+            ustl_sll_amt: '0.000000',
+            frcr_ord_psbl_amt1: '500.000000',
+          },
+        ],
+      });
+
+    const snapshot = await service.getAccountSnapshot();
+
+    expect(snapshot.balance).toHaveLength(1);
+    expect(snapshot.balance[0]?.avgPrice).toBeCloseTo(75.25, 2);
+    expect(snapshot.balance[0]?.currentPrice).toBeCloseTo(73.31, 2);
+    // -20374 KRW / 1500 환율 ≈ -13.58 USD
+    expect(snapshot.balance[0]?.profitLoss).toBeCloseTo(-13.58, 2);
+    expect(snapshot.balance[0]?.profitRate).toBe(-2.57);
+  });
+
   it('should use dedicated overseas cancel TR ID and zero unit price when cancelling', async () => {
     const service = new KisOverseasService(
       mockKisBase as unknown as KisBaseService,
