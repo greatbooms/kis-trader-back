@@ -112,6 +112,7 @@ export class TradingOrchestrator {
 
       for (const [exchangeCode, stocks] of byExchange) {
         if (!this.marketStateSync.isMarketOpen(exchangeCode)) continue;
+        if (await this.marketStateSync.isExchangeHoliday(exchangeCode)) continue;
         await this.executeMarket('OVERSEAS', exchangeCode, stocks);
       }
     } catch (e) {
@@ -187,8 +188,7 @@ export class TradingOrchestrator {
       return { success: false, message: '현재 시장이 열려 있지 않아 수동 실행할 수 없습니다.' };
     }
 
-    const market = watchStock.market as 'DOMESTIC' | 'OVERSEAS';
-    if (watchStock.exchangeCode === 'KRX' && await this.marketStateSync.isExchangeHoliday(watchStock.exchangeCode)) {
+    if (await this.marketStateSync.isExchangeHoliday(watchStock.exchangeCode)) {
       return { success: false, message: '현재 휴장일이라 수동 실행할 수 없습니다.' };
     }
 

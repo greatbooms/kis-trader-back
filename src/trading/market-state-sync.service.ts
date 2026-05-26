@@ -5,7 +5,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { HolidayItem, UnfilledOrder } from '../kis/types/kis-api.types';
-import { MarketHours, getMarketHours } from '../kis/types/kis-config.types';
+import { EXCHANGE_CODE_MAP, MarketHours, getMarketHours } from '../kis/types/kis-config.types';
 import { PositionQuantitySnapshot } from './types';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
@@ -26,8 +26,9 @@ export class MarketStateSyncService {
   private isDomesticOrderSyncRunning = false;
   private isOverseasOrderSyncRunning = false;
 
-  // 휴장일 캐시 (국내, 일 1회)
-  private holidayCache: { date: string; domestic: HolidayItem[] } | null = null;
+  // 휴장일 캐시 (시장별, 일 1회)
+  private domesticHolidayCache: { date: string; holidays: HolidayItem[] } | null = null;
+  private overseasHolidayCache: { date: string; holidays: HolidayItem[] } | null = null;
 
   constructor(
     private positionSyncService: TradingPositionSyncService,
@@ -219,29 +220,42 @@ export class MarketStateSyncService {
 
   // ========== 휴장일 / 시장 오픈 판단 ==========
 
-  async isHoliday(marketType: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
+  async isHoliday(marketType: 'DOMESTIC' | 'OVERSEAS', exchangeCode?: string): Promise<boolean> {
     const now = new Date();
-    const day = now.getDay();
-    if (day === 0 || day === 6) return true;
 
+    if (marketType === 'DOMESTIC') {
+      if (this.isExchangeWeekend('KRX', now)) return true;
+      if (this.isPaper) return false;
+
+      const todayStr = this.getExchangeDateString('KRX', now);
+      await this.ensureDomesticHolidayCache(todayStr);
+
+      if (!this.domesticHolidayCache) return false;
+
+      const holiday = this.domesticHolidayCache.holidays.find((h) => h.date === todayStr);
+      return holiday ? !holiday.isOpen : false;
+    }
+
+    if (!exchangeCode) return false;
+    if (this.isExchangeWeekend(exchangeCode, now)) return true;
     if (this.isPaper) return false;
 
-    if (marketType !== 'DOMESTIC') return false;
+    const tradeDate = this.getExchangeDateString(exchangeCode, now);
+    await this.ensureOverseasHolidayCache(tradeDate);
 
-    const todayStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    await this.ensureHolidayCache(todayStr);
+    if (!this.overseasHolidayCache) return false;
 
-    if (!this.holidayCache) return false;
-
-    const holiday = this.holidayCache.domestic.find((h) => h.date === todayStr);
+    const holiday = this.overseasHolidayCache.holidays.find((h) =>
+      h.date === tradeDate && this.matchesExchangeHoliday(h, exchangeCode),
+    );
     return holiday ? !holiday.isOpen : false;
   }
 
   async isExchangeHoliday(exchangeCode: string): Promise<boolean> {
     if (exchangeCode === 'KRX') {
-      return this.isHoliday('DOMESTIC');
+      return this.isHoliday('DOMESTIC', exchangeCode);
     }
-    return false;
+    return this.isHoliday('OVERSEAS', exchangeCode);
   }
 
   isMarketOpen(exchangeCode: string): boolean {
@@ -268,14 +282,110 @@ export class MarketStateSyncService {
 
   // ========== 내부 헬퍼 ==========
 
-  private async ensureHolidayCache(todayStr: string): Promise<void> {
-    if (this.holidayCache?.date === todayStr) return;
+  private async ensureDomesticHolidayCache(todayStr: string): Promise<void> {
+    if (this.domesticHolidayCache?.date === todayStr) return;
 
     try {
-      const domestic = await this.kisDomestic.getHolidays(todayStr);
-      this.holidayCache = { date: todayStr, domestic };
+      const holidays = await this.kisDomestic.getHolidays(todayStr);
+      this.domesticHolidayCache = { date: todayStr, holidays };
     } catch (e) {
-      this.logger.warn(`Failed to fetch holidays: ${e.message}`);
+      this.logger.warn(`Failed to fetch domestic holidays: ${e.message}`);
+    }
+  }
+
+  private async ensureOverseasHolidayCache(tradeDate: string): Promise<void> {
+    if (this.overseasHolidayCache?.date === tradeDate) return;
+
+    try {
+      const holidays = await this.kisOverseas.getOverseasHolidays(tradeDate);
+      this.overseasHolidayCache = { date: tradeDate, holidays };
+    } catch (e) {
+      this.logger.warn(`Failed to fetch overseas holidays: ${e.message}`);
+    }
+  }
+
+  private getExchangeDateString(exchangeCode: string, date: Date): string {
+    const timeZone = this.getExchangeTimeZone(exchangeCode);
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    return `${year}${month}${day}`;
+  }
+
+  private getExchangeTimeZone(exchangeCode: string): string {
+    switch (exchangeCode) {
+      case 'NASD':
+      case 'NYSE':
+      case 'AMEX':
+        return 'America/New_York';
+      case 'SEHK':
+        return 'Asia/Hong_Kong';
+      case 'SHAA':
+      case 'SZAA':
+        return 'Asia/Shanghai';
+      case 'TKSE':
+        return 'Asia/Tokyo';
+      case 'HASE':
+      case 'VNSE':
+        return 'Asia/Ho_Chi_Minh';
+      case 'KRX':
+      default:
+        return 'Asia/Seoul';
+    }
+  }
+
+  private isExchangeWeekend(exchangeCode: string, date: Date): boolean {
+    const weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: this.getExchangeTimeZone(exchangeCode),
+      weekday: 'short',
+    }).format(date);
+    return weekday === 'Sat' || weekday === 'Sun';
+  }
+
+  private matchesExchangeHoliday(holiday: HolidayItem, exchangeCode: string): boolean {
+    const holidayExchangeCode = this.normalizeExchangeCode(holiday.exchangeCode);
+    if (holidayExchangeCode) {
+      return holidayExchangeCode === exchangeCode;
+    }
+
+    const countryCodes = this.getExchangeCountryCodes(exchangeCode);
+    const holidayCountryCode = holiday.countryCode?.toUpperCase();
+    return !!holidayCountryCode && countryCodes.includes(holidayCountryCode);
+  }
+
+  private normalizeExchangeCode(exchangeCode?: string): string | undefined {
+    const normalized = exchangeCode?.trim().toUpperCase();
+    if (!normalized) return undefined;
+    if (EXCHANGE_CODE_MAP[normalized]) return normalized;
+
+    return Object.entries(EXCHANGE_CODE_MAP).find(([, kisCode]) => kisCode === normalized)?.[0] ?? normalized;
+  }
+
+  private getExchangeCountryCodes(exchangeCode: string): string[] {
+    switch (exchangeCode) {
+      case 'NASD':
+      case 'NYSE':
+      case 'AMEX':
+        return ['US', 'USA'];
+      case 'SEHK':
+        return ['HK', 'HKG'];
+      case 'SHAA':
+      case 'SZAA':
+        return ['CN', 'CHN'];
+      case 'TKSE':
+        return ['JP', 'JPN'];
+      case 'HASE':
+      case 'VNSE':
+        return ['VN', 'VNM'];
+      default:
+        return [];
     }
   }
 

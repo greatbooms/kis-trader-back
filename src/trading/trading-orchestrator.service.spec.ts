@@ -34,8 +34,8 @@ describe('TradingOrchestrator', () => {
 
   const mockMarketStateSync = {
     isMarketOpen: jest.fn(() => true),
-    isHoliday: jest.fn(() => false),
-    isExchangeHoliday: jest.fn(() => false),
+    isHoliday: jest.fn(() => Promise.resolve(false)),
+    isExchangeHoliday: jest.fn(() => Promise.resolve(false)),
     syncMarketPortfolioOnly: jest.fn(),
     cancelUnfilledOrders: jest.fn(),
     getUnfilledOrders: jest.fn(),
@@ -63,6 +63,7 @@ describe('TradingOrchestrator', () => {
     },
     watchStock: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
       count: jest.fn(),
     },
   };
@@ -91,6 +92,9 @@ describe('TradingOrchestrator', () => {
     mockPrisma.position.findMany.mockResolvedValue([]);
     mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
     mockPrisma.tradeRecord.findFirst.mockResolvedValue(null);
+    mockPrisma.watchStock.findMany.mockResolvedValue([]);
+    mockPrisma.watchStock.findUnique.mockResolvedValue(null);
+    mockMarketStateSync.isExchangeHoliday.mockResolvedValue(false);
     mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70000 });
     mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 1000000 });
     mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 54.6 });
@@ -147,6 +151,50 @@ describe('TradingOrchestrator', () => {
       mockConfigService as any,
       mockMarketDataCache as any,
     );
+  });
+
+  it('should skip overseas exchange execution on exchange holiday', async () => {
+    mockPrisma.watchStock.findMany.mockResolvedValue([
+      {
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        isActive: true,
+      },
+    ]);
+    mockMarketStateSync.isMarketOpen.mockReturnValue(true);
+    mockMarketStateSync.isExchangeHoliday.mockResolvedValue(true);
+
+    await orchestrator.executeOverseas();
+
+    expect(mockMarketStateSync.isExchangeHoliday).toHaveBeenCalledWith('NASD');
+    expect(mockTradingService.executePerStockStrategy).not.toHaveBeenCalled();
+  });
+
+  it('should block manual overseas execution on exchange holiday', async () => {
+    mockPrisma.watchStock.findUnique.mockResolvedValue({
+      id: 'ws-1',
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      stockName: 'TQQQ',
+      strategyName: 'infinite-buy',
+      isActive: true,
+    });
+    mockMarketStateSync.isMarketOpen.mockReturnValue(true);
+    mockMarketStateSync.isExchangeHoliday.mockResolvedValue(true);
+
+    const result = await orchestrator.triggerWatchStockNow('ws-1');
+
+    expect(result).toEqual({
+      success: false,
+      message: '현재 휴장일이라 수동 실행할 수 없습니다.',
+    });
+    expect(mockMarketStateSync.isExchangeHoliday).toHaveBeenCalledWith('NASD');
+    expect(mockPrisma.tradeRecord.findFirst).not.toHaveBeenCalled();
   });
 
   it('should not cancel unfilled orders when only continuous strategies exist', async () => {
