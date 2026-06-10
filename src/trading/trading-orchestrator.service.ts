@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Market, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Market, OrderStatus, Prisma, Side, WatchStockExecutionEventType } from '@prisma/client';
 import { TradingService } from './trading.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { MarketRegimeService } from './market-regime.service';
@@ -558,17 +558,28 @@ export class TradingOrchestrator {
       }
     }
 
-    // 오늘 해당 종목+전략으로 이미 체결된 매매가 있는지 확인
+    // 오늘 해당 종목+전략의 매매 기록 — 체결(FILLED/PARTIAL)은 1일 1진입 판정에,
+    // PENDING(제출됨, reconciliation 전)은 미체결 가드에 반영한다.
+    // 시장가 주문은 제출~체결확정 사이에 broker 미체결 목록에서 이미 빠져 있을 수 있어
+    // broker 목록만 믿으면 그 공백(수 초~수십 초)에 중복 주문이 나갈 수 있다.
     const todayStart = new Date(today + 'T00:00:00');
     const todayEnd = new Date(today + 'T23:59:59');
-    const existingTrade = await this.prisma.tradeRecord.findFirst({
+    const todayTrades = await this.prisma.tradeRecord.findMany({
       where: {
         stockCode: ws.stockCode,
         strategyName,
-        status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL] },
+        status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL, OrderStatus.PENDING] },
         createdAt: { gte: todayStart, lte: todayEnd },
       },
+      select: { status: true, side: true },
     });
+    const executedToday = todayTrades.some((t) => t.status !== OrderStatus.PENDING);
+    const hasPendingBuyRecord = todayTrades.some(
+      (t) => t.status === OrderStatus.PENDING && t.side === Side.BUY,
+    );
+    const hasPendingSellRecord = todayTrades.some(
+      (t) => t.status === OrderStatus.PENDING && t.side === Side.SELL,
+    );
 
     const watchStockConfig: WatchStockConfig = {
       id: ws.id,
@@ -670,7 +681,7 @@ export class TradingOrchestrator {
         currentPrice: Number(pos.currentPrice),
         totalInvested: Number(pos.totalInvested),
       } : undefined,
-      alreadyExecutedToday: !!existingTrade,
+      alreadyExecutedToday: executedToday,
       marketCondition,
       stockIndicators,
       fundamentals,
@@ -679,8 +690,8 @@ export class TradingOrchestrator {
       totalPortfolioValue,
       marketRegime,
       riskState,
-      hasOpenBuyOrder: stockOpenOrders.some((order) => order.side === 'BUY'),
-      hasOpenSellOrder: stockOpenOrders.some((order) => order.side === 'SELL'),
+      hasOpenBuyOrder: stockOpenOrders.some((order) => order.side === 'BUY') || hasPendingBuyRecord,
+      hasOpenSellOrder: stockOpenOrders.some((order) => order.side === 'SELL') || hasPendingSellRecord,
     };
   }
 

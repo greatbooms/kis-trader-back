@@ -1156,6 +1156,53 @@ describe('TradingService', () => {
       expect(updated.halfTakeProfitDone).toBeUndefined();
     });
 
+    it('BUY 체결 시 filledAt(주문 시각) 날짜로 entryDate 기록 — reconciliation 지연 무관', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: '005930',
+        strategyParams: {},
+      });
+
+      await service.handleStrategySignalFill(
+        'momentum-breakout',
+        'ws-1',
+        {
+          ...baseSignal,
+          side: 'BUY',
+          reason: '변동성돌파: 돌파가 71000',
+          metadata: { phase: 'vb-entry', breakoutPrice: 71000 },
+        },
+        13,
+        new Date('2026-06-09T14:50:00+09:00'), // 어제 장중 주문 — reconciliation이 자정을 넘겨도
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toBe('2026-06-09');
+    });
+
+    it('BUY 체결 시 metadata.entryDayHigh를 기록 (트레일링 "진입 후 고가" 기준)', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: '005930',
+        strategyParams: {},
+      });
+
+      await service.handleStrategySignalFill(
+        'momentum-breakout',
+        'ws-1',
+        {
+          ...baseSignal,
+          side: 'BUY',
+          reason: '변동성돌파: 돌파가 71000',
+          metadata: { phase: 'vb-entry', breakoutPrice: 71000, entryDayHigh: 71600 },
+        },
+        13,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDayHigh).toBe(71600);
+    });
+
     it.each([
       'carryover-exit',
       'intraday-stop',
@@ -1163,11 +1210,11 @@ describe('TradingService', () => {
       'take-profit',
       'eod-exit',
       'risk-liquidation',
-    ])('SELL(%s) 체결 시 entryDate 제거', async (phase) => {
+    ])('SELL(%s) 체결 시 entryDate/entryDayHigh 제거', async (phase) => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: 'ws-1',
         stockCode: '005930',
-        strategyParams: { entryDate: '2026-06-10', kValue: 0.6 },
+        strategyParams: { entryDate: '2026-06-10', entryDayHigh: 71600, kValue: 0.6 },
       });
 
       await service.handleStrategySignalFill(
@@ -1180,6 +1227,7 @@ describe('TradingService', () => {
       expect(mockPrisma.watchStock.update).toHaveBeenCalledTimes(1);
       const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
       expect(updated.entryDate).toBeUndefined();
+      expect(updated.entryDayHigh).toBeUndefined();
       expect(updated.kValue).toBe(0.6);
     });
 

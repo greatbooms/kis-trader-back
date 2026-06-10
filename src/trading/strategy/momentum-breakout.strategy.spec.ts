@@ -510,15 +510,41 @@ describe('MomentumBreakoutStrategy (당일청산 변동성 돌파)', () => {
       expect(signals).toHaveLength(0);
     });
 
-    it('트레일링: 당일 고가 대비 -2% → 전량 매도', async () => {
+    it('트레일링: 진입 후 고가 대비 -2% → 전량 매도', async () => {
       const ctx = withPosition({}, { currentPrice: 73500 });
       ctx.price.currentPrice = 73500;
       ctx.price.highPrice = 75500; // 75500×0.98 = 73990 > 73500
+      ctx.watchStock.strategyParams = {
+        ...(ctx.watchStock.strategyParams ?? {}),
+        entryDayHigh: 71600, // 진입 시점 고가 < 75500 → 진입 후 형성된 고가로 인정
+      };
       const { signals } = await strategy.evaluateStock(ctx);
 
       expect(signals).toHaveLength(1);
       expect(signals[0].metadata?.phase).toBe('trailing-stop');
       expect(signals[0].reason.toLowerCase()).not.toContain('stop loss');
+    });
+
+    it('트레일링: 진입 전 스파이크(고가 ≤ entryDayHigh)는 기준으로 쓰지 않음', async () => {
+      // 아침 스파이크 75500 후 눌림에서 진입한 케이스 — 구버전은 세션 고가 기준으로
+      // 진입 직후 즉시 트레일링이 오발동했다 (75500×0.98 = 73990 > 71500)
+      const ctx = withPosition({}, { currentPrice: 71500 });
+      ctx.price.currentPrice = 71500; // 평단 부근 (손절 미해당)
+      ctx.price.highPrice = 75500;
+      ctx.watchStock.strategyParams = {
+        ...(ctx.watchStock.strategyParams ?? {}),
+        entryDayHigh: 75500, // 진입 시점에 이미 형성된 고가 — 진입 후 신고가 없음
+      };
+      const { signals } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+    });
+
+    it('트레일링: entryDayHigh 기록 없으면 미발동 (수동/레거시 포지션은 손절만 동작)', async () => {
+      const ctx = withPosition({}, { currentPrice: 71000 });
+      ctx.price.currentPrice = 71000; // -0.7% (손절 미해당)
+      ctx.price.highPrice = 75500;
+      const { signals } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
     });
 
     it('트레일링 비활성화 시 미발동', async () => {
@@ -603,6 +629,39 @@ describe('MomentumBreakoutStrategy (당일청산 변동성 돌파)', () => {
       const { signals } = await strategy.evaluateStock(ctx);
       expect(signals).toHaveLength(1);
       expect(signals[0].metadata?.phase).toBe('eod-exit');
+    });
+
+    it('현재가 0이어도 당일청산(15:10)은 발행 — 시세 이상이 강제청산을 막지 않음', async () => {
+      // KIS 시세 글리치(현재가 0)가 15:10 강제 청산을 막으면 포지션이 밤을 넘긴다.
+      // 강제 청산은 시장가라 현재가가 필요 없다.
+      const ctx = withPosition({ now: kst(15, 10) }, { currentPrice: 0 });
+      ctx.price.currentPrice = 0;
+      const { signals } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].metadata?.phase).toBe('eod-exit');
+      expect(signals[0].quantity).toBe(13);
+      expect(signals[0].price).toBeUndefined(); // 시장가
+    });
+
+    it('현재가 0이어도 이월청산은 발행', async () => {
+      const ctx = withPosition({ now: kst(9, 6) }, { currentPrice: 0 }, YESTERDAY);
+      ctx.price.currentPrice = 0;
+      const { signals } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].metadata?.phase).toBe('carryover-exit');
+    });
+
+    it('현재가 0이면 가격의존 청산(손절/트레일링)은 보류 — 오판 시장가 매도 방지', async () => {
+      // curPrice=0이 그대로 흘러가면 손절식이 -100%로 오판되어 잘못된 전량 매도가 나간다
+      const ctx = withPosition({ now: kst(11, 0) }, { currentPrice: 0 });
+      ctx.price.currentPrice = 0;
+      ctx.watchStock.strategyParams = {
+        ...(ctx.watchStock.strategyParams ?? {}),
+        entryDayHigh: 71600,
+      };
+      const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+      expect(signals).toHaveLength(0);
+      expect(skipReasons.some((r) => r.includes('보류'))).toBe(true);
     });
 
     it('미체결 매도 주문 존재 → 일반 청산(손절)은 중복 매도 금지', async () => {
@@ -693,6 +752,10 @@ describe('MomentumBreakoutStrategy (당일청산 변동성 돌파)', () => {
       const ctx = withPosition({}, { currentPrice: 69000 });
       ctx.price.currentPrice = 69000; // -3.5%
       ctx.price.highPrice = 75000; // 트레일링 조건도 충족
+      ctx.watchStock.strategyParams = {
+        ...(ctx.watchStock.strategyParams ?? {}),
+        entryDayHigh: 71600, // 트레일링이 실제로 armed 상태인지 보장
+      };
       const { signals } = await strategy.evaluateStock(ctx);
 
       expect(signals).toHaveLength(1);

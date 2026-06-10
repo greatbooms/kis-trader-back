@@ -112,18 +112,22 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
     };
     const kstNow = toKst(ctx.now ?? new Date());
 
-    if (ctx.price.currentPrice <= 0) {
-      skipReasons.push('유효하지 않은 현재가');
-      return { signals, skipReasons };
-    }
-
     const hasPosition = !!ctx.position && ctx.position.quantity > 0;
     const mddCheck = ctx.riskState
       ? evaluateStrategyMdd(ctx.riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate)
       : undefined;
 
+    // 보유 중에는 시세 이상(0/음수)이어도 청산 평가로 진행 —
+    // 강제 청산(리스크/이월/당일청산)은 시장가라 현재가가 필요 없고,
+    // 시세 글리치가 15:10 강제 청산을 막으면 포지션이 밤을 넘긴다.
+    // 가격의존 청산(손절/트레일링/익절)은 evaluateExit 내부에서 별도 보류 처리.
     if (hasPosition) {
       return this.evaluateExit(ctx, params, kstNow, mddCheck);
+    }
+
+    if (ctx.price.currentPrice <= 0) {
+      skipReasons.push('유효하지 않은 현재가');
+      return { signals, skipReasons };
     }
 
     if (ctx.evaluationMode === 'daily-bar') {
@@ -195,7 +199,14 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       return sellAll(`당일청산: ${params.exitTime} 장 마감 전 전량 정리`, 'eod-exit');
     }
 
-    // ── 일반 청산 (4~6) — 미체결 매도 주문이 있으면 중복 발행 금지 (다음 루프 재평가)
+    // ── 일반 청산 (4~6) — 가격의존 판정이므로 시세 이상(0/음수) 시 보류
+    // (보류 없이 진행하면 curPrice=0이 손절 -100%로 오판되어 잘못된 시장가 매도가 나간다)
+    if (curPrice <= 0) {
+      skipReasons.push('관망: 유효하지 않은 현재가 — 가격의존 청산(손절/트레일링/익절) 보류');
+      return { signals, skipReasons };
+    }
+
+    // 미체결 매도 주문이 있으면 중복 발행 금지 (다음 루프 재평가)
     if (ctx.hasOpenSellOrder === true) {
       skipReasons.push('관망: 미체결 매도 주문 처리 대기');
       return { signals, skipReasons };
@@ -210,15 +221,24 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       );
     }
 
-    // 5. 트레일링 — 당일 고가 대비
-    const highPrice = ctx.price.highPrice;
+    // 5. 트레일링 — "진입 후 고가" 대비.
+    // ctx.price.highPrice(세션 전체 고가)는 진입 전 스파이크를 포함하므로 그대로 쓰면
+    // 진입 직후 오발동한다. 체결 시 기록된 entryDayHigh(진입 시점 당일 고가)를 넘어선
+    // 경우에만 진입 후 형성된 고가로 인정한다. 기록이 없으면(수동 포지션/레거시) 트레일링
+    // 미발동 — 평단 기반 fallback은 커스텀 손절(stopLossRate>2%)의 의도를 무력화하므로 두지 않는다.
+    const entryDayHigh = typeof strategyParams.entryDayHigh === 'number'
+      ? strategyParams.entryDayHigh
+      : undefined;
+    const highSinceEntry = entryDayHigh !== undefined && ctx.price.highPrice > entryDayHigh
+      ? ctx.price.highPrice
+      : undefined;
     if (
       params.trailingStopEnabled
-      && highPrice > 0
-      && curPrice < highPrice * (1 - params.trailingStopRate)
+      && highSinceEntry !== undefined
+      && curPrice < highSinceEntry * (1 - params.trailingStopRate)
     ) {
       return sellAll(
-        `트레일링청산: 고가 ${highPrice} 대비 -${(params.trailingStopRate * 100).toFixed(1)}%`,
+        `트레일링청산: 진입 후 고가 ${highSinceEntry} 대비 -${(params.trailingStopRate * 100).toFixed(1)}%`,
         'trailing-stop',
       );
     }
@@ -359,7 +379,8 @@ export class MomentumBreakoutStrategy implements PerStockTradingStrategy {
       quantity: buyQty,
       // price 미지정 = 시장가 — 돌파 직후 체결 확실성 우선 (추격 가드로 상한 보호)
       reason: `변동성돌파: 돌파가 ${breakoutPrice.toFixed(0)}, 현재가 ${curPrice}, soft ${soft.passed}/${soft.evaluable}`,
-      metadata: { phase: 'vb-entry', breakoutPrice },
+      // entryDayHigh: 체결 후처리가 strategyParams에 기록 — 트레일링의 "진입 후 고가" 판별 기준
+      metadata: { phase: 'vb-entry', breakoutPrice, entryDayHigh: ctx.price.highPrice },
     });
     return { signals, skipReasons, details: { breakoutPrice, soft } };
   }

@@ -242,6 +242,34 @@ describe('TradingOrchestrator', () => {
     expect(aapl.hasOpenBuyOrder).toBe(false);
   });
 
+  it('당일 PENDING 레코드는 broker 미체결 목록에 없어도 hasOpen*Order에 반영 — reconciliation 공백 중복 주문 가드', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    // 시장가 주문이 즉시 체결되면 broker 미체결 목록에는 이미 없지만,
+    // reconciliation 전이라 로컬 레코드는 PENDING — 이 공백에 중복 매수가 나가면 안 된다
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { status: 'PENDING', side: 'BUY' },
+    ]);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      {
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'conservative',
+        isActive: true,
+      },
+    ]);
+
+    const contexts = mockTradingService.executePerStockStrategy.mock.calls[0][1];
+    const tqqq = contexts.find((c: any) => c.watchStock.stockCode === 'TQQQ');
+    expect(tqqq.hasOpenBuyOrder).toBe(true);
+    expect(tqqq.hasOpenSellOrder).toBe(false);
+    expect(tqqq.alreadyExecutedToday).toBe(false); // PENDING은 아직 체결 확정이 아님
+  });
+
   it('should not cancel unfilled orders when only continuous strategies exist', async () => {
     const shouldExecuteNowSpy = jest
       .spyOn(orchestrator as any, 'shouldExecuteNow')

@@ -97,6 +97,7 @@ describe('MomentumBreakoutStrategy — 당일 사이클 트레이스', () => {
     ctx.watchStock.strategyParams = {
       ...(ctx.watchStock.strategyParams ?? {}),
       entryDate: TODAY,
+      entryDayHigh: 71600, // 진입 시점 당일 고가 — 트레일링 "진입 후 고가" 판별 기준
     };
     return ctx;
   }

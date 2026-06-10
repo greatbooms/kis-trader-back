@@ -852,7 +852,11 @@ export class TradingService {
   }
 
   private getTodayDate(): string {
-    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return this.getKstDateString(new Date());
+  }
+
+  private getKstDateString(date: Date): string {
+    return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   private async updateWatchStockStrategyParams(
@@ -1250,11 +1254,20 @@ export class TradingService {
     watchStockId: string,
     signal: TradingSignal,
     currentPositionQty: number,
+    filledAt?: Date,
   ): Promise<void> {
     if (signal.side === 'BUY') {
       await this.updateWatchStockStrategyParams(watchStockId, (params) => {
         const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
-        nextParams.entryDate = this.getTodayDate();
+        // 이월청산 판정 기준은 실제 주문 시점 — reconciliation이 자정을 넘겨 처리해도
+        // 진입일이 다음 날로 밀리지 않도록 체결 레코드 시각을 우선 사용
+        nextParams.entryDate = this.getKstDateString(filledAt ?? new Date());
+        const entryDayHigh = Number(signal.metadata?.entryDayHigh);
+        if (Number.isFinite(entryDayHigh) && entryDayHigh > 0) {
+          nextParams.entryDayHigh = entryDayHigh; // 트레일링 "진입 후 고가" 판별 기준
+        } else {
+          delete nextParams.entryDayHigh;
+        }
         delete nextParams.halfTakeProfitDone; // legacy 키 정리 (구버전 부분익절 상태)
         return nextParams;
       });
@@ -1271,6 +1284,7 @@ export class TradingService {
       await this.updateWatchStockStrategyParams(watchStockId, (params) => {
         const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         delete nextParams.entryDate;
+        delete nextParams.entryDayHigh;
         delete nextParams.halfTakeProfitDone;
         return nextParams;
       });
@@ -1341,6 +1355,7 @@ export class TradingService {
     watchStockId: string,
     signal: TradingSignal,
     currentPositionQty: number,
+    filledAt?: Date,
   ): Promise<void> {
     if (strategyName === 'infinite-buy') {
       await this.handleInfiniteBuySignalFill(watchStockId, signal, currentPositionQty);
@@ -1348,7 +1363,7 @@ export class TradingService {
     }
 
     if (strategyName === 'momentum-breakout') {
-      await this.handleMomentumBreakoutSignalFill(watchStockId, signal, currentPositionQty);
+      await this.handleMomentumBreakoutSignalFill(watchStockId, signal, currentPositionQty, filledAt);
       return;
     }
 

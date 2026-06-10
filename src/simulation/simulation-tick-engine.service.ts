@@ -807,6 +807,13 @@ export class SimulationTickEngine {
       await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => {
         const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         nextParams.entryDate = this.getTodayDate();
+        // 실거래 TradingService와 동일하게 트레일링 "진입 후 고가" 기준점 기록
+        const entryDayHigh = Number(signal.metadata?.entryDayHigh);
+        if (Number.isFinite(entryDayHigh) && entryDayHigh > 0) {
+          nextParams.entryDayHigh = entryDayHigh;
+        } else {
+          delete nextParams.entryDayHigh;
+        }
         delete nextParams.halfTakeProfitDone; // legacy 키 정리 (구버전 부분익절 상태)
         return nextParams;
       });
@@ -821,6 +828,7 @@ export class SimulationTickEngine {
       await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => {
         const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         delete nextParams.entryDate;
+        delete nextParams.entryDayHigh;
         delete nextParams.halfTakeProfitDone;
         return nextParams;
       });

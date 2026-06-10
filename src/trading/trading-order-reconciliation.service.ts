@@ -320,6 +320,7 @@ export class TradingOrderReconciliationService {
           quantity: filledNowQty,
         },
         currentPositionQty,
+        record.createdAt, // entryDate 등 날짜 상태는 주문 시각 기준 (reconciliation 지연에 영향받지 않게)
       );
       return;
     }
@@ -330,6 +331,7 @@ export class TradingOrderReconciliationService {
         watchStock.id,
         signal,
         currentPositionQty,
+        record.createdAt,
       );
     }
   }
