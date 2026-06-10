@@ -8,25 +8,25 @@ datasource db {
 }
 
 model TradeRecord {
-  id            String      @id @default(uuid())
-  market        Market
-  exchangeCode  String      @map("exchange_code")
-  stockCode     String      @map("stock_code")
-  stockName     String      @map("stock_name")
-  side          Side
-  orderType     OrderType   @map("order_type")
-  quantity      Int
-  price         Decimal
-  executedPrice Decimal?    @map("executed_price")
-  executedQty   Int?        @map("executed_qty")
-  orderNo       String?     @map("order_no")
-  status        OrderStatus
-  strategyName  String?     @map("strategy_name")
-  reason        String?
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  id                String                   @id @default(uuid())
+  market            Market
+  exchangeCode      String                   @map("exchange_code")
+  stockCode         String                   @map("stock_code")
+  stockName         String                   @map("stock_name")
+  side              Side
+  orderType         OrderType                @map("order_type")
+  quantity          Int
+  price             Decimal
+  executedPrice     Decimal?                 @map("executed_price")
+  executedQty       Int?                     @map("executed_qty")
+  orderNo           String?                  @map("order_no")
+  status            OrderStatus
+  strategyName      String?                  @map("strategy_name")
+  reason            String?
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
   stopLossApprovals StopLossApproval[]
-  executionLogs WatchStockExecutionLog[]
+  executionLogs     WatchStockExecutionLog[]
 
   @@map("trade_records")
 }
@@ -50,21 +50,21 @@ model Position {
 }
 
 model WatchStock {
-  id               String   @id @default(uuid())
+  id               String                   @id @default(uuid())
   market           Market
-  exchangeCode     String   @map("exchange_code")
-  stockCode        String   @map("stock_code")
-  stockName        String   @map("stock_name")
-  isActive         Boolean  @default(true) @map("is_active")
-  strategyName     String?  @map("strategy_name")
-  quota            Decimal? @db.Decimal(12, 2)
-  cycle            Int      @default(0)
-  maxCycles        Int      @default(40) @map("max_cycles")
-  stopLossRate     Decimal  @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
-  maxPortfolioRate Decimal  @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  strategyParams   Json?    @map("strategy_params")
+  exchangeCode     String                   @map("exchange_code")
+  stockCode        String                   @map("stock_code")
+  stockName        String                   @map("stock_name")
+  isActive         Boolean                  @default(true) @map("is_active")
+  strategyName     String?                  @map("strategy_name")
+  quota            Decimal?                 @db.Decimal(12, 2)
+  cycle            Int                      @default(0)
+  maxCycles        Int                      @default(40) @map("max_cycles")
+  stopLossRate     Decimal                  @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
+  maxPortfolioRate Decimal                  @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  strategyParams   Json?                    @map("strategy_params")
   executionLogs    WatchStockExecutionLog[]
 
   @@unique([market, exchangeCode, stockCode])
@@ -72,27 +72,25 @@ model WatchStock {
 }
 
 model WatchStockExecutionLog {
-  id           String                      @id @default(uuid())
-  watchStockId String                      @map("watch_stock_id")
-  tradeRecordId String?                    @map("trade_record_id")
-  market       Market
-  exchangeCode String                      @map("exchange_code")
-  stockCode    String                      @map("stock_code")
-  stockName    String                      @map("stock_name")
-  strategyName String?                     @map("strategy_name")
-  eventType    WatchStockExecutionEventType @map("event_type")
-  message      String
-  details      Json?
-  createdAt    DateTime                    @default(now()) @map("created_at")
-  watchStock   WatchStock                  @relation(fields: [watchStockId], references: [id], onDelete: Cascade)
-  tradeRecord  TradeRecord?                @relation(fields: [tradeRecordId], references: [id], onDelete: SetNull)
+  id            String                       @id @default(uuid())
+  watchStockId  String                       @map("watch_stock_id")
+  tradeRecordId String?                      @map("trade_record_id")
+  market        Market
+  exchangeCode  String                       @map("exchange_code")
+  stockCode     String                       @map("stock_code")
+  stockName     String                       @map("stock_name")
+  strategyName  String?                      @map("strategy_name")
+  eventType     WatchStockExecutionEventType @map("event_type")
+  message       String
+  details       Json?
+  createdAt     DateTime                     @default(now()) @map("created_at")
+  watchStock    WatchStock                   @relation(fields: [watchStockId], references: [id], onDelete: Cascade)
+  tradeRecord   TradeRecord?                 @relation(fields: [tradeRecordId], references: [id], onDelete: SetNull)
 
   @@index([watchStockId, createdAt(sort: Desc)])
   @@index([stockCode, createdAt(sort: Desc)])
   @@map("watch_stock_execution_logs")
 }
-
-
 
 model RiskSnapshot {
   id             String   @id @default(uuid())
@@ -136,17 +134,17 @@ model KisToken {
 }
 
 model MarketDataSnapshot {
-  id          String   @id @default(uuid())
-  snapshotKey String   @unique @map("snapshot_key")
-  source      String
-  category    String
-  market      String?
-  exchangeCode String? @map("exchange_code")
-  stockCode   String?  @map("stock_code")
-  data        Json
-  expiresAt   DateTime @map("expires_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  snapshotKey  String   @unique @map("snapshot_key")
+  source       String
+  category     String
+  market       String?
+  exchangeCode String?  @map("exchange_code")
+  stockCode    String?  @map("stock_code")
+  data         Json
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@index([source, category])
   @@index([market, exchangeCode, stockCode])
@@ -154,32 +152,32 @@ model MarketDataSnapshot {
 }
 
 model StockRecommendation {
-  id                  String   @id @default(uuid())
-  screeningDate       String   @map("screening_date")
-  market              Market
-  exchangeCode        String   @map("exchange_code")
-  stockCode           String   @map("stock_code")
-  stockName           String   @map("stock_name")
-  totalScore          Decimal  @map("total_score") @db.Decimal(6, 2)
-  trendScore          Decimal  @map("trend_score") @db.Decimal(6, 2)
-  timingScore         Decimal  @map("timing_score") @db.Decimal(6, 2)
-  fundamentalScore    Decimal  @map("fundamental_score") @db.Decimal(6, 2)
-  riskSupplyScore     Decimal  @map("risk_supply_score") @db.Decimal(6, 2)
-  rank                Int
-  reasons             Json
-  indicators          Json
-  currentPrice        Decimal  @map("current_price") @db.Decimal(16, 4)
-  changeRate          Decimal  @map("change_rate") @db.Decimal(8, 4)
-  volume              BigInt   @default(0)
-  marketCap           BigInt   @default(0) @map("market_cap")
-  isEtf               Boolean  @default(false) @map("is_etf")
-  factorScores        Json?    @map("factor_scores")
-  deepAnalysisId      String?  @map("deep_analysis_id")
-  deepAnalysisStatus  String?  @map("deep_analysis_status")
-  deepAnalysisMessage String?  @map("deep_analysis_message") @db.Text
+  id                    String    @id @default(uuid())
+  screeningDate         String    @map("screening_date")
+  market                Market
+  exchangeCode          String    @map("exchange_code")
+  stockCode             String    @map("stock_code")
+  stockName             String    @map("stock_name")
+  totalScore            Decimal   @map("total_score") @db.Decimal(6, 2)
+  trendScore            Decimal   @map("trend_score") @db.Decimal(6, 2)
+  timingScore           Decimal   @map("timing_score") @db.Decimal(6, 2)
+  fundamentalScore      Decimal   @map("fundamental_score") @db.Decimal(6, 2)
+  riskSupplyScore       Decimal   @map("risk_supply_score") @db.Decimal(6, 2)
+  rank                  Int
+  reasons               Json
+  indicators            Json
+  currentPrice          Decimal   @map("current_price") @db.Decimal(16, 4)
+  changeRate            Decimal   @map("change_rate") @db.Decimal(8, 4)
+  volume                BigInt    @default(0)
+  marketCap             BigInt    @default(0) @map("market_cap")
+  isEtf                 Boolean   @default(false) @map("is_etf")
+  factorScores          Json?     @map("factor_scores")
+  deepAnalysisId        String?   @map("deep_analysis_id")
+  deepAnalysisStatus    String?   @map("deep_analysis_status")
+  deepAnalysisMessage   String?   @map("deep_analysis_message") @db.Text
   deepAnalysisUpdatedAt DateTime? @map("deep_analysis_updated_at")
-  createdAt           DateTime @default(now()) @map("created_at")
-  suggestedStrategies Json?    @map("suggested_strategies")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  suggestedStrategies   Json?     @map("suggested_strategies")
 
   @@unique([screeningDate, market, stockCode])
   @@index([screeningDate, market])
@@ -218,6 +216,31 @@ model StockDeepAnalysis {
   @@map("stock_deep_analyses")
 }
 
+model DayTradeCandidate {
+  id                  String   @id @default(uuid())
+  screeningDate       String   @map("screening_date") // YYYYMMDD (kstTodayStr 포맷)
+  market              Market
+  exchangeCode        String   @map("exchange_code")
+  stockCode           String   @map("stock_code")
+  stockName           String   @map("stock_name")
+  rank                Int // 통과 후보 1부터, 탈락 0
+  score               Decimal  @db.Decimal(6, 2)
+  prevRangePct        Decimal  @map("prev_range_pct") @db.Decimal(8, 4)
+  atrPct              Decimal  @map("atr_pct") @db.Decimal(8, 4)
+  avgTradeValue20d    BigInt   @map("avg_trade_value_20d")
+  aboveMa20           Boolean  @map("above_ma20")
+  excluded            Boolean  @default(false)
+  excludeReason       String?  @map("exclude_reason")
+  simulationSessionId String?  @map("simulation_session_id") // soft ref — 의도적으로 FK 없음 (세션 삭제 후에도 후보 기록의 세션 흔적 보존)
+  indicators          Json
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([screeningDate, market, stockCode])
+  @@index([screeningDate, market])
+  @@map("day_trade_candidates")
+}
+
 model AppSetting {
   key       String   @id
   value     Json
@@ -227,51 +250,51 @@ model AppSetting {
 }
 
 model SimulationSession {
-  id             String                 @id @default(uuid())
-  name           String
-  description    String?
-  market         Market
-  exchangeCode   String                 @map("exchange_code")
-  stockCode      String                 @map("stock_code")
-  stockName      String                 @map("stock_name")
-  strategyName   String                 @map("strategy_name")
-  status         SimulationStatus       @default(RUNNING)
-  currentCash    Decimal                @map("current_cash") @db.Decimal(16, 4)
-  quota          Decimal                @db.Decimal(12, 2)
-  cycle          Int                    @default(0)
-  maxCycles      Int                    @default(40) @map("max_cycles")
-  stopLossRate   Decimal                @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
+  id               String               @id @default(uuid())
+  name             String
+  description      String?
+  market           Market
+  exchangeCode     String               @map("exchange_code")
+  stockCode        String               @map("stock_code")
+  stockName        String               @map("stock_name")
+  strategyName     String               @map("strategy_name")
+  status           SimulationStatus     @default(RUNNING)
+  currentCash      Decimal              @map("current_cash") @db.Decimal(16, 4)
+  quota            Decimal              @db.Decimal(12, 2)
+  cycle            Int                  @default(0)
+  maxCycles        Int                  @default(40) @map("max_cycles")
+  stopLossRate     Decimal              @default(0.3) @map("stop_loss_rate") @db.Decimal(4, 3)
   maxPortfolioRate Decimal              @default(0.2) @map("max_portfolio_rate") @db.Decimal(4, 3)
-  strategyParams Json?                  @map("strategy_params")
-  startedAt      DateTime               @default(now()) @map("started_at")
-  stoppedAt      DateTime?              @map("stopped_at")
-  createdAt      DateTime               @default(now()) @map("created_at")
-  updatedAt      DateTime               @updatedAt @map("updated_at")
-  countryCode    String?                @map("country_code")
-  positions      SimulationPosition[]
-  snapshots      SimulationSnapshot[]
-  trades         SimulationTrade[]
+  strategyParams   Json?                @map("strategy_params")
+  startedAt        DateTime             @default(now()) @map("started_at")
+  stoppedAt        DateTime?            @map("stopped_at")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  countryCode      String?              @map("country_code")
+  positions        SimulationPosition[]
+  snapshots        SimulationSnapshot[]
+  trades           SimulationTrade[]
 
   @@map("simulation_sessions")
 }
 
 model SimulationTrade {
-  id           String            @id @default(uuid())
-  sessionId    String            @map("session_id")
+  id           String                @id @default(uuid())
+  sessionId    String                @map("session_id")
   market       Market
-  exchangeCode String            @map("exchange_code")
-  stockCode    String            @map("stock_code")
-  stockName    String            @map("stock_name")
+  exchangeCode String                @map("exchange_code")
+  stockCode    String                @map("stock_code")
+  stockName    String                @map("stock_name")
   side         Side
   quantity     Int
-  price        Decimal           @db.Decimal(16, 4)
-  totalAmount  Decimal           @map("total_amount") @db.Decimal(16, 4)
+  price        Decimal               @db.Decimal(16, 4)
+  totalAmount  Decimal               @map("total_amount") @db.Decimal(16, 4)
   tradeStatus  SimulationTradeStatus @default(EXECUTED) @map("trade_status")
-  failReason   String?           @map("fail_reason")
-  strategyName String?           @map("strategy_name")
+  failReason   String?               @map("fail_reason")
+  strategyName String?               @map("strategy_name")
   reason       String?
-  createdAt    DateTime          @default(now()) @map("created_at")
-  session      SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime              @default(now()) @map("created_at")
+  session      SimulationSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("simulation_trades")
 }
@@ -333,7 +356,7 @@ model HistoricalDailyPrice {
   market       Market
   exchangeCode String   @map("exchange_code")
   stockCode    String   @map("stock_code")
-  date         String   // YYYYMMDD
+  date         String // YYYYMMDD
   open         Decimal  @db.Decimal(16, 4)
   high         Decimal  @db.Decimal(16, 4)
   low          Decimal  @db.Decimal(16, 4)
@@ -404,7 +427,6 @@ model StopLossApproval {
 
   @@map("stop_loss_approvals")
 }
-
 
 enum SimulationStatus {
   RUNNING

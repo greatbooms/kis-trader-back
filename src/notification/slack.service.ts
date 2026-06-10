@@ -374,6 +374,90 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async sendDayTradeCandidates(payload: {
+    date: string;
+    candidates: {
+      stockCode: string;
+      stockName: string;
+      rank: number;
+      score: number;
+      prevRangePct: number;
+      atrPct: number;
+      avgTradeValue20d: number;
+      simulated: boolean;
+    }[];
+    excluded: { stockName: string; reason: string }[];
+    warnings: string[];
+  }): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const { date, candidates, excluded, warnings } = payload;
+      const MAX_DISPLAY = 15; // section text 3000자 제한 — 후보 1개 ≈ 150자
+      const displayCandidates = candidates.slice(0, MAX_DISPLAY);
+      const overflowCount = candidates.length - displayCandidates.length;
+      const lines = displayCandidates.map((c) =>
+        `${c.rank}. *${c.stockName}* (${c.stockCode}) — ${c.score.toFixed(1)}점${c.simulated ? ' :robot_face: 시뮬 투입' : ''}\n` +
+        `    전일변동폭 ${c.prevRangePct.toFixed(2)}% | ATR ${c.atrPct.toFixed(2)}% | 거래대금 ${(c.avgTradeValue20d / 100_000_000).toFixed(0)}억 | MA20 위`,
+      );
+
+      const blocks: KnownBlock[] = [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `:zap: *당일청산(변동성 돌파) 후보 | ${date}*` },
+        },
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: lines.length > 0
+              ? lines.join('\n\n')
+              : '오늘 조건을 충족한 ETF가 없습니다. (레짐/변동폭 미달 시 진입하지 않는 것이 정상)',
+          },
+        },
+      ];
+
+      if (excluded.length > 0) {
+        blocks.push({
+          type: 'context',
+          elements: [{
+            type: 'mrkdwn',
+            text: `제외: ${excluded.map((e) => `${e.stockName}(${e.reason})`).join(', ')}`,
+          }],
+        });
+      }
+
+      if (overflowCount > 0) {
+        blocks.push({
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: `외 ${overflowCount}종목 추가 통과 (day_trade_candidates 테이블 조회)` }],
+        });
+      }
+
+      if (warnings.length > 0) {
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `:warning: ${warnings.join('\n')}` },
+        });
+      }
+
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: '실거래 등록은 수동입니다 — 시뮬 검증 후 진행하세요.' }],
+      });
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks,
+        text: `당일청산 후보 ${candidates.length}종목 | ${date}`,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send day-trade candidates: ${e.message}`);
+      this.handleSendError(e);
+    }
+  }
+
   async sendDeepAnalysisReport(stockCode: string, analysis: {
     stockName: string;
     exchangeCode: string;

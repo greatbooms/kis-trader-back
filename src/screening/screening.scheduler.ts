@@ -3,6 +3,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { CronJob } from 'cron';
 import { ScreeningService } from './screening.service';
+import { DayTradeScreeningService } from './day-trade-screening.service';
 import { SlackService } from '../notification/slack.service';
 import { PrismaService } from '../prisma.service';
 import { kstTodayStr } from './utils/date.util';
@@ -28,7 +29,8 @@ type ScreeningSchedulerJobKey =
   | 'overseas-asia-fast'
   | 'domestic-deep'
   | 'overseas-us-deep'
-  | 'overseas-deep';
+  | 'overseas-deep'
+  | 'day-trade-fast';
 
 @Injectable()
 export class ScreeningScheduler implements OnModuleInit {
@@ -38,6 +40,7 @@ export class ScreeningScheduler implements OnModuleInit {
 
   constructor(
     private screeningService: ScreeningService,
+    private dayTradeScreeningService: DayTradeScreeningService,
     private schedulerRegistry: SchedulerRegistry,
     private slackService: SlackService,
     private prisma: PrismaService,
@@ -71,7 +74,72 @@ export class ScreeningScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('screening-overseas-asia', asiaJob);
     asiaJob.start();
 
-    this.logger.log('Screening scheduler registered (screening + deep analysis: domestic 09:10, Asia 10:50, US 00:10 KST)');
+    // 데이트레이드 후보 선정: 08:30 KST (장 시작 전, 전일 확정 일봉 기반)
+    const dayTradeJob = new CronJob(
+      '30 8 * * 1-5',
+      () => this.runDayTradeScreening(),
+      null, false, 'Asia/Seoul',
+    );
+    this.schedulerRegistry.addCronJob('screening-day-trade', dayTradeJob);
+    dayTradeJob.start();
+
+    this.logger.log('Screening scheduler registered (day-trade 08:30, domestic 09:10, Asia 10:50, US 00:10 KST)');
+  }
+
+  async runDayTradeScreening(): Promise<void> {
+    const jobKey: ScreeningSchedulerJobKey = 'day-trade-fast';
+    const date = kstTodayStr();
+    if (this.isFastRunning || this.isDeepRunning) {
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        date,
+        message: '다른 스크리닝 작업이 실행 중입니다.',
+      });
+      return;
+    }
+
+    const enabled = await this.getEnabledCountries();
+    if (!enabled.has('KR')) {
+      this.logger.log('KR screening disabled, skipping day-trade screening');
+      await this.recordSchedulerRun(jobKey, {
+        status: 'skipped',
+        date,
+        message: 'KR 스크리닝이 비활성화되어 있습니다.',
+      });
+      return;
+    }
+
+    this.isFastRunning = true;
+    await this.recordSchedulerRun(jobKey, { status: 'started', date });
+    try {
+      const result = await this.dayTradeScreeningService.runDailySelection(date);
+      if (result.skipped) {
+        await this.recordSchedulerRun(jobKey, {
+          status: 'skipped',
+          date,
+          message: result.skipReason,
+        });
+        return;
+      }
+      this.logger.log(
+        `Day-trade screening saved: ${result.saved} candidates, ${result.simulated} simulated`,
+      );
+      await this.recordSchedulerRun(jobKey, {
+        status: 'success',
+        date,
+        count: result.saved,
+        message: result.topStockName ?? '후보 없음',
+      });
+    } catch (e) {
+      this.logger.error(`Day-trade screening error: ${e.message}`);
+      await this.recordSchedulerRun(jobKey, {
+        status: 'failed',
+        date,
+        message: e.message,
+      });
+    } finally {
+      this.isFastRunning = false;
+    }
   }
 
   async runDomesticScreening(): Promise<void> {

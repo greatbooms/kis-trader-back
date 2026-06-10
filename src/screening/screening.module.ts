@@ -3,7 +3,9 @@ import { KisModule } from '../kis/kis.module';
 import { NotificationModule } from '../notification/notification.module';
 import { TradingModule } from '../trading/trading.module';
 import { PrismaService } from '../prisma.service';
+import { SimulationModule } from '../simulation/simulation.module';
 import { StockMasterModule } from '../stock-master/stock-master.module';
+import { DayTradeScreeningService } from './day-trade-screening.service';
 import { DeepAnalysisService } from './deep-analysis.service';
 import { ScreeningService } from './screening.service';
 import { ScreeningScheduler } from './screening.scheduler';
@@ -13,7 +15,7 @@ import { ScreeningAnalyzer } from './screening-analyzer.service';
 import { ScreeningRepository } from './screening-repository.service';
 
 @Module({
-  imports: [KisModule, NotificationModule, TradingModule, StockMasterModule],
+  imports: [KisModule, NotificationModule, TradingModule, StockMasterModule, SimulationModule],
   providers: [
     PrismaService,
     DeepAnalysisService,
@@ -21,6 +23,7 @@ import { ScreeningRepository } from './screening-repository.service';
     ScreeningAnalyzer,
     ScreeningRepository,
     ScreeningService,
+    DayTradeScreeningService,
     ScreeningScheduler,
     ScreeningResolver,
   ],
