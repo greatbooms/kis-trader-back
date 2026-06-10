@@ -70,6 +70,10 @@ export function AddWatchStockModal({ strategies, onSave, onClose }: AddWatchStoc
         const mdq = Number(maxDailyQuotaMultiple)
         if (mdq > 0) params.maxDailyQuotaMultiple = mdq
       }
+      // momentum-breakout 등은 WatchStock.stopLossRate가 아닌 strategyParams.stopLossRate를 읽는다
+      if (meta.stopLossViaParams && stopLossRate && Number(stopLossRate) > 0) {
+        params.stopLossRate = Number(stopLossRate) / 100
+      }
 
       await onSave({
         market: (selectedStock.market as Market) || selectedCountry?.market || 'DOMESTIC',
