@@ -218,6 +218,31 @@ model StockDeepAnalysis {
   @@map("stock_deep_analyses")
 }
 
+model DayTradeCandidate {
+  id                  String   @id @default(uuid())
+  screeningDate       String   @map("screening_date") // YYYYMMDD (kstTodayStr 포맷)
+  market              Market
+  exchangeCode        String   @map("exchange_code")
+  stockCode           String   @map("stock_code")
+  stockName           String   @map("stock_name")
+  rank                Int // 통과 후보 1부터, 탈락 0
+  score               Decimal  @db.Decimal(6, 2)
+  prevRangePct        Decimal  @map("prev_range_pct") @db.Decimal(8, 4)
+  atrPct              Decimal  @map("atr_pct") @db.Decimal(8, 4)
+  avgTradeValue20d    BigInt   @map("avg_trade_value_20d")
+  aboveMa20           Boolean  @map("above_ma20")
+  excluded            Boolean  @default(false)
+  excludeReason       String?  @map("exclude_reason")
+  simulationSessionId String?  @map("simulation_session_id") // soft ref — 의도적으로 FK 없음 (세션 삭제 후에도 후보 기록의 세션 흔적 보존)
+  indicators          Json
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([screeningDate, market, stockCode])
+  @@index([screeningDate, market])
+  @@map("day_trade_candidates")
+}
+
 model AppSetting {
   key       String   @id
   value     Json
