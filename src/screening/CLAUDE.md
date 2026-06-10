@@ -53,6 +53,8 @@
   - 임계값 근거: 평균 거래대금 ≥ 300억(시장가 슬리피지 무시 수준), ATR14% ≥ 1.2(왕복 비용 ~0.3% 대비 4배), 전일 종가 > MA20(백테스트 2023-06~2026-05에서 MA20 위 레짐만 양의 엣지). momentum-breakout 백테스트 결론(거래세 면제 ETF만 양의 기대값)이 전체 설계의 근거 — `src/backtest/CLAUDE.md` 참조
   - 거래대금은 종가×거래량 근사 (KIS 일봉 응답에 거래대금 필드 없음)
   - 봉 부족(확정 일봉 20개 미만) 종목은 하드필터 탈락이 아닌 평가 전제조건 미달 — DB 저장 없이 `log` 레벨로만 추적
+  - 평가 가능 종목이 0개면 throw → 스케줄러가 `failed`로 기록 (시드 ETF는 항상 이력이 있으므로 0개 = KIS 장애가 "후보 없음"으로 위장되는 것 방지)
+  - 같은 날 재실행 시 이번 평가에 없는 잔존 후보는 `deleteMany`로 정리 (스테일 rank/score 방지)
   - `screeningDate`는 `kstTodayStr()` 포맷(YYYYMMDD) — `StockRecommendation.screeningDate`와 동일 컨벤션
   - [DT] 시뮬 세션 라이프사이클: 다음 날 08:30 잡이 포지션 없는 세션만 COMPLETED 처리. 포지션이 남은 세션은 전략의 이월청산이 동작하도록 RUNNING 유지 + Slack 경고. `strategyParams.dayTradeAuto=true`가 자동 세션 마커
   - 설정: `AppSetting` 키 `day-trade-screening` = `{ enabled, topN(기본 3), simCapital(기본 200만) }`. 실거래 자동 등록은 범위 외 (시뮬 검증 후 별도 설계)

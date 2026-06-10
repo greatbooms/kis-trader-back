@@ -41,12 +41,15 @@ describe('DayTradeScreeningService', () => {
       dayTradeCandidate: {
         upsert: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
     kis = {
       getVolumeRanking: jest.fn().mockResolvedValue([]),
       getFluctuationRanking: jest.fn().mockResolvedValue([]),
-      getDailyPrices: jest.fn().mockResolvedValue([]), // 기본: 봉 부족 → 평가 제외
+      // 기본: 122630만 평가 가능 (전 종목 평가 불능은 KIS 이상으로 간주해 throw하므로)
+      getDailyPrices: jest.fn().mockImplementation((code: string) =>
+        Promise.resolve(code === '122630' ? passingBars() : [])),
       getPrice: jest.fn().mockImplementation((code: string) =>
         Promise.resolve({ stockCode: code, stockName: `name-${code}`, currentPrice: 100 })),
     };
@@ -203,6 +206,32 @@ describe('DayTradeScreeningService', () => {
     expect(result.simulated).toBe(0);
     expect(prisma.dayTradeCandidate.upsert).toHaveBeenCalled();
     expect(slack.sendDayTradeCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it('유니버스 전체가 평가 불능이면 KIS 이상으로 간주해 throw한다 (silent success 방지)', async () => {
+    kis.getDailyPrices.mockResolvedValue([]); // 전 종목 봉 없음 — KIS 장애 시나리오
+
+    await expect(service.runDailySelection(DATE)).rejects.toThrow('평가 불능');
+    expect(prisma.dayTradeCandidate.upsert).not.toHaveBeenCalled();
+    expect(slack.sendDayTradeCandidates).not.toHaveBeenCalled();
+  });
+
+  it('같은 날 재실행 시 이번 평가에 없는 잔존 후보를 정리한다', async () => {
+    kis.getDailyPrices.mockImplementation((code: string) => {
+      if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '252670') return Promise.resolve(flatBars());
+      return Promise.resolve([]);
+    });
+
+    await service.runDailySelection(DATE);
+
+    expect(prisma.dayTradeCandidate.deleteMany).toHaveBeenCalledWith({
+      where: {
+        screeningDate: DATE,
+        market: 'DOMESTIC',
+        stockCode: { notIn: expect.arrayContaining(['122630', '252670']) },
+      },
+    });
   });
 
   it('랭킹에서 수집한 strict ETF가 유니버스에 합류한다', async () => {

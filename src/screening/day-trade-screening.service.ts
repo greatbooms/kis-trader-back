@@ -61,6 +61,10 @@ export class DayTradeScreeningService {
     }
 
     const scores = await this.evaluateUniverse(universe, date);
+    if (scores.length === 0) {
+      // 시드 ETF는 항상 60일+ 이력이 있으므로 평가 0건은 정상적 "후보 없음"이 아니라 KIS 전장 이상 신호
+      throw new Error(`유니버스 ${universe.length}종목 전체 평가 불능 — KIS 응답 이상 의심`);
+    }
     const ranked = rankDayTradeCandidates(scores);
     await this.saveCandidates(date, ranked);
 
@@ -225,6 +229,15 @@ export class DayTradeScreeningService {
         },
       });
     }
+
+    // 같은 날 재실행 시 이번 평가에 없는 잔존 후보 정리 (스테일 rank/score 방지)
+    await this.prisma.dayTradeCandidate.deleteMany({
+      where: {
+        screeningDate: date,
+        market: Market.DOMESTIC,
+        stockCode: { notIn: ranked.map((c) => c.stockCode) },
+      },
+    });
   }
 
   /** 상위 후보를 시뮬 세션으로 투입. 같은 날 같은 종목 세션이 있으면 재사용 (멱등) */
