@@ -197,6 +197,51 @@ describe('TradingOrchestrator', () => {
     expect(mockPrisma.tradeRecord.findFirst).not.toHaveBeenCalled();
   });
 
+  it('should map unfilled orders to hasOpenBuyOrder/hasOpenSellOrder in strategy contexts', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([
+      {
+        orderNo: 'order-1',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        exchangeCode: 'NASD',
+        quantity: 1,
+        price: 58.42,
+      },
+    ]);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      {
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'conservative',
+        isActive: true,
+      },
+      {
+        id: 'ws-2',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'AAPL',
+        stockName: 'AAPL',
+        strategyName: 'conservative',
+        isActive: true,
+      },
+    ]);
+
+    expect(mockTradingService.executePerStockStrategy).toHaveBeenCalledTimes(1);
+    const contexts = mockTradingService.executePerStockStrategy.mock.calls[0][1];
+    const tqqq = contexts.find((c: any) => c.watchStock.stockCode === 'TQQQ');
+    const aapl = contexts.find((c: any) => c.watchStock.stockCode === 'AAPL');
+
+    expect(tqqq.hasOpenSellOrder).toBe(true);
+    expect(tqqq.hasOpenBuyOrder).toBe(false);
+    expect(aapl.hasOpenSellOrder).toBe(false);
+    expect(aapl.hasOpenBuyOrder).toBe(false);
+  });
+
   it('should not cancel unfilled orders when only continuous strategies exist', async () => {
     const shouldExecuteNowSpy = jest
       .spyOn(orchestrator as any, 'shouldExecuteNow')

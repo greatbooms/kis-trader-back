@@ -35,6 +35,11 @@ export function EditWatchStockModal({ stock, strategies, onSave, onClose }: Edit
         if (sell2Rate && Number(sell2Rate) > 0) params.sell2Rate = Number(sell2Rate) / 100
         else delete params.sell2Rate
       }
+      // momentum-breakout 등은 WatchStock.stopLossRate가 아닌 strategyParams.stopLossRate를 읽는다
+      if (meta.stopLossViaParams) {
+        if (stopLossRate && Number(stopLossRate) > 0) params.stopLossRate = Number(stopLossRate) / 100
+        else delete params.stopLossRate
+      }
       const strategyParams = Object.keys(params).length > 0 ? JSON.stringify(params) : undefined
 
       await onSave({

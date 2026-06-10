@@ -4,6 +4,8 @@ export interface StrategyMeta {
   defaultStopLoss: number
   hasMaxCycles: boolean
   hasSellRates: boolean
+  /** 손절률을 WatchStock.stopLossRate 대신 strategyParams.stopLossRate로 전달하는 전략 */
+  stopLossViaParams?: boolean
   quotaDesc: string
   stopLossDesc: string
 }
@@ -24,11 +26,17 @@ export const STRATEGY_META: Record<string, StrategyMeta> = {
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 손절 매도합니다.',
   },
   'momentum-breakout': {
-    defaultStopLoss: 3,
+    defaultStopLoss: 2,
     hasMaxCycles: false,
     hasSellRates: false,
-    quotaDesc: '이 종목에 배정할 투자 금액입니다. 돌파 시그널 발생 시 한 번에 매수합니다.',
-    stopLossDesc: '진입가 대비 이 비율만큼 하락하면 손절합니다. 단기 전략이므로 낮은 손절률을 권장합니다.',
+    stopLossViaParams: true,
+    quotaDesc:
+      '이 종목에 배정할 투자 금액입니다. 변동성 돌파(시가 + 전일변동폭×K) 시 시장가로 한 번에 매수하고, '
+      + '늦어도 15:10에 전량 청산하는 당일청산 전략입니다 (오버나잇 없음). 국내(KRX) 전용이며, '
+      + '거래세가 면제되는 유동성 높은 ETF에 적합합니다.',
+    stopLossDesc:
+      '진입가 대비 이 비율만큼 하락하면 즉시 시장가로 손절합니다 (기본 -2%). '
+      + '당일 고가 대비 -2% 트레일링 스탑과 15:10 당일청산이 함께 동작합니다.',
   },
   'conservative': {
     defaultStopLoss: 5,

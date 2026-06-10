@@ -293,6 +293,11 @@ export class TradingService {
             continue;
           }
 
+          // 관망: continuous 전략이 매분 반복하는 대기 상태 — 로그/Slack 스팸 방지
+          if (this.isSilentWaitSkip(skipReasons)) {
+            continue;
+          }
+
           const reason = this.buildSkipExecutionMessage(strategy.name, ctx, skipReasons, details);
 
           await this.logWatchStockExecution(
@@ -838,6 +843,14 @@ export class TradingService {
     return skipReasons.length > 0 && skipReasons.every((reason) => reason.startsWith('오늘 이미 실행됨'));
   }
 
+  /**
+   * '관망:' prefix 스킵은 전략의 정상 대기 상태(돌파 미달, 시간 윈도우 외 등).
+   * continuous 전략은 매분 평가되므로 이를 기록하면 DB/Slack이 도배된다.
+   */
+  private isSilentWaitSkip(skipReasons: string[]): boolean {
+    return skipReasons.length > 0 && skipReasons.every((reason) => reason.startsWith('관망'));
+  }
+
   private getTodayDate(): string {
     return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
@@ -1223,6 +1236,16 @@ export class TradingService {
     return closeMinutes - normalizedCurrentMinutes;
   }
 
+  /** 당일청산 변동성 돌파의 전량 청산 phase — SELL 체결 시 entryDate를 정리한다 */
+  private static readonly MOMENTUM_FULL_EXIT_PHASES = new Set([
+    'carryover-exit',
+    'intraday-stop',
+    'trailing-stop',
+    'take-profit',
+    'eod-exit',
+    'risk-liquidation',
+  ]);
+
   private async handleMomentumBreakoutSignalFill(
     watchStockId: string,
     signal: TradingSignal,
@@ -1230,42 +1253,25 @@ export class TradingService {
   ): Promise<void> {
     if (signal.side === 'BUY') {
       await this.updateWatchStockStrategyParams(watchStockId, (params) => {
-        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         nextParams.entryDate = this.getTodayDate();
-        delete nextParams.halfTakeProfitDone;
+        delete nextParams.halfTakeProfitDone; // legacy 키 정리 (구버전 부분익절 상태)
         return nextParams;
       });
       return;
     }
 
-    if (signal.metadata?.phase === 'take-profit-half') {
-      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
-      if (remainingQty > 0) {
-        await this.updateWatchStockStrategyParams(watchStockId, (params) => ({
-          ...(params as MomentumBreakoutStrategyParams),
-          halfTakeProfitDone: true,
-        }));
-      } else {
-        await this.updateWatchStockStrategyParams(watchStockId, (params) => {
-          const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
-          delete nextParams.halfTakeProfitDone;
-          delete nextParams.entryDate;
-          return nextParams;
-        });
-      }
-      return;
-    }
-
+    const phase = signal.metadata?.phase as string | undefined;
     if (
-      signal.metadata?.phase === 'take-profit-full'
-      || signal.metadata?.phase === 'time-stop'
+      (phase && TradingService.MOMENTUM_FULL_EXIT_PHASES.has(phase))
+      // 전환기 호환: 구버전 미체결 주문(reason 'stop loss' 등)이 뒤늦게 체결되는 경우
       || this.isStopLossSignal(signal)
       || signal.quantity >= currentPositionQty
     ) {
       await this.updateWatchStockStrategyParams(watchStockId, (params) => {
-        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
-        delete nextParams.halfTakeProfitDone;
+        const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         delete nextParams.entryDate;
+        delete nextParams.halfTakeProfitDone;
         return nextParams;
       });
     }

@@ -1059,4 +1059,148 @@ describe('TradingService', () => {
     });
   });
 
+  describe('관망(silent wait) skip', () => {
+    function buildWaitContext() {
+      return {
+        watchStock: {
+          id: 'ws-1',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: '삼성전자',
+          strategyName: 'momentum-breakout',
+          quota: 1000000,
+          cycle: 0,
+          maxCycles: 40,
+          stopLossRate: 0.3,
+          maxPortfolioRate: 0.15,
+          strategyParams: {},
+        },
+        price: { currentPrice: 70000 } as any,
+        alreadyExecutedToday: false,
+        marketCondition: {} as any,
+        stockIndicators: {} as any,
+        buyableAmount: 1000000,
+        totalPortfolioValue: 0,
+      };
+    }
+
+    it('관망 prefix 스킵은 실행 로그/Slack 없이 조용히 넘어간다 (매분 반복 스팸 방지)', async () => {
+      const strategy = {
+        name: 'momentum-breakout',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['관망: 돌파 대기 (현재가 70000 < 돌파가 71000)'],
+        }),
+      };
+
+      await service.executePerStockStrategy(strategy as any, [buildWaitContext() as any]);
+
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendFilterLog).not.toHaveBeenCalled();
+    });
+
+    it('관망이 아닌 스킵 사유는 기존대로 실행 로그를 남긴다', async () => {
+      const strategy = {
+        name: 'momentum-breakout',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['유효하지 않은 현재가'],
+        }),
+      };
+
+      await service.executePerStockStrategy(strategy as any, [buildWaitContext() as any]);
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SKIPPED',
+          message: '유효하지 않은 현재가',
+        }),
+      });
+    });
+  });
+
+  describe('momentum-breakout 체결 후처리 (handleStrategySignalFill)', () => {
+    const baseSignal = {
+      market: 'DOMESTIC' as const,
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      side: 'SELL' as const,
+      quantity: 13,
+      reason: '당일청산: 15:10 장 마감 전 전량 정리',
+    };
+
+    it('BUY 체결 시 entryDate(KST) 기록 + legacy halfTakeProfitDone 제거', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: '005930',
+        strategyParams: { halfTakeProfitDone: true, kValue: 0.6 },
+      });
+
+      await service.handleStrategySignalFill(
+        'momentum-breakout',
+        'ws-1',
+        {
+          ...baseSignal,
+          side: 'BUY',
+          reason: '변동성돌파: 돌파가 71000',
+          metadata: { phase: 'vb-entry', breakoutPrice: 71000 },
+        },
+        13,
+      );
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledTimes(1);
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(updated.kValue).toBe(0.6); // 기존 튜닝 파라미터 보존
+      expect(updated.halfTakeProfitDone).toBeUndefined();
+    });
+
+    it.each([
+      'carryover-exit',
+      'intraday-stop',
+      'trailing-stop',
+      'take-profit',
+      'eod-exit',
+      'risk-liquidation',
+    ])('SELL(%s) 체결 시 entryDate 제거', async (phase) => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: '005930',
+        strategyParams: { entryDate: '2026-06-10', kValue: 0.6 },
+      });
+
+      await service.handleStrategySignalFill(
+        'momentum-breakout',
+        'ws-1',
+        { ...baseSignal, metadata: { phase } },
+        13,
+      );
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledTimes(1);
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toBeUndefined();
+      expect(updated.kValue).toBe(0.6);
+    });
+
+    it('전량 매도(phase 없음)도 entryDate 제거 (수량 기준 fallback)', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-1',
+        stockCode: '005930',
+        strategyParams: { entryDate: '2026-06-10' },
+      });
+
+      await service.handleStrategySignalFill(
+        'momentum-breakout',
+        'ws-1',
+        { ...baseSignal, metadata: undefined },
+        13, // signal.quantity(13) >= currentPositionQty(13)
+      );
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledTimes(1);
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toBeUndefined();
+    });
+  });
+
 });

@@ -23,6 +23,34 @@ export interface BacktestConfig {
   startingCash: number;       // cash available for this backtest (>= quota)
   slippageRate?: number;      // default 0.005 (0.5%) for infinite-buy
   warmupBars?: number;        // minimum bars required before first trade (default 200 for MA200)
+  /**
+   * 거래비용 모델 — 현재 fillModel 기반 체결(stop-entry 데이트레이드)에만 적용.
+   * 미설정 시 0 (기존 infinite-buy reason-prefix 경로 결과 보존).
+   */
+  feeConfig?: {
+    buyFeeRate?: number;      // 매수 수수료율 (예: 0.00015)
+    sellFeeRate?: number;     // 매도 수수료율
+    sellTaxRate?: number;     // 매도 거래세율 (예: 0.0018)
+  };
+  /**
+   * 일봉 근사에서 같은 bar 손절 판정 기준 (stop-entry 전용).
+   * 'low'(기본): 장중 저가가 stop에 닿으면 손절 — 보수적 (터치 기반)
+   * 'close': 종가가 stop 아래일 때만 손절 — 장중 회복분을 무손절 처리 (낙관적)
+   */
+  stopFill?: 'low' | 'close';
+  /**
+   * 지표 계산 기준 bar 시프트. 0(기본)이면 당일 bar 포함(종가까지) — 기존
+   * infinite-buy 결과 보존용. 1이면 전일까지의 지표로 평가 — 시가 시점에
+   * 알 수 없는 당일 종가가 진입 필터(MA20/RSI)에 새는 lookahead를 제거.
+   */
+  indicatorLag?: number;
+}
+
+interface DayTradeFillConfig {
+  buyFeeRate: number;
+  sellFeeRate: number;
+  sellTaxRate: number;
+  stopFill: 'low' | 'close';
 }
 
 export interface BacktestResult {
@@ -69,6 +97,12 @@ export async function runBacktest(
   const slippage = config.slippageRate ?? DEFAULT_SLIPPAGE;
   const warmup = config.warmupBars ?? 200;
   const isOverseas = config.market === 'OVERSEAS';
+  const dayTradeFill: DayTradeFillConfig = {
+    buyFeeRate: config.feeConfig?.buyFeeRate ?? 0,
+    sellFeeRate: config.feeConfig?.sellFeeRate ?? 0,
+    sellTaxRate: config.feeConfig?.sellTaxRate ?? 0,
+    stopFill: config.stopFill ?? 'low',
+  };
 
   const state: SimState = {
     cash: config.startingCash,
@@ -133,7 +167,8 @@ export async function runBacktest(
       continue;
     }
 
-    const indicators = computeIndicators(bars, i);
+    const indicators = computeIndicators(bars, Math.max(0, i - (config.indicatorLag ?? 0)));
+    const prevBar = i > 0 ? bars[i - 1] : undefined;
     const stockIndicators: StockIndicators = {
       currentAboveMA200: indicators.ma200 !== undefined ? today.close > indicators.ma200 : true,
       ma20: indicators.ma20,
@@ -149,6 +184,9 @@ export async function runBacktest(
       volatility30d: indicators.volatility30d,
       avgVolume20: indicators.avgVolume20,
       todayOpen: today.open,
+      prevHigh: prevBar?.high,
+      prevLow: prevBar?.low,
+      prevClose: prevBar?.close,
     };
 
     // 3. 전략 컨텍스트 구성
@@ -197,6 +235,7 @@ export async function runBacktest(
       alreadyExecutedToday: false,
       marketCondition,
       stockIndicators,
+      evaluationMode: 'daily-bar',
       buyableAmount: state.cash,
       totalPortfolioValue: portfolioValue,
       riskState: {
@@ -216,7 +255,7 @@ export async function runBacktest(
     // 5. 시그널 체결
     const prevQuantity = state.quantity;
     for (const signal of result.signals) {
-      executeSignal(signal, state, today, trades, pendingOrders, slippage, isOverseas);
+      executeSignal(signal, state, today, trades, pendingOrders, slippage, isOverseas, dayTradeFill);
     }
     const boughtToday = state.quantity > prevQuantity;
 
@@ -265,7 +304,14 @@ function executeSignal(
   pendingOrders: PendingLimitOrder[],
   slippage: number,
   isOverseas: boolean,
+  dayTradeFill: DayTradeFillConfig,
 ) {
+  // metadata.fillModel 기반 체결 — reason-prefix 분기(infinite-buy 전용)보다 먼저 처리
+  if (signal.side === 'BUY' && signal.metadata?.fillModel === 'stop-entry') {
+    executeStopEntryDayTrade(signal, state, today, trades, slippage, dayTradeFill);
+    return;
+  }
+
   const reason = signal.reason ?? '';
   const isBuy1 = reason.startsWith('Buy1');
   const isBuy2 = reason.startsWith('Buy2');
@@ -318,6 +364,83 @@ function executeSignal(
       // 미체결은 다음 날 자동 재주문(전략이 매일 생성)
     }
   }
+}
+
+/**
+ * stop-entry 데이트레이드 체결 근사 (당일청산 변동성 돌파 등):
+ * - 진입: 장중 고가가 trigger(=돌파가)에 닿으면 trigger가 체결.
+ *   trigger는 당일 시가 기준으로 산출되므로 항상 시가 위 — 갭 체결 케이스 없음.
+ *   비용(슬리피지+수수료)이 현금을 초과하면 수량을 줄여 체결 (조용한 드랍 금지).
+ * - 같은 bar 청산 (exitModel 'eod'): 손절 → 익절 → 종가 순으로 판정.
+ *   손절/익절가는 metadata의 rate × 실제 체결가로 계산 — 실거래(평균단가 기준)와 동일 의미.
+ *   손절/익절 동시 터치 시 손절 우선 (경로를 알 수 없으므로 보수적 가정).
+ * - 한계: 트레일링 스탑은 일봉으로 검증 불가 (고가 도달 경로 미상) — 미반영.
+ */
+function executeStopEntryDayTrade(
+  signal: TradingSignal,
+  state: SimState,
+  today: OHLCV,
+  trades: BacktestTrade[],
+  slippage: number,
+  fill: DayTradeFillConfig,
+) {
+  const trigger = signal.price ?? 0;
+  if (trigger <= 0 || signal.quantity <= 0) return;
+
+  // 체결 판정은 슬리피지 포함가 기준 — (a) 기록상 고가보다 높은 "불가능한 체결" 방지,
+  // (b) 돌파가를 한 틱 스치고 꺾인 날은 1분 폴링 라이브도 놓치기 쉬움 (샘플링 지연 근사)
+  const entryPrice = trigger * (1 + slippage);
+  if (today.high < entryPrice) return; // 미돌파 — 신호는 당일로 소멸 (다음 bar에서 재생성)
+  const unitCost = entryPrice * (1 + fill.buyFeeRate);
+  const quantity = Math.min(signal.quantity, Math.floor(state.cash / unitCost));
+  if (quantity <= 0) return;
+
+  const buyFee = entryPrice * quantity * fill.buyFeeRate;
+  fillBuy(state, entryPrice, quantity);
+  state.cash -= buyFee;
+  trades.push({
+    date: today.date,
+    side: 'BUY',
+    price: entryPrice,
+    quantity,
+    reason: signal.reason,
+  });
+
+  // 같은 bar 청산 — stop/익절가는 실제 체결가 기준
+  const stopLossRate = Number(signal.metadata?.stopLossRate) || undefined;
+  const takeProfitRate = Number(signal.metadata?.takeProfitRate) || undefined;
+  const stopPrice = stopLossRate !== undefined ? entryPrice * (1 - stopLossRate) : undefined;
+  const takeProfitPrice = takeProfitRate !== undefined ? entryPrice * (1 + takeProfitRate) : undefined;
+  const stopHit = stopPrice !== undefined
+    && (fill.stopFill === 'low' ? today.low <= stopPrice : today.close <= stopPrice);
+
+  let exitBase: number;
+  let exitReason: string;
+  if (stopHit) {
+    exitBase = stopPrice!;
+    exitReason = '손절청산(백테스트 근사)';
+  } else if (takeProfitPrice !== undefined && today.high >= takeProfitPrice) {
+    exitBase = takeProfitPrice;
+    exitReason = '익절청산(백테스트 근사)';
+  } else {
+    exitBase = today.close;
+    exitReason = '당일청산(백테스트 근사)';
+  }
+
+  const exitPrice = exitBase * (1 - slippage);
+  const sellFees = exitPrice * quantity * (fill.sellFeeRate + fill.sellTaxRate);
+  const pnl = (exitPrice - entryPrice) * quantity - buyFee - sellFees;
+
+  fillSell(state, exitPrice, quantity);
+  state.cash -= sellFees;
+  trades.push({
+    date: today.date,
+    side: 'SELL',
+    price: exitPrice,
+    quantity,
+    reason: exitReason,
+    pnl,
+  });
 }
 
 function fillBuy(state: SimState, price: number, qty: number) {

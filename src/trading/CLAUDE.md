@@ -17,7 +17,8 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 - `strategy/` — 전략 구현체 + 레지스트리
   - `strategy-registry.service.ts` — 모든 전략을 name → instance 맵으로 등록
   - `infinite-buy.strategy.ts` — 무한매수법 (intraday VWAP exit / quota carry / RSI policy)
-  - `momentum-breakout.strategy.ts`, `grid-mean-reversion.strategy.ts`, `conservative.strategy.ts`, `trend-following.strategy.ts`, `value-factor.strategy.ts`, `daily-dca.strategy.ts`, `noop.strategy.ts`
+  - `momentum-breakout.strategy.ts` — **당일청산 변동성 돌파** (국내 전용 데이트레이딩). 돌파가 = 당일 시가 + 전일변동폭×K(0.5). hard 조건(시간 윈도우 09:05~14:30, 추격 가드 +1%, **MA20 위**, RSI≤75) + soft 채점(시간보정 거래량/VWAP/수급 중 2개). 청산: 이월 → 손절(-2%) → 트레일링 → 익절(기본 off) → 15:10 당일청산. 모든 주문 시장가, 1일 1진입. **MA20 hard 필터 근거**: 2023-06~2026-05 레짐 분석에서 K돌파 gross 엣지가 MA20 위에서만 유의 (005930 +0.176% vs +0.007%/거래). **적합 종목**: 변동성 크고 거래세 없는 레버리지 ETF류 — 일반 주식은 거래세(0.18%)가 gross 엣지보다 커서 데이트레이딩 비용 구조상 불리
+  - `grid-mean-reversion.strategy.ts`, `conservative.strategy.ts`, `trend-following.strategy.ts`, `value-factor.strategy.ts`, `daily-dca.strategy.ts`, `noop.strategy.ts`
   - `infinite-buy-quota.util.ts`, `infinite-buy-target-table.ts` — 무한매수 보조 유틸 (백테스트와 공유)
 
 ## 외부 의존성
@@ -50,3 +51,9 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
   - `MarketStateSyncService` 휴장일 캐시 — 일 1회 KIS API 갱신
 - **백테스트와의 관계**: 전략 클래스(`*.strategy.ts`)는 `BacktestEngine`/`SimulationTickEngine`에서도 동일 인스턴스를 재사용. 즉 전략의 `evaluate()` 시그니처(`PerStockTradingStrategy`)는 backtest/simulation/실거래의 공유 계약 — breaking change는 3곳 모두 영향
 - **`@Optional() SlackService`**: trading 모듈은 Slack이 없어도 부팅돼야 함. 모든 Slack 호출 분기는 `if (this.slackService)` 가드 또는 try/catch
+- **momentum-breakout 청산 reason은 한글 유지 (의도된 설계)**: `TradingService.isStopLossSignal`은 영문 'stop loss'가 포함된 SELL reason을 수동 승인 대기(Slack 알림 후 수동 매도)로 보낸다. 당일청산 전략의 손절/청산('손절청산'/'당일청산' 등)은 **자동 실행되어야 하므로** reason에 'stop loss' 문구를 쓰지 않는다 — 영문으로 통일하면 장중 청산이 마비됨
+- **'관망:' prefix 스킵은 무로깅**: continuous 전략이 매분 반복하는 정상 대기 상태(돌파 대기, 시간 윈도우 외, 미체결 대기 등)는 `TradingService.executePerStockStrategy`가 실행 로그/Slack 없이 조용히 건너뜀 (`isSilentWaitSkip`). 미동작 진단은 시뮬레이션 세션 또는 `triggerWatchStockNow`로 수행
+- **ctx.hasOpenBuyOrder / hasOpenSellOrder**: orchestrator가 이미 조회한 미체결 주문을 종목별로 매핑해 전달 — continuous 전략의 중복 주문 방지. `undefined`는 "정보 없음"이며 차단하지 않음 (수동 트리거 경로는 자체 가드 보유)
+- **ctx.evaluationMode**: `'daily-bar'`는 백테스트의 일봉 단위 평가. momentum-breakout은 이 모드에서 장중 의존 조건(시간/추격/soft)을 생략하고 `metadata.fillModel='stop-entry'` 조건부 신호를 발행 — 체결 판정은 backtest 엔진 책임
+- **국내 일봉 지표 캐시는 KST 날짜 키**: `MarketAnalysisService.getStockIndicators`는 DOMESTIC 캐시 키에 날짜를 포함하고, `prices[0]`가 당일 봉인지 검증해 prevHigh/prevLow/todayOpen을 보정 (전일 캐시 잔존·장 시작 직후 당일 봉 미생성 오염 방지). 해외는 세션이 KST 자정을 걸치므로 기존 키 유지
+- **momentum-breakout WatchStock 운영 주의**: 같은 종목에 수동 매수를 섞으면 전략이 그 물량까지 당일청산 대상으로 흡수한다. 전일 진입분이 남은 채 전략을 켜면 이월청산 규칙이 즉시 전량 매도함 (의도된 안전망)

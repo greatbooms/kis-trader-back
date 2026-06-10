@@ -485,4 +485,60 @@ describe('SimulationService', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('momentum-breakout 체결 후처리 (simulation)', () => {
+    it('BUY 체결 시 entryDate 기록 + legacy halfTakeProfitDone 제거', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        strategyParams: { halfTakeProfitDone: true, kValue: 0.6 },
+      });
+      mockPrisma.simulationSession.update.mockResolvedValue({ id: 'session-1' });
+
+      await (tickEngine as any).handleSimulationStrategySignalFill(
+        'momentum-breakout',
+        'session-1',
+        { side: 'BUY', quantity: 13, metadata: { phase: 'vb-entry' } },
+        13,
+      );
+
+      const updated = mockPrisma.simulationSession.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(updated.kValue).toBe(0.6);
+      expect(updated.halfTakeProfitDone).toBeUndefined();
+    });
+
+    it('SELL(intraday-stop) 체결 시 부분 체결이어도 entryDate 제거', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        strategyParams: { entryDate: '2026-06-10', kValue: 0.6 },
+      });
+      mockPrisma.simulationSession.update.mockResolvedValue({ id: 'session-1' });
+
+      await (tickEngine as any).handleSimulationStrategySignalFill(
+        'momentum-breakout',
+        'session-1',
+        { side: 'SELL', quantity: 10, metadata: { phase: 'intraday-stop' } },
+        13, // 부분 체결 (10 < 13)
+      );
+
+      const updated = mockPrisma.simulationSession.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toBeUndefined();
+      expect(updated.kValue).toBe(0.6);
+    });
+
+    it('SELL(eod-exit) 전량 체결 시 entryDate 제거', async () => {
+      mockPrisma.simulationSession.findUnique.mockResolvedValue({
+        strategyParams: { entryDate: '2026-06-10' },
+      });
+      mockPrisma.simulationSession.update.mockResolvedValue({ id: 'session-1' });
+
+      await (tickEngine as any).handleSimulationStrategySignalFill(
+        'momentum-breakout',
+        'session-1',
+        { side: 'SELL', quantity: 13, metadata: { phase: 'eod-exit' } },
+        13,
+      );
+
+      const updated = mockPrisma.simulationSession.update.mock.calls[0][0].data.strategyParams;
+      expect(updated.entryDate).toBeUndefined();
+    });
+  });
 });

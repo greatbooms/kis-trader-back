@@ -3,13 +3,23 @@ import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicator
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
 /**
- * 모멘텀 돌파 전략 — 실제 시나리오 기반 트레이싱 테스트
+ * 변동성 돌파 (당일청산) — 하루 사이클 트레이싱 테스트
  *
- * 시나리오: 삼성전자 (005930) 단기 급등 + 트레일링 스탑
- * - 변동성 돌파 진입 → 1차 익절 → 트레일링 스탑
+ * 시나리오: 삼성전자 (005930), 2026-06-10
+ * - 전일 고가 71000 / 저가 69000 → 변동폭 2000
+ * - 당일 시가 70000 → 돌파가 = 70000 + 2000×0.5 = 71000
+ * - 장중 매 분 평가를 시점별로 재현: 돌파 대기 → 진입 → 보유 → 청산
  */
-describe('MomentumBreakoutStrategy — Realistic Trace', () => {
+describe('MomentumBreakoutStrategy — 당일 사이클 트레이스', () => {
   const strategy = new MomentumBreakoutStrategy();
+
+  const TODAY = '2026-06-10';
+  const YESTERDAY = '2026-06-09';
+
+  /** 2026-06-10(수) KST hh:mm */
+  function kst(hour: number, minute: number, day = 10): Date {
+    return new Date(Date.UTC(2026, 5, day, hour - 9, minute));
+  }
 
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
@@ -22,19 +32,20 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
       quota: 2000000,
       cycle: 1,
       maxCycles: 40,
-      stopLossRate: 0.03,
+      stopLossRate: 0.3,
       maxPortfolioRate: 0.15,
     };
 
     const defaultPrice: StockPriceResult = {
       stockCode: '005930',
       stockName: '삼성전자',
-      currentPrice: 72000,
+      currentPrice: 70800,
       openPrice: 70000,
-      highPrice: 72500,
-      lowPrice: 69500,
-      volume: 2000000,
-    };
+      highPrice: 70900,
+      lowPrice: 69800,
+      volume: 800000,
+      tradingValue: 56400000000, // VWAP = 70500
+    } as StockPriceResult;
 
     const defaultMarketCondition: MarketCondition = {
       referenceIndexAboveMA200: true,
@@ -45,16 +56,14 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
     const defaultStockIndicators: StockIndicators = {
       currentAboveMA200: true,
       ma200: 65000,
-      ma20: 69000,
+      ma20: 69500,
       ma60: 67000,
-      rsi14: 60,
-      bollingerUpper: 75000,
-      bollingerMiddle: 70000,
-      bollingerLower: 65000,
-      volumeRatio: 2.0,
+      rsi14: 58,
+      avgVolume20: 1500000,
       prevHigh: 71000,
       prevLow: 69000,
       todayOpen: 70000,
+      foreignNetBuy: true,
     };
 
     return {
@@ -66,489 +75,307 @@ describe('MomentumBreakoutStrategy — Realistic Trace', () => {
       stockIndicators: defaultStockIndicators,
       buyableAmount: 2000000,
       totalPortfolioValue: 50000000,
+      now: kst(10, 15),
       ...overrides,
     };
   }
 
+  function holdingContext(
+    overrides: Partial<StockStrategyContext>,
+    currentPrice: number,
+    quantity = 28,
+  ): StockStrategyContext {
+    const ctx = createContext(overrides);
+    ctx.price.currentPrice = currentPrice;
+    ctx.position = {
+      stockCode: '005930',
+      quantity,
+      avgPrice: 71200,
+      currentPrice,
+      totalInvested: 71200 * quantity,
+    };
+    ctx.watchStock.strategyParams = {
+      ...(ctx.watchStock.strategyParams ?? {}),
+      entryDate: TODAY,
+    };
+    return ctx;
+  }
+
   // ============================================================
-  // 1. 진입 조건 점검 — 모든 조건 충족 시에만 매수
+  // 1. 장 초반: 돌파 전 관망
   // ============================================================
 
-  it('모든 조건 충족 → 매수', async () => {
-    // curPrice=72000 > ma20=69000 ✓
-    // rsi14=60 (50~70) ✓
-    // volumeRatio=2.0 >= 1.5 ✓
-    // breakout = 70000 + (71000-69000)*0.5 = 71000, curPrice(72000) >= 71000 ✓
-    const ctx = createContext();
-    const { signals } = await strategy.evaluateStock(ctx);
+  it('09:30 — 돌파가 미달 → 관망', async () => {
+    const ctx = createContext({ now: kst(9, 30) });
+    ctx.price.currentPrice = 70800; // < 돌파가 71000
 
-    expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('BUY');
-    // quota=2000000, buyQty = floor(2000000/72000) = 27
-    expect(signals[0].quantity).toBe(Math.floor(2000000 / 72000));
-    expect(signals[0].price).toBe(72000);
-    expect(signals[0].reason).toContain('모멘텀돌파');
-  });
-
-  it('가격 <= MA20 → 매수 안함', async () => {
-    const ctx = createContext();
-    ctx.price.currentPrice = 68000; // <= ma20(69000)
-    const { signals } = await strategy.evaluateStock(ctx);
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('돌파 대기'))).toBe(true);
   });
 
-  it('RSI < 50 → 매수 안함', async () => {
-    const ctx = createContext({
-      stockIndicators: {
-        currentAboveMA200: true,
-        ma20: 69000,
-        rsi14: 45, // < 50
-        volumeRatio: 2.0,
-        prevHigh: 71000,
-        prevLow: 69000,
-        todayOpen: 70000,
-      },
-    });
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
-  });
+  // ============================================================
+  // 2. 돌파 → 진입
+  // ============================================================
 
-  it('RSI > 70 → 매수 안함 (과열)', async () => {
-    const ctx = createContext({
-      stockIndicators: {
-        currentAboveMA200: true,
-        ma20: 69000,
-        rsi14: 75, // > 70
-        volumeRatio: 2.0,
-        prevHigh: 71000,
-        prevLow: 69000,
-        todayOpen: 70000,
-      },
-    });
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
-  });
+  it('10:15 — 돌파 직후 (+0.3%) → 시장가 매수', async () => {
+    const ctx = createContext({ now: kst(10, 15) });
+    ctx.price.currentPrice = 71200; // 돌파가 71000 돌파, 추격 한도(71710) 이내
+    // 시간보정 거래량: 경과 75분 → 1.5M × (75/390) ≈ 288,461 ≤ 800,000 ✓
+    // VWAP 70500 ≤ 71200 ✓ / MA20 69500 < 71200 ✓ / 외인 순매수 ✓
 
-  it('거래량 부족 (volumeRatio < 1.5) → 매수 안함', async () => {
-    const ctx = createContext({
-      stockIndicators: {
-        currentAboveMA200: true,
-        ma20: 69000,
-        rsi14: 60,
-        volumeRatio: 1.2, // < 1.5
-        prevHigh: 71000,
-        prevLow: 69000,
-        todayOpen: 70000,
-      },
-    });
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
-  });
-
-  it('변동성 돌파 미달 → 매수 안함', async () => {
-    // breakout = 70000 + (71000-69000)*0.5 = 71000
-    // curPrice = 70500 < 71000 → 돌파 안됨
-    const ctx = createContext();
-    ctx.price.currentPrice = 70500;
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
-  });
-
-  it('breakoutPrice 경계값: curPrice == breakoutPrice → 매수 안함 (< 아닌 >= 아님)', async () => {
-    // breakout = 70000 + (71000-69000)*0.5 = 71000
-    // curPrice = 71000 → curPrice < breakoutPrice? NO → 돌파 인정? 코드에서는 curPrice < breakoutPrice return → 71000 < 71000 = false → 통과
-    const ctx = createContext();
-    ctx.price.currentPrice = 71000;
-    // 하지만 curPrice(71000) <= ma20(69000)? NO → ma20 통과
-    // 조건: 진입됨! curPrice >= breakoutPrice → curPrice NOT < breakoutPrice
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('BUY');
+    expect(signals[0].price).toBeUndefined(); // 시장가
+    expect(signals[0].quantity).toBe(Math.floor(2000000 / 71200)); // 28
+    expect(signals[0].metadata?.phase).toBe('vb-entry');
+    expect(signals[0].metadata?.breakoutPrice).toBe(71000);
+  });
+
+  it('10:15 — 이미 급등해버린 경우 (+1.5%) → 추격 금지', async () => {
+    const ctx = createContext({ now: kst(10, 15) });
+    ctx.price.currentPrice = 72100; // > 71000 × 1.01 = 71710
+
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('추격 금지'))).toBe(true);
+  });
+
+  it('14:35 — 늦은 돌파 → 진입 윈도우 종료로 관망', async () => {
+    const ctx = createContext({ now: kst(14, 35) });
+    ctx.price.currentPrice = 71200;
+
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('시간 윈도우'))).toBe(true);
   });
 
   // ============================================================
-  // 2. 포지션 보유 — 손절
+  // 3. 보유 중: 청산 조건 미충족 → 유지
   // ============================================================
 
-  it('손절: -3% 이하 → 전량 매도', async () => {
-    // avgPrice=72000, -3% = 69840
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 69000,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 69000;
-    // profitRate = (69000-72000)/72000 = -4.2%
+  it('11:00 — 보유 중 +0.8%, 고가 인접 → 보유 유지', async () => {
+    const ctx = holdingContext({ now: kst(11, 0) }, 71800);
+    ctx.price.highPrice = 71900; // 71900×0.98 = 70462 < 71800 → 트레일링 미발동
+
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('보유 유지'))).toBe(true);
+  });
+
+  // ============================================================
+  // 4. 청산 시나리오 A — 트레일링 (고점 후 -2%)
+  // ============================================================
+
+  it('13:00 — 고가 73500 대비 -2% 하회 → 트레일링 전량 청산', async () => {
+    const ctx = holdingContext({ now: kst(13, 0) }, 72000);
+    ctx.price.highPrice = 73500; // 73500×0.98 = 72030 > 72000 → 발동
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
-    expect(signals[0].quantity).toBe(27);
+    expect(signals[0].quantity).toBe(28);
+    expect(signals[0].price).toBeUndefined(); // 시장가
+    expect(signals[0].metadata?.phase).toBe('trailing-stop');
+    expect(signals[0].reason.toLowerCase()).not.toContain('stop loss');
+  });
+
+  // ============================================================
+  // 5. 청산 시나리오 B — 손절 (-2%)
+  // ============================================================
+
+  it('11:30 — -2.1% → 손절 전량 청산', async () => {
+    const ctx = holdingContext({ now: kst(11, 30) }, 69700);
+    ctx.price.highPrice = 71300;
+    // profitRate = (69700-71200)/71200 = -2.1%
+
+    const { signals } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].metadata?.phase).toBe('intraday-stop');
     expect(signals[0].reason).toContain('손절');
+    expect(signals[0].reason.toLowerCase()).not.toContain('stop loss');
   });
 
-  it('손실 -2.5%: 아직 손절 아님', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 70200, // -2.5%
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 70200;
-    ctx.price.highPrice = 72000; // 고점과 같으니 트레일링 안걸림
+  it('11:30 — -1.5%는 손절 기준 미달 → 보유 유지', async () => {
+    const ctx = holdingContext({ now: kst(11, 30) }, 70150);
+    ctx.price.highPrice = 71300; // 71300×0.98 = 69874 < 70150 → 트레일링 미발동
+    // profitRate = (70150-71200)/71200 = -1.47%
 
     const { signals } = await strategy.evaluateStock(ctx);
-    const stopLoss = signals.find(s => s.reason?.includes('손절'));
-    expect(stopLoss).toBeUndefined();
+    expect(signals).toHaveLength(0);
   });
 
   // ============================================================
-  // 3. 트레일링 스탑 — 당일 고가 대비 -2%
+  // 6. 청산 시나리오 C — 당일청산 (15:10)
   // ============================================================
 
-  it('트레일링 스탑: 고가 78000 대비 -2% (76440) → curPrice 74500 → 발동', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 74500,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 74500;
-    ctx.price.highPrice = 78000;
-    // 78000 * 0.98 = 76440, 74500 < 76440 → 트레일링 발동
+  it('15:09 — 마감 직전이지만 아직 당일청산 시각 아님 → 보유', async () => {
+    const ctx = holdingContext({ now: kst(15, 9) }, 71400);
+    ctx.price.highPrice = 71500;
+
+    const { signals } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('15:10 — 당일청산 시각 도달 → 전량 시장가 청산', async () => {
+    const ctx = holdingContext({ now: kst(15, 10) }, 71400);
+    ctx.price.highPrice = 71500;
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
-    expect(signals[0].quantity).toBe(27);
-    expect(signals[0].reason).toContain('트레일링스탑');
+    expect(signals[0].quantity).toBe(28);
+    expect(signals[0].metadata?.phase).toBe('eod-exit');
+    expect(signals[0].reason).toContain('당일청산');
   });
 
-  it('고가 대비 -1.5%: 트레일링 미발동', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 76500,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 76500;
-    ctx.price.highPrice = 78000;
-    // 78000 * 0.98 = 76440, 76500 >= 76440 → 트레일링 미발동
+  it('15:10 — 당일청산 후 같은 날 재진입 금지', async () => {
+    // 청산 체결 후 다음 루프: 포지션 없음 + 오늘 체결 이력 존재
+    const ctx = createContext({ now: kst(15, 12), alreadyExecutedToday: true });
+    ctx.price.currentPrice = 71500;
 
     const { signals } = await strategy.evaluateStock(ctx);
-    const trailing = signals.find(s => s.reason?.includes('트레일링스탑'));
-    expect(trailing).toBeUndefined();
-  });
-
-  it('highPrice=0 → 트레일링 스탑 비활성', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 73000,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 73000;
-    ctx.price.highPrice = 0;
-
-    const { signals } = await strategy.evaluateStock(ctx);
-    const trailing = signals.find(s => s.reason?.includes('트레일링스탑'));
-    expect(trailing).toBeUndefined();
+    expect(signals).toHaveLength(0);
   });
 
   // ============================================================
-  // 4. 손절 vs 트레일링 우선순위 — 손절이 먼저
+  // 7. 청산 시나리오 D — 이월 포지션 정리 (다음날)
   // ============================================================
 
-  it('손절과 트레일링 동시 충족 → 손절이 먼저 (return)', async () => {
-    // avgPrice=72000, -3%=69840 → curPrice=69000 (손절 충족)
-    // highPrice=78000, -2%=76440 → 69000 < 76440 (트레일링도 충족)
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 69000,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 69000;
-    ctx.price.highPrice = 78000;
+  it('다음날 09:10 — 전일 진입분 잔존 → 즉시 이월청산 (진입 윈도우 무관)', async () => {
+    const ctx = createContext({ now: kst(9, 10, 11) }); // 2026-06-11 09:10
+    ctx.price.currentPrice = 70500;
+    ctx.position = {
+      stockCode: '005930',
+      quantity: 28,
+      avgPrice: 71200,
+      currentPrice: 70500,
+      totalInvested: 71200 * 28,
+    };
+    ctx.watchStock.strategyParams = { entryDate: TODAY }; // 어제(06-10) 진입
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
-    expect(signals[0].reason).toContain('손절'); // 트레일링이 아닌 손절
+    expect(signals[0].metadata?.phase).toBe('carryover-exit');
+    expect(signals[0].reason).toContain('이월청산');
+    expect(signals[0].reason).toContain(TODAY);
   });
 
-  // ============================================================
-  // 5. 익절 — 1차(+5%) 50%, 2차(+8%) 전량
-  // ============================================================
-
-  it('1차 익절: +5% → 50% 매도', async () => {
-    // avgPrice=72000, +5%=75600
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 75600,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 75600;
-    ctx.price.highPrice = 75600; // 고점과 같으므로 트레일링 안걸림
+  it('이월청산이 손절보다 우선 (전일분은 조건 없이 정리)', async () => {
+    const ctx = createContext({ now: kst(10, 0) });
+    ctx.price.currentPrice = 69000; // -3.1% (손절 조건도 충족)
+    ctx.position = {
+      stockCode: '005930',
+      quantity: 28,
+      avgPrice: 71200,
+      currentPrice: 69000,
+      totalInvested: 71200 * 28,
+    };
+    ctx.watchStock.strategyParams = { entryDate: YESTERDAY };
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('SELL');
-    expect(signals[0].quantity).toBe(Math.floor(27 / 2)); // 13
-    expect(signals[0].reason).toContain('익절(반)');
+    expect(signals[0].metadata?.phase).toBe('carryover-exit');
   });
 
-  it('2차 익절: +8% → 전량 매도', async () => {
-    // avgPrice=72000, +8%=77760
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 14, // 1차 익절 후 남은 수량
-        avgPrice: 72000,
-        currentPrice: 77760,
-        totalInvested: 1008000,
-      },
-    });
-    ctx.price.currentPrice = 77760;
-    ctx.price.highPrice = 77760;
+  // ============================================================
+  // 8. 미체결 주문 가드
+  // ============================================================
+
+  it('진입 직후 미체결 매수 주문 존재 → 다음 분 중복 진입 금지', async () => {
+    const ctx = createContext({ now: kst(10, 16), hasOpenBuyOrder: true });
+    ctx.price.currentPrice = 71200;
+
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('미체결'))).toBe(true);
+  });
+
+  it('일반 청산(손절)은 미체결 매도 주문 처리 대기 중 중복 발행 금지', async () => {
+    const ctx = holdingContext({ now: kst(11, 30), hasOpenSellOrder: true }, 69700);
+    ctx.price.highPrice = 71300;
+    // -2.1% 손절 조건이지만 직전 매도 주문이 처리 중 → 다음 분 재평가
+
+    const { signals } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+  });
+
+  it('당일청산은 미체결 매도 주문이 있어도 발행 (오버나잇 방지 우선, 중복은 브로커가 거부)', async () => {
+    const ctx = holdingContext({ now: kst(15, 11), hasOpenSellOrder: true }, 71400);
+    ctx.price.highPrice = 71500;
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('SELL');
-    expect(signals[0].quantity).toBe(14); // 전량
-    expect(signals[0].reason).toContain('익절(전량)');
+    expect(signals[0].metadata?.phase).toBe('eod-exit');
   });
 
   // ============================================================
-  // 6. 익절 우선순위 — +8% > +5% > 트레일링
+  // 9. 수량/한도
   // ============================================================
 
-  it('+8%와 +5% 동시 충족 → +8% 우선 (전량 매도)', async () => {
-    // avgPrice=72000, +8%=77760, +5%=75600
-    // curPrice=80000 → 둘 다 충족, +8%가 먼저 체크됨
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 80000,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 80000;
-    ctx.price.highPrice = 80000;
+  it('buyableAmount < quota → 주문가능금액 기준 수량', async () => {
+    const ctx = createContext({ now: kst(10, 15), buyableAmount: 500000 });
+    ctx.price.currentPrice = 71200;
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
-    expect(signals[0].quantity).toBe(27); // 전량 (8% 익절)
-    expect(signals[0].reason).toContain('익절(전량)');
+    expect(signals[0].quantity).toBe(Math.floor(500000 / 71200)); // 7
   });
 
-  // ============================================================
-  // 7. 해외 종목 테스트
-  // ============================================================
-
-  it('해외 종목: 가격 소수점 2자리 + exchangeCode 포함', async () => {
-    const ctx = createContext({
-      stockIndicators: {
-        currentAboveMA200: true,
-        ma20: 150,
-        rsi14: 60,
-        volumeRatio: 2.0,
-        prevHigh: 155,
-        prevLow: 150,
-        todayOpen: 152,
-      },
-    });
-    ctx.watchStock.market = 'OVERSEAS';
-    ctx.watchStock.exchangeCode = 'NASD';
-    ctx.watchStock.stockCode = 'AAPL';
-    // breakout = 152 + (155-150)*0.5 = 154.5
-    ctx.price.currentPrice = 155.678; // > breakout(154.5)
-
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].price).toBe(155.68); // 반올림
-    expect(signals[0].exchangeCode).toBe('NASD');
-  });
-
-  // ============================================================
-  // 8. buyableAmount 제한
-  // ============================================================
-
-  it('buyableAmount < quota → buyableAmount 기준 매수', async () => {
-    const ctx = createContext({ buyableAmount: 500000 });
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    // buyAmount = min(2000000, 500000) = 500000, qty = floor(500000/72000) = 6
-    expect(signals[0].quantity).toBe(Math.floor(500000 / 72000));
-  });
-
-  // ============================================================
-  // 9. quota=0 → 매수 불가
-  // ============================================================
-
-  it('quota=0 → 매수 0주', async () => {
-    const ctx = createContext();
+  it('quota 0 → 진입 불가', async () => {
+    const ctx = createContext({ now: kst(10, 15) });
+    ctx.price.currentPrice = 71200;
     ctx.watchStock.quota = 0;
+
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
   // ============================================================
-  // 10. 커스텀 파라미터
+  // 10. 리스크 상태
   // ============================================================
 
-  it('커스텀 kValue=0.7: 더 높은 돌파 기준', async () => {
-    const ctx = createContext();
-    ctx.watchStock.strategyParams = { kValue: 0.7 };
-    // breakout = 70000 + (71000-69000)*0.7 = 71400
-    // curPrice=72000 >= 71400 → 돌파
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('BUY');
-  });
-
-  it('커스텀 kValue=0.7 + 미세 돌파 미달', async () => {
-    const ctx = createContext();
-    ctx.watchStock.strategyParams = { kValue: 0.7 };
-    ctx.price.currentPrice = 71300; // < breakout(71400)
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
-  });
-
-  it('커스텀 stopLossRate=0.05: 더 넓은 손절', async () => {
-    // avgPrice=72000, -5%=68400
+  it('riskState.buyBlocked → 돌파해도 진입 차단', async () => {
     const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 69000, // -4.2%
-        totalInvested: 1944000,
-      },
-    });
-    ctx.watchStock.strategyParams = { stopLossRate: 0.05 };
-    ctx.price.currentPrice = 69000;
-    ctx.price.highPrice = 72000; // 트레일링 안걸리게
-
-    const { signals } = await strategy.evaluateStock(ctx);
-    // -4.2% > -5% → 손절 안됨
-    const stopLoss = signals.find(s => s.reason?.includes('손절'));
-    expect(stopLoss).toBeUndefined();
-  });
-
-  // ============================================================
-  // 11. prevHigh = prevLow (변동폭 0) → breakout = todayOpen
-  // ============================================================
-
-  it('전일 변동폭 0 → breakout = todayOpen, curPrice >= todayOpen 이면 매수', async () => {
-    const ctx = createContext({
-      stockIndicators: {
-        currentAboveMA200: true,
-        ma20: 69000,
-        rsi14: 60,
-        volumeRatio: 2.0,
-        prevHigh: 70000,
-        prevLow: 70000, // range = 0
-        todayOpen: 70000,
-      },
-    });
-    // breakout = 70000 + 0*0.5 = 70000
-    // curPrice(72000) >= 70000 → 돌파
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('BUY');
-  });
-
-  // ============================================================
-  // 12. riskState 관련
-  // ============================================================
-
-  it('riskState.buyBlocked → 매수 차단', async () => {
-    const ctx = createContext({
+      now: kst(10, 15),
       riskState: {
         liquidateAll: false,
         buyBlocked: true,
         positionCount: 3,
         investedRate: 0.5,
         dailyPnlRate: -0.02,
-        drawdown: 0.05,
-        reasons: ['MDD 5%'],
+        drawdown: -0.09,
+        reasons: ['MDD -9%'],
       },
     });
+    ctx.price.currentPrice = 71200;
+
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(0);
   });
 
-  it('riskState.liquidateAll + 포지션 → 전량 청산', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 71000,
-        totalInvested: 1944000,
+  it('riskState.liquidateAll + 보유 → 리스크 전량청산 최우선', async () => {
+    const ctx = holdingContext(
+      {
+        now: kst(11, 0),
+        riskState: {
+          liquidateAll: true,
+          buyBlocked: true,
+          positionCount: 1,
+          investedRate: 0.5,
+          dailyPnlRate: -0.1,
+          drawdown: -0.13,
+          reasons: ['MDD -13% 초과'],
+        },
       },
-      riskState: {
-        liquidateAll: true,
-        buyBlocked: true,
-        positionCount: 1,
-        investedRate: 0.5,
-        dailyPnlRate: -0.1,
-        drawdown: -0.13,
-        reasons: ['MDD -13% 초과'],
-      },
-    });
-    ctx.price.currentPrice = 71000;
+      71400,
+    );
 
     const { signals } = await strategy.evaluateStock(ctx);
     expect(signals).toHaveLength(1);
     expect(signals[0].side).toBe('SELL');
-    expect(signals[0].quantity).toBe(27);
+    expect(signals[0].quantity).toBe(28);
     expect(signals[0].reason).toContain('리스크 전량청산');
-  });
-
-  // ============================================================
-  // 13. 포지션 보유 중 이익도 손실도 아닌 상태 → 시그널 없음
-  // ============================================================
-
-  it('보유 중 변화 없음 (profitRate ≈ 0) → 시그널 없음', async () => {
-    const ctx = createContext({
-      position: {
-        stockCode: '005930',
-        quantity: 27,
-        avgPrice: 72000,
-        currentPrice: 72000,
-        totalInvested: 1944000,
-      },
-    });
-    ctx.price.currentPrice = 72000;
-    ctx.price.highPrice = 72500; // 72500*0.98=71050, 72000 > 71050 → 트레일링 안걸림
-
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(0);
   });
 });
