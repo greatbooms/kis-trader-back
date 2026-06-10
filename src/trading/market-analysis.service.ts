@@ -46,7 +46,12 @@ export class MarketAnalysisService {
     stockCode: string,
     currentPrice: number,
   ): Promise<StockIndicators> {
-    const cacheKey = `indicators:${market}:${exchangeCode}:${stockCode}`;
+    // DOMESTIC은 캐시 키에 KST 날짜 포함 — 전일 장중에 만든 캐시(TTL 24h)가
+    // 다음 날 아침까지 살아남아 prevHigh/prevLow/todayOpen이 하루 밀린 채
+    // 동결되는 것을 방지한다. 해외는 세션이 KST 자정을 걸치므로 기존 키 유지.
+    const cacheKey = market === 'DOMESTIC'
+      ? `indicators:${market}:${exchangeCode}:${stockCode}:${this.getKstDate()}`
+      : `indicators:${market}:${exchangeCode}:${stockCode}`;
     const cached = this.getCache<StockIndicators>(cacheKey);
     if (cached) return cached;
 
@@ -106,11 +111,23 @@ export class MarketAnalysisService {
       const volatility30d = prices.length >= 31 ? this.calculateVolatility(prices.slice(0, 31)) : undefined;
       const atrPercent = atr14 && currentPrice > 0 ? (atr14 / currentPrice) * 100 : undefined;
 
-      // 전일 OHLC / 당일 시가
-      const prevHigh = prices.length >= 2 ? prices[1].high : undefined;
-      const prevLow = prices.length >= 2 ? prices[1].low : undefined;
-      const prevClose = prices.length >= 2 ? prices[1].close : undefined;
-      const todayOpen = prices.length >= 1 ? prices[0].open : undefined;
+      // 전일 OHLC / 당일 시가 — prices[0]가 정말 '오늘' 봉인지 검증 (DOMESTIC).
+      // KIS 일봉은 장중에 당일 진행 봉을 포함하지만, 장 시작 직후 등 당일 봉이
+      // 아직 없으면 prices[0]는 전일 봉이다. 이때 prev*를 prices[1]로 잡으면
+      // '그저께' 값이 되어 돌파가 계산이 통째로 틀어진다.
+      let prevBarIndex = 1;
+      let todayOpen = prices.length >= 1 ? prices[0].open : undefined;
+      if (market === 'DOMESTIC') {
+        const kstTodayYmd = this.getKstDate().replace(/-/g, '');
+        const latestBarYmd = (prices[0]?.date ?? '').replace(/-/g, '');
+        if (latestBarYmd !== kstTodayYmd) {
+          prevBarIndex = 0; // 당일 봉 미생성 — 가장 최근 봉이 곧 전일
+          todayOpen = undefined;
+        }
+      }
+      const prevHigh = prices.length > prevBarIndex ? prices[prevBarIndex].high : undefined;
+      const prevLow = prices.length > prevBarIndex ? prices[prevBarIndex].low : undefined;
+      const prevClose = prices.length > prevBarIndex ? prices[prevBarIndex].close : undefined;
 
       const result: StockIndicators = {
         ma200,

@@ -359,6 +359,59 @@ describe('MarketAnalysisService', () => {
     });
   });
 
+  // ---- getStockIndicators 일봉 날짜 무결성 (DOMESTIC) ----
+  describe('getStockIndicators — 일봉 날짜 무결성', () => {
+    it('당일 봉 포함 시: prev* = 어제 봉, todayOpen = 당일 시가', async () => {
+      const prices = generateDailyPrices(40); // prices[0].date = 오늘
+      mockKisDomestic.getDailyPrices.mockResolvedValue(prices);
+
+      const result = await service.getStockIndicators('DOMESTIC', 'KRX', '005930', 100);
+
+      expect(result.todayOpen).toBe(prices[0].open);
+      expect(result.prevHigh).toBe(prices[1].high);
+      expect(result.prevLow).toBe(prices[1].low);
+      expect(result.prevClose).toBe(prices[1].close);
+    });
+
+    it('당일 봉 미생성 시 (장 시작 직후): prev* = 가장 최근 봉, todayOpen = undefined', async () => {
+      const prices = generateDailyPrices(41).slice(1); // prices[0].date = 어제
+      mockKisDomestic.getDailyPrices.mockResolvedValue(prices);
+
+      const result = await service.getStockIndicators('DOMESTIC', 'KRX', '005930', 100);
+
+      expect(result.todayOpen).toBeUndefined();
+      expect(result.prevHigh).toBe(prices[0].high);
+      expect(result.prevLow).toBe(prices[0].low);
+      expect(result.prevClose).toBe(prices[0].close);
+    });
+
+    it('DOMESTIC 지표 캐시 키에 KST 날짜가 포함된다 (전일 캐시 잔존 방지)', async () => {
+      const prices = generateDailyPrices(40);
+      mockKisDomestic.getDailyPrices.mockResolvedValue(prices);
+      const setCacheSpy = jest.spyOn(service, 'setCache');
+
+      await service.getStockIndicators('DOMESTIC', 'KRX', '005930', 100);
+
+      expect(setCacheSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/^indicators:DOMESTIC:KRX:005930:\d{4}-\d{2}-\d{2}$/),
+        expect.anything(),
+      );
+    });
+
+    it('OVERSEAS 지표 캐시 키는 기존 형식 유지 (해외 세션은 KST 자정을 걸침)', async () => {
+      const prices = generateDailyPrices(40);
+      mockKisOverseas.getDailyPrices.mockResolvedValue(prices);
+      const setCacheSpy = jest.spyOn(service, 'setCache');
+
+      await service.getStockIndicators('OVERSEAS', 'NASD', 'AAPL', 150);
+
+      expect(setCacheSpy).toHaveBeenCalledWith(
+        'indicators:OVERSEAS:NASD:AAPL',
+        expect.anything(),
+      );
+    });
+  });
+
   describe('getIntradayVwap', () => {
     it('should calculate domestic intraday VWAP from trading value and volume', async () => {
       const vwap = await service.getIntradayVwap('DOMESTIC', 'KRX', '005930', {
@@ -445,13 +498,20 @@ describe('MarketAnalysisService', () => {
   });
 });
 
-// Helper: generate mock daily price data
+// Helper: KST 기준 오늘로부터 offset일 전 날짜 (YYYYMMDD — KIS 일봉 포맷)
+function ymdKst(offsetDays: number): string {
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  kst.setUTCDate(kst.getUTCDate() - offsetDays);
+  return kst.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// Helper: generate mock daily price data (prices[0] = 오늘, reverse-chronological)
 function generateDailyPrices(count: number): Array<{ date: string; close: number; open: number; high: number; low: number; volume: number }> {
   const prices: Array<{ date: string; close: number; open: number; high: number; low: number; volume: number }> = [];
   for (let i = 0; i < count; i++) {
     const base = 100 + Math.sin(i * 0.1) * 20;
     prices.push({
-      date: `2026${String(Math.floor(i / 30) + 1).padStart(2, '0')}${String((i % 30) + 1).padStart(2, '0')}`,
+      date: ymdKst(i),
       close: base,
       open: base - 1,
       high: base + 3,
