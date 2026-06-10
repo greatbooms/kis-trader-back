@@ -236,7 +236,7 @@ model DayTradeCandidate {
   simulationSessionId String?  @map("simulation_session_id") // soft ref — 의도적으로 FK 없음 (세션 삭제 후에도 후보 기록의 세션 흔적 보존)
   indicators          Json
   createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@unique([screeningDate, market, stockCode])
   @@index([screeningDate, market])
