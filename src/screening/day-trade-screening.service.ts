@@ -168,6 +168,7 @@ export class DayTradeScreeningService {
     const scores: DayTradeCandidateScore[] = [];
     const from = kstDateNDaysAgo(DAILY_PRICE_LOOKBACK_DAYS);
 
+    // KIS 호출 간격은 KisBaseService.rateLimit()가 전역 직렬화(67ms/300ms)로 보장 — 서비스 레벨 딜레이 불필요
     for (const item of universe) {
       try {
         const prices = await this.kisDomestic.getDailyPrices(item.stockCode, from, date);
@@ -175,10 +176,8 @@ export class DayTradeScreeningService {
         if (!indicators) {
           // 봉 부족은 하드필터 탈락이 아닌 평가 전제조건 미달 — DB 저장 없이 로그로만 추적
           this.logger.log(`[${item.stockCode}] ${item.stockName} 확정 일봉 부족으로 평가 제외`);
-          await this.sleep(60); // continue가 루프 끝 sleep을 건너뛰므로 KIS 호출 간격 유지
           continue;
         }
-        await this.sleep(60); // KIS rate limit
         const price = await this.kisDomestic.getPrice(item.stockCode);
         scores.push(
           buildDayTradeScore(item.stockCode, price.stockName || item.stockName, indicators, {
@@ -190,7 +189,6 @@ export class DayTradeScreeningService {
       } catch (e) {
         this.logger.warn(`[${item.stockCode}] 데이트레이드 평가 실패: ${e.message}`);
       }
-      await this.sleep(60); // KIS rate limit
     }
     return scores;
   }
@@ -315,9 +313,5 @@ export class DayTradeScreeningService {
     } catch (e) {
       this.logger.warn(`[DT] Slack 리포트 전송 실패: ${e.message}`);
     }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
