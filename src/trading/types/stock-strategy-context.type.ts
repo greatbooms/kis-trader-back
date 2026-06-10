@@ -29,6 +29,18 @@ export interface StockStrategyContext {
   totalPortfolioValue: number;
   marketRegime?: MarketRegimeLabel;
   riskState?: RiskState;
+  /**
+   * 평가 컨텍스트 종류. 미설정 시 'realtime'(실시간 시세 기반)으로 간주.
+   * 'daily-bar'는 백테스트의 일봉 단위 평가 — 장중 시세 의존 조건(시간 윈도우,
+   * 당일 누적거래량, VWAP 등)을 평가할 수 없으므로 전략이 근사 모드로 동작한다.
+   */
+  evaluationMode?: 'realtime' | 'daily-bar';
+  /** 이 종목의 미체결 매수 주문 존재 여부. undefined = 정보 없음 (차단하지 않음) */
+  hasOpenBuyOrder?: boolean;
+  /** 이 종목의 미체결 매도 주문 존재 여부. undefined = 정보 없음 (차단하지 않음) */
+  hasOpenSellOrder?: boolean;
+  /** 평가 기준 시각 — 테스트/리플레이용 주입. 미설정 시 현재 시각 사용 */
+  now?: Date;
 }
 
 export type ExecutionMode =

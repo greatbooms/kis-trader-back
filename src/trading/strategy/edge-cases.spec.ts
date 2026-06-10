@@ -284,30 +284,43 @@ describe('Edge Cases - GridMeanReversionStrategy', () => {
 
 describe('Edge Cases - MomentumBreakoutStrategy', () => {
   const strategy = new MomentumBreakoutStrategy();
+  const kst = (hour: number, minute: number) => new Date(Date.UTC(2026, 5, 10, hour - 9, minute));
 
-  it('prevHigh = prevLow (zero range): breakout = todayOpen, should buy if price >= todayOpen', async () => {
+  it('prevHigh = prevLow (zero range): 돌파 기준이 없어 진입하지 않음', async () => {
     const ctx = createBaseContext({
       stockIndicators: {
         currentAboveMA200: true,
         ma20: 69000,
         rsi14: 60,
-        volumeRatio: 2.0,
         prevHigh: 70000,
-        prevLow: 70000, // zero range
+        prevLow: 70000, // zero range — 변동폭 0이면 "시가 위 = 돌파"로 퇴화하므로 차단
         todayOpen: 69000,
       },
+      now: kst(10, 0),
     });
     ctx.price.currentPrice = 70000;
-    // breakout = 69000 + 0 * 0.5 = 69000
-    // curPrice(70000) >= 69000 → buy
 
-    const { signals } = await strategy.evaluateStock(ctx);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].side).toBe('BUY');
+    const { signals, skipReasons } = await strategy.evaluateStock(ctx);
+    expect(signals).toHaveLength(0);
+    expect(skipReasons.some((r) => r.includes('변동폭'))).toBe(true);
   });
 
   it('highPrice = 0: should not trigger trailing stop', async () => {
     const ctx = createBaseContext({
+      watchStock: {
+        id: 'ws-1',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        stockName: 'Samsung',
+        strategyName: 'momentum-breakout',
+        quota: 1000000,
+        cycle: 1,
+        maxCycles: 40,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 0.15,
+        strategyParams: { entryDate: '2026-06-10' },
+      },
       position: {
         stockCode: '005930',
         quantity: 10,
@@ -315,13 +328,13 @@ describe('Edge Cases - MomentumBreakoutStrategy', () => {
         currentPrice: 71000,
         totalInvested: 700000,
       },
+      now: kst(10, 0),
     });
     ctx.price.currentPrice = 71000;
     ctx.price.highPrice = 0;
 
     const { signals } = await strategy.evaluateStock(ctx);
-    const trailing = signals.find((s) => s.reason?.includes('트레일링스탑'));
-    expect(trailing).toBeUndefined();
+    expect(signals).toHaveLength(0);
   });
 });
 

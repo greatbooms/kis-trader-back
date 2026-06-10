@@ -416,6 +416,7 @@ export class TradingOrchestrator {
             marketRegime: regime,
             riskState,
             today,
+            unfilledOrders,
             caches: {
               investorTrade: investorTradeCache,
               dividendSchedule: dividendScheduleCache,
@@ -498,6 +499,7 @@ export class TradingOrchestrator {
     marketRegime: any;
     riskState: any;
     today: string;
+    unfilledOrders: UnfilledOrder[];
     caches: {
       investorTrade: Map<string, Promise<any[] | undefined>>;
       dividendSchedule: Map<string, Promise<any[] | undefined>>;
@@ -507,11 +509,18 @@ export class TradingOrchestrator {
       secFundamentals: Map<string, Promise<SecFundamentals | undefined>>;
     };
   }): Promise<StockStrategyContext | null> {
-    const { market, ws, strategyName, positions, totalPortfolioValue, marketCondition, marketRegime, riskState, today, caches } = args;
+    const { market, ws, strategyName, positions, totalPortfolioValue, marketCondition, marketRegime, riskState, today, unfilledOrders, caches } = args;
 
     const price = market === 'DOMESTIC'
       ? await this.kisDomestic.getPrice(ws.stockCode)
       : await this.kisOverseas.getPrice(ws.exchangeCode, ws.stockCode);
+
+    // 종목별 미체결 주문 → continuous 전략의 중복 주문 방지 플래그
+    const stockOpenOrders = unfilledOrders.filter(
+      (order) =>
+        order.stockCode === ws.stockCode
+        && (!order.exchangeCode || order.exchangeCode === ws.exchangeCode),
+    );
 
     const pos = positions.find((p) => p.stockCode === ws.stockCode);
 
@@ -670,6 +679,8 @@ export class TradingOrchestrator {
       totalPortfolioValue,
       marketRegime,
       riskState,
+      hasOpenBuyOrder: stockOpenOrders.some((order) => order.side === 'BUY'),
+      hasOpenSellOrder: stockOpenOrders.some((order) => order.side === 'SELL'),
     };
   }
 
@@ -832,6 +843,8 @@ export class TradingOrchestrator {
       totalPortfolioValue,
       marketRegime: regime,
       riskState,
+      // hasOpenBuyOrder/hasOpenSellOrder 미설정(undefined) — 수동 트리거는
+      // triggerWatchStockNow에서 이미 열린 주문을 검사해 차단하므로 중복 가드 불필요
     };
   }
 

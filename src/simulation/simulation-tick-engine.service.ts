@@ -205,6 +205,9 @@ export class SimulationTickEngine {
         );
       }
 
+      // 세션 내 pending 주문 → continuous 전략의 중복 주문 방지 플래그 (실거래와 동일 계약)
+      const sessionPendingOrders = this.pendingOrders.get(sessionId) || [];
+
       const ctx: StockStrategyContext = {
         watchStock: watchStockConfig,
         price,
@@ -223,6 +226,8 @@ export class SimulationTickEngine {
         totalPortfolioValue,
         marketRegime,
         riskState,
+        hasOpenBuyOrder: sessionPendingOrders.some((order) => order.side === 'BUY'),
+        hasOpenSellOrder: sessionPendingOrders.some((order) => order.side === 'SELL'),
       };
 
       const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
@@ -783,6 +788,16 @@ export class SimulationTickEngine {
     }
   }
 
+  /** 당일청산 변동성 돌파의 전량 청산 phase — 실거래(TradingService)와 동일 목록 유지 */
+  private static readonly MOMENTUM_FULL_EXIT_PHASES = new Set([
+    'carryover-exit',
+    'intraday-stop',
+    'trailing-stop',
+    'take-profit',
+    'eod-exit',
+    'risk-liquidation',
+  ]);
+
   private async handleMomentumBreakoutSignalFill(
     sessionId: string,
     signal: { side: string; quantity: number; metadata?: Record<string, any> },
@@ -790,41 +805,23 @@ export class SimulationTickEngine {
   ): Promise<void> {
     if (signal.side === 'BUY') {
       await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => {
-        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
+        const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         nextParams.entryDate = this.getTodayDate();
-        delete nextParams.halfTakeProfitDone;
+        delete nextParams.halfTakeProfitDone; // legacy 키 정리 (구버전 부분익절 상태)
         return nextParams;
       });
       return;
     }
 
-    if (signal.metadata?.phase === 'take-profit-half') {
-      const remainingQty = Math.max(0, currentPositionQty - signal.quantity);
-      if (remainingQty > 0) {
-        await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => ({
-          ...(params as MomentumBreakoutStrategyParams),
-          halfTakeProfitDone: true,
-        }));
-      } else {
-        await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => {
-          const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
-          delete nextParams.halfTakeProfitDone;
-          delete nextParams.entryDate;
-          return nextParams;
-        });
-      }
-      return;
-    }
-
+    const phase = signal.metadata?.phase as string | undefined;
     if (
-      signal.metadata?.phase === 'take-profit-full'
-      || signal.metadata?.phase === 'time-stop'
+      (phase && SimulationTickEngine.MOMENTUM_FULL_EXIT_PHASES.has(phase))
       || signal.quantity >= currentPositionQty
     ) {
       await this.sessionManager.updateSessionStrategyParams(sessionId, (params) => {
-        const nextParams = { ...(params as MomentumBreakoutStrategyParams) };
-        delete nextParams.halfTakeProfitDone;
+        const nextParams = { ...params } as MomentumBreakoutStrategyParams & Record<string, any>;
         delete nextParams.entryDate;
+        delete nextParams.halfTakeProfitDone;
         return nextParams;
       });
     }

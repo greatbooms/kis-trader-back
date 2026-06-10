@@ -339,106 +339,140 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
     });
   });
 
-  describe('모멘텀 돌파: 급등 + 트레일링 시나리오', () => {
+  describe('변동성 돌파: 당일 사이클 시나리오 (진입 → 보유 → 당일청산)', () => {
     const strategy = new MomentumBreakoutStrategy();
+    const kst = (hour: number, minute: number) => new Date(Date.UTC(2026, 5, 10, hour - 9, minute));
 
-    it('should enter on breakout, take partial profit, then trailing stop', async () => {
-      // Day 1: 변동성 돌파 진입
+    const momentumWatchStock = {
+      id: 'ws-1',
+      market: 'DOMESTIC' as const,
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      stockName: 'Samsung',
+      strategyName: 'momentum-breakout',
+      quota: 1000000,
+      cycle: 1,
+      maxCycles: 40,
+      stopLossRate: 0.3,
+      maxPortfolioRate: 0.15,
+    };
+
+    const momentumIndicators = {
+      currentAboveMA200: true,
+      ma20: 70000,
+      rsi14: 60,
+      avgVolume20: 1000000,
+      prevHigh: 71000,
+      prevLow: 67000,
+      todayOpen: 69000,
+      foreignNetBuy: true,
+    };
+
+    it('should enter on breakout and exit at end of day', async () => {
+      // 10:00 — 돌파가(69000 + 4000×0.5 = 71000) 직후 진입
       const ctx1 = createBaseContext({
-        watchStock: {
-          id: 'ws-1',
-          market: 'DOMESTIC',
-          exchangeCode: 'KRX',
-          stockCode: '005930',
-          stockName: 'Samsung',
-          strategyName: 'momentum-breakout',
-          quota: 1000000,
-          cycle: 1,
-          maxCycles: 40,
-          stopLossRate: 0.3,
-          maxPortfolioRate: 0.15,
-        },
-        stockIndicators: {
-          currentAboveMA200: true,
-          ma20: 70000,
-          rsi14: 60,
-          volumeRatio: 2.0,
-          prevHigh: 71000,
-          prevLow: 67000,
-          todayOpen: 69000,
-        },
+        watchStock: { ...momentumWatchStock },
+        stockIndicators: { ...momentumIndicators },
+        now: kst(10, 0),
       });
-      ctx1.price.currentPrice = 72000; // > breakout(69000 + 4000*0.5 = 71000)
+      ctx1.price.currentPrice = 71200; // 돌파 + 추격 한도(71710) 이내
+      ctx1.price.openPrice = 69000;
+      ctx1.price.volume = 800000;
+      ctx1.price.tradingValue = 56000000000; // VWAP = 70000
 
       const { signals: signals1 } = await strategy.evaluateStock(ctx1);
       expect(signals1).toHaveLength(1);
       expect(signals1[0].side).toBe('BUY');
+      expect(signals1[0].price).toBeUndefined(); // 시장가
       const buyQty = signals1[0].quantity;
 
-      // Day 2: +5.5% → 1차 익절 (50%)
+      // 13:00 — +0.4% 보유 유지
       const ctx2 = createBaseContext({
         watchStock: {
-          id: 'ws-1',
-          market: 'DOMESTIC',
-          exchangeCode: 'KRX',
-          stockCode: '005930',
-          stockName: 'Samsung',
-          strategyName: 'momentum-breakout',
-          quota: 1000000,
-          cycle: 1,
-          maxCycles: 40,
-          stopLossRate: 0.3,
-          maxPortfolioRate: 0.15,
+          ...momentumWatchStock,
+          strategyParams: { entryDate: '2026-06-10' },
         },
+        stockIndicators: { ...momentumIndicators },
         position: {
           stockCode: '005930',
           quantity: buyQty,
-          avgPrice: 72000,
-          currentPrice: 76000, // +5.6%
-          totalInvested: 72000 * buyQty,
+          avgPrice: 71200,
+          currentPrice: 71500,
+          totalInvested: 71200 * buyQty,
         },
+        now: kst(13, 0),
       });
-      ctx2.price.currentPrice = 76000;
-      ctx2.price.highPrice = 76000;
+      ctx2.price.currentPrice = 71500;
+      ctx2.price.highPrice = 71600; // 트레일링 미발동 (71600×0.98 = 70168)
 
       const { signals: signals2 } = await strategy.evaluateStock(ctx2);
-      expect(signals2).toHaveLength(1);
-      expect(signals2[0].side).toBe('SELL');
-      expect(signals2[0].reason).toContain('익절');
+      expect(signals2).toHaveLength(0);
 
-      // Day 3: 고점 후 2% 하락 → 트레일링 스탑
-      const remainQty = buyQty - signals2[0].quantity;
-      if (remainQty > 0) {
-        const ctx3 = createBaseContext({
-          watchStock: {
-            id: 'ws-1',
-            market: 'DOMESTIC',
-            exchangeCode: 'KRX',
-            stockCode: '005930',
-            stockName: 'Samsung',
-            strategyName: 'momentum-breakout',
-            quota: 1000000,
-            cycle: 1,
-            maxCycles: 40,
-            stopLossRate: 0.3,
-            maxPortfolioRate: 0.15,
-          },
-          position: {
-            stockCode: '005930',
-            quantity: remainQty,
-            avgPrice: 72000,
-            currentPrice: 74500,
-            totalInvested: 72000 * remainQty,
-          },
-        });
-        ctx3.price.currentPrice = 74500;
-        ctx3.price.highPrice = 78000; // 74500 < 78000 * 0.98(76440) → trailing
+      // 15:10 — 당일청산
+      const ctx3 = createBaseContext({
+        watchStock: {
+          ...momentumWatchStock,
+          strategyParams: { entryDate: '2026-06-10' },
+        },
+        stockIndicators: { ...momentumIndicators },
+        position: {
+          stockCode: '005930',
+          quantity: buyQty,
+          avgPrice: 71200,
+          currentPrice: 71400,
+          totalInvested: 71200 * buyQty,
+        },
+        now: kst(15, 10),
+      });
+      ctx3.price.currentPrice = 71400;
+      ctx3.price.highPrice = 71600;
 
-        const { signals: signals3 } = await strategy.evaluateStock(ctx3);
-        expect(signals3).toHaveLength(1);
-        expect(signals3[0].side).toBe('SELL');
-        expect(signals3[0].reason).toContain('트레일링스탑');
-      }
+      const { signals: signals3 } = await strategy.evaluateStock(ctx3);
+      expect(signals3).toHaveLength(1);
+      expect(signals3[0].side).toBe('SELL');
+      expect(signals3[0].quantity).toBe(buyQty); // 전량
+      expect(signals3[0].metadata?.phase).toBe('eod-exit');
+      expect(signals3[0].reason).toContain('당일청산');
+    });
+
+    it('should stop out intraday and not re-enter same day', async () => {
+      // 11:30 — 손절 (-2.1%)
+      const ctx1 = createBaseContext({
+        watchStock: {
+          ...momentumWatchStock,
+          strategyParams: { entryDate: '2026-06-10' },
+        },
+        stockIndicators: { ...momentumIndicators },
+        position: {
+          stockCode: '005930',
+          quantity: 14,
+          avgPrice: 71200,
+          currentPrice: 69700,
+          totalInvested: 71200 * 14,
+        },
+        now: kst(11, 30),
+      });
+      ctx1.price.currentPrice = 69700;
+      ctx1.price.highPrice = 71300;
+
+      const { signals: signals1 } = await strategy.evaluateStock(ctx1);
+      expect(signals1).toHaveLength(1);
+      expect(signals1[0].metadata?.phase).toBe('intraday-stop');
+
+      // 12:00 — 손절 체결 후 같은 날 재진입 금지
+      const ctx2 = createBaseContext({
+        watchStock: { ...momentumWatchStock },
+        stockIndicators: { ...momentumIndicators },
+        alreadyExecutedToday: true,
+        now: kst(12, 0),
+      });
+      ctx2.price.currentPrice = 71200;
+      ctx2.price.openPrice = 69000;
+      ctx2.price.volume = 900000;
+      ctx2.price.tradingValue = 63000000000;
+
+      const { signals: signals2 } = await strategy.evaluateStock(ctx2);
+      expect(signals2).toHaveLength(0);
     });
   });
 
