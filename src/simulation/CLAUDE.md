@@ -44,3 +44,4 @@
   - `backtest/`는 CLI standalone, DB cache + 마크다운 리포트
   - `simulation/`은 운영 NestJS 앱에서 라이브 KIS 시세 기반 paper 세션 (실시간 가격 사용)
   - 둘 다 `StrategyRegistryService`의 동일 전략 인스턴스를 재사용 — 전략 시그니처는 3곳(실거래/시뮬/백테스트) 공유 계약
+- **[DT] 자동 세션**: `screening` 모듈의 `DayTradeScreeningService`가 `strategyParams.dayTradeAuto=true` 마커로 momentum-breakout 페이퍼 세션을 매 거래일 생성/정리한다. 이 마커가 있는 세션의 상태를 수동으로 바꾸면 다음 날 08:30 정리 로직과 충돌할 수 있음 (포지션 없는 RUNNING 세션은 자동 COMPLETED 처리됨)
