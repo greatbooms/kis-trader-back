@@ -175,6 +175,7 @@ export class DayTradeScreeningService {
         if (!indicators) {
           // 봉 부족은 하드필터 탈락이 아닌 평가 전제조건 미달 — DB 저장 없이 로그로만 추적
           this.logger.log(`[${item.stockCode}] ${item.stockName} 확정 일봉 부족으로 평가 제외`);
+          await this.sleep(60); // continue가 루프 끝 sleep을 건너뛰므로 KIS 호출 간격 유지
           continue;
         }
         await this.sleep(60); // KIS rate limit
