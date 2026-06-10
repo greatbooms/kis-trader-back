@@ -1,5 +1,6 @@
 import { PerStockTradingStrategy, StockStrategyContext, TradingSignal } from '../trading/types';
 import { SuggestedStrategy } from './types';
+import { DAY_TRADE_MIN_ATR_PCT, isStrictKrxEtf } from './day-trade-selector';
 
 const SCREENING_RECOMMENDATION_PRIORITY = [
   'momentum-breakout',
@@ -31,7 +32,27 @@ function hasStrongSellFlow(stockIndicators: StockStrategyContext['stockIndicator
     && stockIndicators.programTradeDirection === 'SELL';
 }
 
+/**
+ * momentum-breakout 추천 게이트.
+ * 백테스트(2023-06~2026-05) 결론: 거래세 면제 ETF + MA20 위 레짐 + 충분한 변동폭에서만
+ * 양의 기대값 — 일반 주식은 거래세(0.18%)가 gross 엣지보다 커서 구조적 손실.
+ * ETN/스팩은 isStrictKrxEtf가 차단 (발행사 신용 리스크/유동성 구조 — day-trade-selector와 동일 기준).
+ */
+function passesMomentumBreakoutGate(context: StockStrategyContext): boolean {
+  const { stockIndicators, watchStock, price } = context;
+  if (watchStock.market !== 'DOMESTIC') return false; // 국내 전용 전략
+  if (!isStrictKrxEtf(watchStock.stockName ?? '', watchStock.stockCode)) return false;
+  if (stockIndicators.investCautionYn || stockIndicators.shortOverheatYn) return false;
+  if (stockIndicators.marketWarnCode && stockIndicators.marketWarnCode !== '00') return false;
+  const ma20 = stockIndicators.ma20;
+  if (ma20 === undefined || ma20 <= 0 || price.currentPrice <= ma20) return false;
+  const atrPercent = stockIndicators.atrPercent;
+  if (atrPercent === undefined || atrPercent < DAY_TRADE_MIN_ATR_PCT) return false;
+  return true;
+}
+
 function passesRecommendationGate(strategyName: string, context: StockStrategyContext): boolean {
+  if (strategyName === 'momentum-breakout') return passesMomentumBreakoutGate(context);
   if (strategyName !== 'infinite-buy') return true;
 
   const { stockIndicators } = context;

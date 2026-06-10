@@ -59,6 +59,18 @@ function createContext(): StockStrategyContext {
   };
 }
 
+/** momentum-breakout 게이트(ETF + MA20 위 + ATR)를 통과하는 ETF 컨텍스트 */
+function createEtfContext(): StockStrategyContext {
+  const context = createContext();
+  context.watchStock.stockName = 'KODEX 레버리지';
+  context.watchStock.stockCode = '122630';
+  context.price.stockCode = '122630';
+  context.price.stockName = 'KODEX 레버리지';
+  context.stockIndicators.ma20 = 65000; // currentPrice 70000 > ma20
+  context.stockIndicators.atrPercent = 2; // ≥ 1.2 (DAY_TRADE_MIN_ATR_PCT)
+  return context;
+}
+
 function createStrategy(
   name: string,
   displayName: string,
@@ -89,14 +101,76 @@ function createStrategy(
 }
 
 describe('suggestStrategies', () => {
+  it('momentum-breakout은 일반 주식(비ETF)이면 BUY 신호가 있어도 제외한다', async () => {
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('005930', 'BUY', '돌파')]),
+    ];
+    const results = await suggestStrategies(strategies, createContext()); // Samsung 컨텍스트
+    expect(results).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 MA20 아래면 제외한다', async () => {
+    const context = createEtfContext();
+    context.stockIndicators.ma20 = 75000; // currentPrice 70000 < ma20
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    expect(await suggestStrategies(strategies, context)).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 ATR 미달이면 제외한다', async () => {
+    const context = createEtfContext();
+    context.stockIndicators.atrPercent = 1.0;
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    expect(await suggestStrategies(strategies, context)).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 해외 종목이면 제외한다 (국내 전용 전략)', async () => {
+    const context = createEtfContext();
+    context.watchStock.market = 'OVERSEAS';
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    expect(await suggestStrategies(strategies, context)).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 투자유의 종목이면 제외한다', async () => {
+    const context = createEtfContext();
+    context.stockIndicators.investCautionYn = true;
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    expect(await suggestStrategies(strategies, context)).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 시장경고(00 아님)이면 제외한다', async () => {
+    const context = createEtfContext();
+    context.stockIndicators.marketWarnCode = '01';
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    expect(await suggestStrategies(strategies, context)).toHaveLength(0);
+  });
+
+  it('momentum-breakout은 조건을 충족한 ETF에서 추천된다', async () => {
+    const strategies = [
+      createStrategy('momentum-breakout', '변동성 돌파', [createSignal('122630', 'BUY', '돌파')]),
+    ];
+    const results = await suggestStrategies(strategies, createEtfContext());
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('momentum-breakout');
+  });
+
   it('recommends only strategies that produce BUY signals', async () => {
     const strategies = [
-      createStrategy('momentum-breakout', '모멘텀 돌파', [createSignal('005930', 'BUY', '모멘텀돌파')]),
-      createStrategy('trend-following', '추세 추종', [createSignal('005930', 'SELL', '추세청산')]),
+      createStrategy('momentum-breakout', '모멘텀 돌파', [createSignal('122630', 'BUY', '모멘텀돌파')]),
+      createStrategy('trend-following', '추세 추종', [createSignal('122630', 'SELL', '추세청산')]),
       createStrategy('value-factor', '밸류 팩터', []),
     ];
 
-    const results = await suggestStrategies(strategies, createContext());
+    const results = await suggestStrategies(strategies, createEtfContext());
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('momentum-breakout');
@@ -257,14 +331,14 @@ describe('suggestStrategies', () => {
   it('sorts recommendations by configured priority and layered buy bonus', async () => {
     const strategies = [
       createStrategy('infinite-buy', '무한매수법', [
-        createSignal('005930', 'BUY', 'Buy1'),
-        createSignal('005930', 'BUY', 'Buy2'),
+        createSignal('122630', 'BUY', 'Buy1'),
+        createSignal('122630', 'BUY', 'Buy2'),
       ]),
-      createStrategy('trend-following', '추세 추종', [createSignal('005930', 'BUY', '추세진입')]),
-      createStrategy('momentum-breakout', '모멘텀 돌파', [createSignal('005930', 'BUY', '모멘텀돌파')]),
+      createStrategy('trend-following', '추세 추종', [createSignal('122630', 'BUY', '추세진입')]),
+      createStrategy('momentum-breakout', '모멘텀 돌파', [createSignal('122630', 'BUY', '모멘텀돌파')]),
     ];
 
-    const results = await suggestStrategies(strategies, createContext());
+    const results = await suggestStrategies(strategies, createEtfContext());
 
     expect(results.map((item) => item.name)).toEqual([
       'momentum-breakout',
