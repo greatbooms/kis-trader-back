@@ -39,6 +39,7 @@
   - `TickEngine` → 위 3개 + `StrategyRegistry` + `MarketAnalysis` + `MarketRegime` + `Kis*` + `MarketDataCache`
   - `SimulationService` façade → 위 4개 주입
 - **실거래 스케줄러와 충돌 방지**: `SimulationScheduler.waitForTradingScheduler()`로 `TradingScheduler.isBusy()` 폴링 — KIS API rate limit 공유 방지. 50초 초과 시 강제 진행
+- **시뮬 cron mutex는 마켓별 분리** (`runningMarkets: Set<Market>`): 국내/해외(아시아) cron이 09:00~15:29 내내 같은 분에 동시 발화하는데, 단일 플래그를 공유하면 세션 0개인 해외 run이 플래그를 점유해 국내 틱이 무로깅 누락된다 (2026-06-11 장애 — 장중 138분 중 ~45분 틱 누락). 같은 마켓 중복 실행 skip은 `warn` 로그로 가시화. 세션 0개 마켓은 `waitForTradingScheduler` 진입 전에 즉시 종료
 - **시간대 매핑**: `COUNTRY_EXCHANGE_MAP` (US→NASD, HK→SEHK, CN→SHAA, JP→TKSE, VN→HASE)으로 국가코드 → 대표 거래소코드 변환 → `MARKET_HOURS` 조회
 - **Backtest와의 구분**:
   - `backtest/`는 CLI standalone, DB cache + 마크다운 리포트

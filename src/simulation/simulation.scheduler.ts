@@ -19,7 +19,9 @@ const COUNTRY_EXCHANGE_MAP: Record<string, string> = {
 @Injectable()
 export class SimulationScheduler implements OnModuleInit {
   private readonly logger = new Logger(SimulationScheduler.name);
-  private isSimRunning = false;
+  // 마켓별 독립 mutex — 국내/해외 cron이 같은 분에 동시 발화해도 서로를 막지 않는다.
+  // 단일 플래그 공유 시 세션 0개인 해외 run이 국내 틱을 통째로 누락시킴 (2026-06-11 장애)
+  private readonly runningMarkets = new Set<Market>();
 
   constructor(
     private simulationService: SimulationService,
@@ -130,14 +132,22 @@ export class SimulationScheduler implements OnModuleInit {
   }
 
   private async executeSimulations(market: Market): Promise<void> {
-    if (this.isSimRunning) return;
-    this.isSimRunning = true;
+    if (this.runningMarkets.has(market)) {
+      // 같은 마켓 직전 run이 1분 넘게 진행 중 — KIS 혼잡 등 이상 징후이므로 가시화
+      this.logger.warn(`Simulation tick skipped: previous ${market} run still in progress`);
+      return;
+    }
+    this.runningMarkets.add(market);
 
     try {
-      await this.waitForTradingScheduler();
+      // 세션 조회를 대기보다 먼저 — 실행할 세션이 없으면 mutex를 들고 최대 50초
+      // 대기하지 않고 즉시 종료한다 (틱 신선도는 tick engine의 RUNNING 재검증이 보장)
       const sessions = await this.prisma.simulationSession.findMany({
         where: { status: SimulationStatus.RUNNING, market },
       });
+      if (sessions.length === 0) return;
+
+      await this.waitForTradingScheduler();
 
       for (const session of sessions) {
         try {
@@ -159,7 +169,7 @@ export class SimulationScheduler implements OnModuleInit {
     } catch (e) {
       this.logger.error(`Simulation scheduler error (${market}): ${e.message}`);
     } finally {
-      this.isSimRunning = false;
+      this.runningMarkets.delete(market);
     }
   }
 
