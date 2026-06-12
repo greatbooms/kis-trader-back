@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Market, Prisma, SimulationStatus } from '@prisma/client';
 import { KisDomesticService } from '../kis/kis-domestic.service';
+import { DailyPrice } from '../kis/types/kis-api.types';
 import { SimulationSessionManager } from '../simulation/simulation-session-manager.service';
 import { SlackService } from '../notification/slack.service';
 import { PrismaService } from '../prisma.service';
@@ -8,19 +9,24 @@ import {
   buildDayTradeScore,
   computeDayTradeIndicators,
   DAY_TRADE_SEED_ETFS,
+  computeUnderlyingRegime,
+  detectDayTradeDirection,
   isStrictKrxEtf,
   rankDayTradeCandidates,
+  resolveUnderlyingProxy,
+  runDayTradeBacktest,
 } from './day-trade-selector';
 import { kstDateNDaysAgo, kstTodayStr } from './utils/date.util';
 import {
   DayTradeCandidateScore,
   DayTradeRunResult,
   DayTradeScreeningSettings,
+  DayTradeUnderlyingRegimeSnapshot,
 } from './types/day-trade.type';
 
 const DAY_TRADE_SETTINGS_KEY = 'day-trade-screening';
 const DAY_TRADE_STRATEGY_NAME = 'momentum-breakout';
-const DAILY_PRICE_LOOKBACK_DAYS = 60; // 달력일 기준 — 거래일 ~40개 확보 (MA20+ATR14에 충분)
+const DAILY_PRICE_LOOKBACK_DAYS = 420; // 달력일 기준 — 거래일 ~280개 확보 (레짐+최근 백테스트)
 const DEFAULT_SETTINGS: DayTradeScreeningSettings = {
   enabled: true,
   topN: 3,
@@ -171,11 +177,19 @@ export class DayTradeScreeningService {
   ): Promise<DayTradeCandidateScore[]> {
     const scores: DayTradeCandidateScore[] = [];
     const from = kstDateNDaysAgo(DAILY_PRICE_LOOKBACK_DAYS);
+    const dailyPriceCache = new Map<string, DailyPrice[]>();
+    const getDailyPrices = async (stockCode: string): Promise<DailyPrice[]> => {
+      const cached = dailyPriceCache.get(stockCode);
+      if (cached) return cached;
+      const prices = await this.kisDomestic.getDailyPrices(stockCode, from, date);
+      dailyPriceCache.set(stockCode, prices);
+      return prices;
+    };
 
     // KIS 호출 간격은 KisBaseService.rateLimit()가 전역 직렬화(67ms/300ms)로 보장 — 서비스 레벨 딜레이 불필요
     for (const item of universe) {
       try {
-        const prices = await this.kisDomestic.getDailyPrices(item.stockCode, from, date);
+        const prices = await getDailyPrices(item.stockCode);
         const indicators = computeDayTradeIndicators(prices, date);
         if (!indicators) {
           // 봉 부족은 하드필터 탈락이 아닌 평가 전제조건 미달 — DB 저장 없이 로그로만 추적
@@ -183,12 +197,58 @@ export class DayTradeScreeningService {
           continue;
         }
         const price = await this.kisDomestic.getPrice(item.stockCode);
+        const stockName = price.stockName || item.stockName;
+        const directionName = `${stockName} ${item.stockName}`;
+        const direction = detectDayTradeDirection(directionName);
+        const proxy = resolveUnderlyingProxy(directionName, item.stockCode);
+        let proxyPrices: DailyPrice[] | undefined;
+        let underlyingRegime: DayTradeUnderlyingRegimeSnapshot;
+
+        if (!proxy) {
+          underlyingRegime = {
+            direction,
+            proxyStockCode: '',
+            proxyStockName: '미확인',
+            regime: 'UNKNOWN',
+            aligned: false,
+            reason: '인버스 ETF 기초지수 프록시 없음',
+          };
+        } else {
+          try {
+            proxyPrices = proxy.stockCode === item.stockCode
+              ? prices
+              : await getDailyPrices(proxy.stockCode);
+            underlyingRegime = computeUnderlyingRegime(proxyPrices, date, direction, proxy);
+          } catch (e) {
+            underlyingRegime = {
+              direction,
+              proxyStockCode: proxy.stockCode,
+              proxyStockName: proxy.stockName,
+              regime: 'UNKNOWN',
+              aligned: false,
+              reason: `기초지수 프록시 조회 실패: ${e.message}`,
+            };
+          }
+        }
+
+        const backtest = runDayTradeBacktest(prices, date, {
+          direction,
+          proxy,
+          proxyPrices,
+        });
+
         scores.push(
-          buildDayTradeScore(item.stockCode, price.stockName || item.stockName, indicators, {
-            investCautionYn: price.investCautionYn,
-            shortOverheatYn: price.shortOverheatYn,
-            marketWarnCode: price.marketWarnCode,
-          }),
+          buildDayTradeScore(
+            item.stockCode,
+            stockName,
+            indicators,
+            {
+              investCautionYn: price.investCautionYn,
+              shortOverheatYn: price.shortOverheatYn,
+              marketWarnCode: price.marketWarnCode,
+            },
+            { underlyingRegime, backtest },
+          ),
         );
       } catch (e) {
         this.logger.warn(`[${item.stockCode}] 데이트레이드 평가 실패: ${e.message}`);
@@ -318,6 +378,8 @@ export class DayTradeScreeningService {
           prevRangePct: s.indicators.prevRangePct,
           atrPct: s.indicators.atrPct,
           avgTradeValue20d: s.indicators.avgTradeValue20d,
+          underlyingRegime: s.indicators.underlyingRegime,
+          backtest: s.indicators.backtest,
           simulated: simulatedCodes.has(s.stockCode),
         })),
         excluded: excludedNotables,

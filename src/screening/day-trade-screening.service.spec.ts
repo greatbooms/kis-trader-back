@@ -4,21 +4,49 @@ import { DailyPrice } from '../kis/types/kis-api.types';
 
 const DATE = '20260611';
 
-/** 게이트 통과용 봉: 최신 봉만 상승 → aboveMa20 true, ATR/거래대금 충분 */
+const TEST_STOCK_NAMES: Record<string, string> = {
+  '122630': 'KODEX 레버리지',
+  '252670': 'KODEX 200선물인버스2X',
+  '233740': 'KODEX 코스닥150레버리지',
+  '251340': 'KODEX 코스닥150선물인버스',
+  '114800': 'KODEX 인버스',
+  '069500': 'KODEX 200',
+  '229200': 'KODEX 코스닥150',
+};
+
+/** 게이트 통과용 봉: 상승 추세 + 반복 돌파 → MA20/ATR/거래대금/백테스트 통과 */
 function passingBars(): DailyPrice[] {
-  return Array.from({ length: 25 }, (_, i) => ({
-    date: String(20260610 - i),
-    close: i === 0 ? 105 : 100,
-    open: 100,
-    high: i === 0 ? 108 : 102,
-    low: i === 0 ? 102 : 98,
-    volume: 600_000_000, // 평균 거래대금 ≈ 600억 ≥ 300억
-  }));
+  return Array.from({ length: 90 }, (_, i) => {
+    const base = 100 + i;
+    return {
+      date: String(20260101 + i),
+      close: base + 4,
+      open: base,
+      high: base + 4,
+      low: base,
+      volume: 600_000_000,
+    };
+  }).reverse();
+}
+
+/** 기초지수 상승 레짐용 봉: 추세는 강하지만 당일 돌파는 거의 없어 후보 백테스트는 탈락 */
+function regimeOnlyUpBars(): DailyPrice[] {
+  return Array.from({ length: 90 }, (_, i) => {
+    const base = 100 + i;
+    return {
+      date: String(20260101 + i),
+      close: base + 1,
+      open: base,
+      high: base + 1,
+      low: base - 3,
+      volume: 600_000_000,
+    };
+  }).reverse();
 }
 
 /** 레짐 탈락용 봉: 전 구간 동일 → aboveMa20 false */
 function flatBars(): DailyPrice[] {
-  return Array.from({ length: 25 }, (_, i) => ({
+  return Array.from({ length: 90 }, (_, i) => ({
     date: String(20260610 - i),
     close: 100, open: 100, high: 102, low: 98, volume: 600_000_000,
   }));
@@ -47,11 +75,14 @@ describe('DayTradeScreeningService', () => {
     kis = {
       getVolumeRanking: jest.fn().mockResolvedValue([]),
       getFluctuationRanking: jest.fn().mockResolvedValue([]),
-      // 기본: 122630만 평가 가능 (전 종목 평가 불능은 KIS 이상으로 간주해 throw하므로)
-      getDailyPrices: jest.fn().mockImplementation((code: string) =>
-        Promise.resolve(code === '122630' ? passingBars() : [])),
+      // 기본: 122630만 통과, 069500은 122630의 기초지수 프록시로만 사용
+      getDailyPrices: jest.fn().mockImplementation((code: string) => {
+        if (code === '122630') return Promise.resolve(passingBars());
+        if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
+        return Promise.resolve([]);
+      }),
       getPrice: jest.fn().mockImplementation((code: string) =>
-        Promise.resolve({ stockCode: code, stockName: `name-${code}`, currentPrice: 100 })),
+        Promise.resolve({ stockCode: code, stockName: TEST_STOCK_NAMES[code] ?? `name-${code}`, currentPrice: 100 })),
     };
     sessionManager = {
       createSession: jest.fn().mockImplementation((input: any) =>
@@ -74,6 +105,7 @@ describe('DayTradeScreeningService', () => {
     // 시드 7종목 중 122630만 통과, 252670은 레짐 탈락, 나머지는 봉 부족으로 제외
     kis.getDailyPrices.mockImplementation((code: string) => {
       if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
       if (code === '252670') return Promise.resolve(flatBars());
       return Promise.resolve([]);
     });
@@ -81,15 +113,15 @@ describe('DayTradeScreeningService', () => {
     const result = await service.runDailySelection(DATE);
 
     expect(result.skipped).toBe(false);
-    expect(result.saved).toBe(2); // 통과 1 + 탈락 1
+    expect(result.saved).toBe(3); // 통과 1 + 탈락 2(프록시 ETF/252670)
     expect(result.simulated).toBe(1);
-    expect(prisma.dayTradeCandidate.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.dayTradeCandidate.upsert).toHaveBeenCalledTimes(3);
     expect(sessionManager.createSession).toHaveBeenCalledTimes(1);
     expect(sessionManager.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         stockCode: '122630',
         strategyName: 'momentum-breakout',
-        name: `[DT] ${DATE} name-122630`,
+        name: `[DT] ${DATE} KODEX 레버리지`,
         strategyParams: JSON.stringify({ dayTradeAuto: true, screeningDate: DATE }),
       }),
     );
@@ -124,8 +156,11 @@ describe('DayTradeScreeningService', () => {
         positions: [{ quantity: 10 }],
       },
     ]);
-    kis.getDailyPrices.mockImplementation((code: string) =>
-      Promise.resolve(code === '122630' ? passingBars() : []));
+    kis.getDailyPrices.mockImplementation((code: string) => {
+      if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
+      return Promise.resolve([]);
+    });
 
     await service.runDailySelection(DATE);
 
@@ -151,8 +186,11 @@ describe('DayTradeScreeningService', () => {
   });
 
   it('같은 날 같은 종목 세션이 이미 있으면 중복 생성하지 않는다 (멱등)', async () => {
-    kis.getDailyPrices.mockImplementation((code: string) =>
-      Promise.resolve(code === '122630' ? passingBars() : []));
+    kis.getDailyPrices.mockImplementation((code: string) => {
+      if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
+      return Promise.resolve([]);
+    });
     prisma.simulationSession.findFirst.mockResolvedValue({ id: 'existing-session' });
 
     const result = await service.runDailySelection(DATE);
@@ -167,37 +205,42 @@ describe('DayTradeScreeningService', () => {
   it('일부 종목의 KIS 호출이 실패해도 나머지는 계속 평가한다', async () => {
     kis.getDailyPrices.mockImplementation((code: string) => {
       if (code === '122630') return Promise.reject(new Error('KIS timeout'));
-      if (code === '252670') return Promise.resolve(passingBars());
+      if (code === '233740') return Promise.resolve(passingBars());
+      if (code === '229200') return Promise.resolve(regimeOnlyUpBars());
       return Promise.resolve([]);
     });
 
     const result = await service.runDailySelection(DATE);
 
-    expect(result.saved).toBe(1); // 252670만 평가됨
+    expect(result.saved).toBe(2); // 233740 통과 + 229200 프록시 후보 탈락
     expect(slack.sendDayTradeCandidates).toHaveBeenCalledTimes(1);
   });
 
   it('getPrice 실패 종목은 건너뛰고 나머지는 계속 평가한다', async () => {
     kis.getDailyPrices.mockImplementation((code: string) => {
-      if (code === '122630' || code === '252670') return Promise.resolve(passingBars());
+      if (code === '122630' || code === '233740') return Promise.resolve(passingBars());
+      if (code === '229200') return Promise.resolve(regimeOnlyUpBars());
       return Promise.resolve([]);
     });
     kis.getPrice.mockImplementation((code: string) =>
       code === '122630'
         ? Promise.reject(new Error('KIS price error'))
-        : Promise.resolve({ stockCode: code, stockName: `name-${code}`, currentPrice: 100 }),
+        : Promise.resolve({ stockCode: code, stockName: TEST_STOCK_NAMES[code] ?? `name-${code}`, currentPrice: 100 }),
     );
 
     const result = await service.runDailySelection(DATE);
 
-    expect(result.saved).toBe(1); // 252670만 평가/저장됨
-    expect(prisma.dayTradeCandidate.upsert).toHaveBeenCalledTimes(1);
+    expect(result.saved).toBe(2); // 233740 통과 + 229200 프록시 후보 탈락
+    expect(prisma.dayTradeCandidate.upsert).toHaveBeenCalledTimes(2);
     expect(slack.sendDayTradeCandidates).toHaveBeenCalledTimes(1);
   });
 
   it('시뮬 생성이 실패해도 후보 저장과 Slack 리포트는 유지된다', async () => {
-    kis.getDailyPrices.mockImplementation((code: string) =>
-      Promise.resolve(code === '122630' ? passingBars() : []));
+    kis.getDailyPrices.mockImplementation((code: string) => {
+      if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
+      return Promise.resolve([]);
+    });
     sessionManager.createSession.mockRejectedValue(new Error('sim error'));
 
     const result = await service.runDailySelection(DATE);
@@ -219,6 +262,7 @@ describe('DayTradeScreeningService', () => {
   it('같은 날 재실행 시 이번 평가에 없는 잔존 후보를 정리한다', async () => {
     kis.getDailyPrices.mockImplementation((code: string) => {
       if (code === '122630') return Promise.resolve(passingBars());
+      if (code === '069500') return Promise.resolve(regimeOnlyUpBars());
       if (code === '252670') return Promise.resolve(flatBars());
       return Promise.resolve([]);
     });
@@ -229,7 +273,7 @@ describe('DayTradeScreeningService', () => {
       where: {
         screeningDate: DATE,
         market: 'DOMESTIC',
-        stockCode: { notIn: expect.arrayContaining(['122630', '252670']) },
+        stockCode: { notIn: expect.arrayContaining(['122630', '252670', '069500']) },
       },
     });
   });
