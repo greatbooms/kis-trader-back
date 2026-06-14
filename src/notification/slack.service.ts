@@ -384,6 +384,18 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       prevRangePct: number;
       atrPct: number;
       avgTradeValue20d: number;
+      underlyingRegime?: {
+        proxyStockName: string;
+        regime: string;
+        reason: string;
+      };
+      backtest?: {
+        tradeCount: number;
+        winRatePct: number;
+        totalReturnPct: number;
+        averageTradeReturnPct: number;
+        maxDrawdownPct: number;
+      };
       simulated: boolean;
     }[];
     excluded: { stockName: string; reason: string }[];
@@ -393,12 +405,19 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const { date, candidates, excluded, warnings } = payload;
-      const MAX_DISPLAY = 15; // section text 3000자 제한 — 후보 1개 ≈ 150자
+      const MAX_DISPLAY = 8; // 상세 3줄 후보는 길어 Slack section 3000자 제한 여유를 둔다.
       const displayCandidates = candidates.slice(0, MAX_DISPLAY);
       const overflowCount = candidates.length - displayCandidates.length;
+      const formatRegime = (c: typeof candidates[number]) => c.underlyingRegime
+        ? `${c.underlyingRegime.proxyStockName} ${c.underlyingRegime.reason}`
+        : '기초지수 레짐 N/A';
+      const formatBacktest = (c: typeof candidates[number]) => c.backtest
+        ? `BT ${c.backtest.tradeCount}회 | 평균 ${c.backtest.averageTradeReturnPct.toFixed(2)}% | 누적 ${c.backtest.totalReturnPct.toFixed(1)}% | 승률 ${c.backtest.winRatePct.toFixed(1)}% | MDD ${c.backtest.maxDrawdownPct.toFixed(1)}%`
+        : 'BT N/A';
       const lines = displayCandidates.map((c) =>
         `${c.rank}. *${c.stockName}* (${c.stockCode}) — ${c.score.toFixed(1)}점${c.simulated ? ' :robot_face: 시뮬 투입' : ''}\n` +
-        `    전일변동폭 ${c.prevRangePct.toFixed(2)}% | ATR ${c.atrPct.toFixed(2)}% | 거래대금 ${(c.avgTradeValue20d / 100_000_000).toFixed(0)}억 | MA20 위`,
+        `    전일변동폭 ${c.prevRangePct.toFixed(2)}% | ATR ${c.atrPct.toFixed(2)}% | 거래대금 ${(c.avgTradeValue20d / 100_000_000).toFixed(0)}억 | MA20 위\n` +
+        `    ${formatRegime(c)} | ${formatBacktest(c)}`,
       );
 
       const blocks: KnownBlock[] = [

@@ -7,6 +7,8 @@ export interface DayTradeIndicatorSnapshot {
   ma20: number;
   aboveMa20: boolean; // 전일 종가 > MA20
   avgTradeValue20d: number; // 20일 평균 거래대금(원) — 종가×거래량 근사
+  underlyingRegime?: DayTradeUnderlyingRegimeSnapshot;
+  backtest?: DayTradeBacktestSnapshot;
 }
 
 /** getPrice에서 가져오는 당일 적용 유의/경고 상태 */
@@ -26,6 +28,41 @@ export interface DayTradeCandidateScore {
   excluded: boolean;
   excludeReason?: string;
   indicators: DayTradeIndicatorSnapshot;
+}
+
+export type DayTradeDirection = 'LONG' | 'INVERSE';
+export type DayTradeRegimeLabel = 'TRENDING_UP' | 'TRENDING_DOWN' | 'SIDEWAYS' | 'UNKNOWN';
+
+export interface DayTradeUnderlyingProxy {
+  stockCode: string;
+  stockName: string;
+}
+
+export interface DayTradeUnderlyingRegimeSnapshot {
+  direction: DayTradeDirection;
+  proxyStockCode: string;
+  proxyStockName: string;
+  regime: DayTradeRegimeLabel;
+  aligned: boolean;
+  prevDate?: string;
+  prevClose?: number;
+  ma20?: number;
+  ma60?: number;
+  adx14?: number;
+  reason: string;
+}
+
+export interface DayTradeBacktestSnapshot {
+  passed: boolean;
+  fromDate?: string;
+  toDate?: string;
+  tradeCount: number;
+  winRatePct: number;
+  totalReturnPct: number;
+  averageTradeReturnPct: number;
+  maxDrawdownPct: number;
+  profitFactor?: number;
+  reason: string;
 }
 
 export interface DayTradeRunResult {

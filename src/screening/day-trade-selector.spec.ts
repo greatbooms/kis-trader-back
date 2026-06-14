@@ -2,10 +2,12 @@ import { DailyPrice } from '../kis/types/kis-api.types';
 import {
   buildDayTradeScore,
   computeDayTradeIndicators,
+  computeUnderlyingRegime,
   isStrictKrxEtf,
   rankDayTradeCandidates,
+  runDayTradeBacktest,
 } from './day-trade-selector';
-import { DayTradeCandidateScore, DayTradeIndicatorSnapshot } from './types';
+import { DayTradeBacktestSnapshot, DayTradeCandidateScore, DayTradeIndicatorSnapshot } from './types';
 
 const TODAY = '20260611';
 
@@ -36,6 +38,50 @@ function makeSnapshot(overrides: Partial<DayTradeIndicatorSnapshot> = {}): DayTr
     avgTradeValue20d: 300_000_000_000, // 3000억
     ...overrides,
   };
+}
+
+function passingBacktest(overrides: Partial<DayTradeBacktestSnapshot> = {}): DayTradeBacktestSnapshot {
+  return {
+    passed: true,
+    fromDate: '20260101',
+    toDate: '20260610',
+    tradeCount: 20,
+    winRatePct: 55,
+    totalReturnPct: 8.4,
+    averageTradeReturnPct: 0.4,
+    maxDrawdownPct: -3.2,
+    profitFactor: 1.4,
+    reason: '최근 백테스트 통과',
+    ...overrides,
+  };
+}
+
+function trendingBars(count: number, step = 1): DailyPrice[] {
+  return Array.from({ length: count }, (_, i) => {
+    const base = 100 + i * step;
+    return {
+      date: String(20260101 + i),
+      open: base,
+      high: base + 3,
+      low: base,
+      close: base + 3,
+      volume: 600_000_000,
+    };
+  }).reverse();
+}
+
+function slippageTouchOnlyBars(count: number): DailyPrice[] {
+  return Array.from({ length: count }, (_, i) => {
+    const base = 100 + i;
+    return {
+      date: String(20260101 + i),
+      open: base,
+      high: base + 2,
+      low: base - 2,
+      close: base + 2,
+      volume: 600_000_000,
+    };
+  }).reverse();
 }
 
 describe('isStrictKrxEtf', () => {
@@ -145,6 +191,96 @@ describe('buildDayTradeScore', () => {
       '122630', 'KODEX 레버리지', makeSnapshot({ atrPct: 1.19 }), {},
     );
     expect(result.excludeReason).toBe('변동폭(ATR) 미달');
+  });
+
+  it('인버스 ETF는 기초지수 상승 레짐이면 제외한다', () => {
+    const result = buildDayTradeScore(
+      '251340',
+      'KODEX 코스닥150선물인버스',
+      makeSnapshot(),
+      {},
+      {
+        underlyingRegime: {
+          direction: 'INVERSE',
+          proxyStockCode: '229200',
+          proxyStockName: 'KODEX 코스닥150',
+          regime: 'TRENDING_UP',
+          aligned: false,
+          reason: '방향 불일치: 인버스 ETF는 하락 레짐 필요, 현재 상승',
+        },
+        backtest: passingBacktest(),
+      },
+    );
+    expect(result.excluded).toBe(true);
+    expect(result.excludeReason).toContain('기초지수 레짐 불일치');
+  });
+
+  it('최근 백테스트 기대값이 미달이면 제외한다', () => {
+    const result = buildDayTradeScore(
+      '122630',
+      'KODEX 레버리지',
+      makeSnapshot(),
+      {},
+      {
+        underlyingRegime: {
+          direction: 'LONG',
+          proxyStockCode: '069500',
+          proxyStockName: 'KODEX 200',
+          regime: 'TRENDING_UP',
+          aligned: true,
+          reason: '기초지수 상승 레짐',
+        },
+        backtest: passingBacktest({
+          passed: false,
+          totalReturnPct: -2,
+          averageTradeReturnPct: -0.1,
+          reason: '기대값 미달: 평균 -0.10%, 누적 -2.0%',
+        }),
+      },
+    );
+    expect(result.excluded).toBe(true);
+    expect(result.excludeReason).toContain('백테스트 미통과');
+  });
+});
+
+describe('computeUnderlyingRegime', () => {
+  it('롱 ETF는 기초지수 상승 레짐이면 정렬된다', () => {
+    const result = computeUnderlyingRegime(
+      trendingBars(80),
+      TODAY,
+      'LONG',
+      { stockCode: '229200', stockName: 'KODEX 코스닥150' },
+    );
+    expect(result.regime).toBe('TRENDING_UP');
+    expect(result.aligned).toBe(true);
+  });
+
+  it('인버스 ETF는 기초지수 상승 레짐이면 정렬되지 않는다', () => {
+    const result = computeUnderlyingRegime(
+      trendingBars(80),
+      TODAY,
+      'INVERSE',
+      { stockCode: '229200', stockName: 'KODEX 코스닥150' },
+    );
+    expect(result.regime).toBe('TRENDING_UP');
+    expect(result.aligned).toBe(false);
+  });
+});
+
+describe('runDayTradeBacktest', () => {
+  it('최근 돌파 거래 기대값이 양수면 통과한다', () => {
+    const result = runDayTradeBacktest(trendingBars(80), TODAY);
+    expect(result.passed).toBe(true);
+    expect(result.tradeCount).toBeGreaterThanOrEqual(5);
+    expect(result.averageTradeReturnPct).toBeGreaterThan(0);
+  });
+
+  it('고가가 슬리피지 포함 진입가에 못 미치면 거래로 세지 않는다', () => {
+    const result = runDayTradeBacktest(slippageTouchOnlyBars(80), TODAY);
+
+    expect(result.passed).toBe(false);
+    expect(result.tradeCount).toBe(0);
+    expect(result.reason).toBe('거래 수 부족: 0/5');
   });
 });
 
