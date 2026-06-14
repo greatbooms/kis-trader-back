@@ -70,6 +70,20 @@ function trendingBars(count: number, step = 1): DailyPrice[] {
   }).reverse();
 }
 
+function slippageTouchOnlyBars(count: number): DailyPrice[] {
+  return Array.from({ length: count }, (_, i) => {
+    const base = 100 + i;
+    return {
+      date: String(20260101 + i),
+      open: base,
+      high: base + 2,
+      low: base - 2,
+      close: base + 2,
+      volume: 600_000_000,
+    };
+  }).reverse();
+}
+
 describe('isStrictKrxEtf', () => {
   it('국내 레버리지/인버스 ETF를 통과시킨다', () => {
     expect(isStrictKrxEtf('KODEX 레버리지', '122630')).toBe(true);
@@ -259,6 +273,14 @@ describe('runDayTradeBacktest', () => {
     expect(result.passed).toBe(true);
     expect(result.tradeCount).toBeGreaterThanOrEqual(5);
     expect(result.averageTradeReturnPct).toBeGreaterThan(0);
+  });
+
+  it('고가가 슬리피지 포함 진입가에 못 미치면 거래로 세지 않는다', () => {
+    const result = runDayTradeBacktest(slippageTouchOnlyBars(80), TODAY);
+
+    expect(result.passed).toBe(false);
+    expect(result.tradeCount).toBe(0);
+    expect(result.reason).toBe('거래 수 부족: 0/5');
   });
 });
 

@@ -309,9 +309,9 @@ export function runDayTradeBacktest(
 
     const prev = bars[i - 1];
     const breakoutPrice = today.open + (prev.high - prev.low) * BACKTEST_K_VALUE;
-    if (today.high < breakoutPrice) continue;
-
     const entryPrice = breakoutPrice * (1 + BACKTEST_SLIPPAGE_RATE);
+    if (today.high < entryPrice) continue;
+
     const stopPrice = entryPrice * (1 - BACKTEST_STOP_LOSS_RATE);
     const exitRawPrice = today.low <= stopPrice ? stopPrice : today.close;
     const exitPrice = exitRawPrice * (1 - BACKTEST_SLIPPAGE_RATE);

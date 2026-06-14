@@ -405,7 +405,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const { date, candidates, excluded, warnings } = payload;
-      const MAX_DISPLAY = 15; // section text 3000자 제한 — 후보 1개 ≈ 150자
+      const MAX_DISPLAY = 8; // 상세 3줄 후보는 길어 Slack section 3000자 제한 여유를 둔다.
       const displayCandidates = candidates.slice(0, MAX_DISPLAY);
       const overflowCount = candidates.length - displayCandidates.length;
       const formatRegime = (c: typeof candidates[number]) => c.underlyingRegime
