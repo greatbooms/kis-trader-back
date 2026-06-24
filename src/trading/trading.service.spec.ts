@@ -390,9 +390,9 @@ describe('TradingService', () => {
       expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           eventType: 'SKIPPED',
-          message: '자전거래 방지: 매수가가 매도가와 동일하여 해당 매수 스킵',
+          message: '자전거래/수수료 방지: 매수·매도 가격 간격이 부족하여 해당 매수 스킵',
           details: expect.objectContaining({
-            skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
+            skipReason: 'INSUFFICIENT_SAME_CYCLE_PROFIT_GAP',
             selfTradePrevention: true,
             actionTaken: 'SELL_SUBMITTED_BUY_SKIPPED',
             carryQueued: true,
@@ -421,7 +421,106 @@ describe('TradingService', () => {
       });
     });
 
-    it('submits BUY and SELL when their prices differ in the same cycle', async () => {
+    it('should skip BUY submission when same-cycle SELL does not clear the configured cost buffer', async () => {
+      const buySignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'AMEX',
+        stockCode: 'SOXL',
+        side: 'BUY',
+        quantity: 1,
+        price: 294.28,
+        reason: 'Buy1',
+        orderDivision: '00',
+      };
+      const sellSignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'AMEX',
+        stockCode: 'SOXL',
+        side: 'SELL',
+        quantity: 1,
+        price: 294.27,
+        reason: 'Take profit 1',
+        orderDivision: '00',
+        metadata: {
+          sameCycleMinProfitRate: 0.006,
+        },
+      };
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [buySignal, sellSignal],
+          skipReasons: [],
+          details: {},
+        }),
+      };
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-soxl',
+        stockCode: 'SOXL',
+        quota: 10000,
+        maxCycles: 40,
+        strategyParams: {},
+      });
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-soxl',
+            market: 'OVERSEAS',
+            exchangeCode: 'AMEX',
+            stockCode: 'SOXL',
+            stockName: 'SOXL',
+            strategyName: 'infinite-buy',
+            quota: 10000,
+            cycle: 1.9,
+            maxCycles: 40,
+            stopLossRate: 0.5,
+            maxPortfolioRate: 1,
+            strategyParams: {},
+          },
+          position: {
+            stockCode: 'SOXL',
+            quantity: 2,
+            avgPrice: 253.89,
+            currentPrice: 294.27,
+            totalInvested: 507.78,
+          },
+          price: { currentPrice: 294.28 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 6500.88,
+          totalPortfolioValue: 0,
+        },
+      ]);
+
+      expect(executeSignalSpy).toHaveBeenCalledTimes(1);
+      expect(executeSignalSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'SELL', quantity: 1, price: 294.27 }),
+        'infinite-buy',
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(executeSignalSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'BUY' }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SKIPPED',
+          details: expect.objectContaining({
+            skipReason: 'INSUFFICIENT_SAME_CYCLE_PROFIT_GAP',
+            minProfitRate: 0.006,
+            blockedSignals: [expect.objectContaining({ side: 'BUY', price: 294.28 })],
+            executableSignals: [expect.objectContaining({ side: 'SELL', price: 294.27 })],
+          }),
+        }),
+      });
+    });
+
+    it('submits BUY and SELL when their prices differ enough in the same cycle', async () => {
       const buy1 = {
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
@@ -451,6 +550,9 @@ describe('TradingService', () => {
         price: 76.89,
         reason: 'Take profit 1',
         orderDivision: '00',
+        metadata: {
+          sameCycleMinProfitRate: 0.006,
+        },
       };
       const strategy = {
         name: 'infinite-buy',
@@ -524,7 +626,7 @@ describe('TradingService', () => {
         data: expect.objectContaining({
           eventType: 'SKIPPED',
           details: expect.objectContaining({
-            skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
+            skipReason: 'INSUFFICIENT_SAME_CYCLE_PROFIT_GAP',
           }),
         }),
       });

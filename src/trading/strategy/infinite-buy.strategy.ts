@@ -17,6 +17,7 @@ import { applyAccumulatedQuota } from './infinite-buy-quota.util';
 import { tickSize } from '../../common/utils/tick-size.util';
 
 const MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT = 0.20;
+const SAME_CYCLE_MIN_PROFIT_RATE_DEFAULT = 0.006;
 
 function pushQuotaAdjustment(
   details: Record<string, any>,
@@ -282,6 +283,11 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const hasPosition = !!position && position.quantity > 0;
     const strategyParams = (watchStock.strategyParams as InfiniteBuyStrategyParams | undefined) || {};
     const today = getTodayDate();
+    const configuredSameCycleMinProfitRate = Number(strategyParams.sameCycleMinProfitRate);
+    const sameCycleMinProfitRate =
+      Number.isFinite(configuredSameCycleMinProfitRate) && configuredSameCycleMinProfitRate >= 0
+        ? configuredSameCycleMinProfitRate
+        : SAME_CYCLE_MIN_PROFIT_RATE_DEFAULT;
 
     // --- 기본 무한매수법 계산 ---
     const quota = watchStock.quota;
@@ -307,24 +313,42 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const roundPrice = isOverseas
       ? (p: number) => Math.round(p * 100) / 100  // 소수점 2자리
       : (p: number) => Math.round(p);              // 정수
+    const ceilPriceToTick = (p: number) => {
+      const tick = tickSize(isOverseas, p);
+      const ceiled = Math.ceil((p / tick) - 1e-9) * tick;
+      return roundPrice(ceiled);
+    };
     // 익절 매도 주문 가격 결정:
     // - target이 현재가 1틱 이상 위 → target 그대로 (호가창 위쪽 등록, 정상)
-    // - target이 현재가 이하 → 즉시 청산 의도. 단 BUY1(=현재가)과 가격이 같으면
-    //   KIS 자전거래 의심으로 거부되므로 현재가 -1틱(매수1호가 영역)으로 던져
-    //   즉시 매칭 체결 + BUY1과 가격 분리. 슬리피지는 1틱(해외 0.01 = ~0.013%).
-    const takeProfitOrderPrice = (targetPrice: number) => {
+    // - target이 현재가 이하 + 같은 사이클 BUY가 있음 → 비용버퍼 위로 호가를 올려
+    //   상승 중 의미 없는 즉시 왕복매매를 방지한다.
+    // - target이 현재가 이하 + 같은 사이클 BUY가 없음 → 기존 즉시 청산 동작 유지.
+    const takeProfitOrderPrice = (targetPrice: number, sameCycleBuyPrices: number[] = []) => {
       const targetRounded = roundPrice(targetPrice);
       const currentRounded = roundPrice(curPrice);
       const tick = tickSize(isOverseas, currentRounded);
       if (targetRounded >= currentRounded + tick) return targetRounded;
+      if (sameCycleBuyPrices.length > 0) {
+        const referenceBuyPrice = Math.max(currentRounded, ...sameCycleBuyPrices);
+        return ceilPriceToTick(referenceBuyPrice * (1 + sameCycleMinProfitRate));
+      }
       return roundPrice(currentRounded - tick);
     };
-    const takeProfitPriceNote = (orderPrice: number, targetPrice: number) => {
+    const takeProfitPriceNote = (
+      orderPrice: number,
+      targetPrice: number,
+      sameCycleBuyPrices: number[] = [],
+    ) => {
       const currentRounded = roundPrice(curPrice);
       const tick = tickSize(isOverseas, currentRounded);
       // 정상: target이 현재가 +1틱 이상 위 → orderPrice = target → 표기 없음
       if (targetPrice >= currentRounded + tick) return '';
-      // 강세 도달: target이 현재가 이하 → orderPrice = current - tick (즉시 청산 + 자전거래 회피)
+      if (sameCycleBuyPrices.length > 0 && orderPrice >= currentRounded + tick) {
+        return (
+          ` (목표가 ${targetPrice} ≤ 현재가 → ${orderPrice} 비용버퍼 ` +
+          `${(sameCycleMinProfitRate * 100).toFixed(1)}% 상향, 자전거래/수수료 방지)`
+        );
+      }
       return ` (목표가 ${targetPrice} ≤ 현재가 → ${orderPrice} 즉시 청산, 자전거래 회피)`;
     };
 
@@ -635,41 +659,54 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     // --- 매도 시그널 (항상 생성, 지수 상태 무관) ---
     if (holdQty > 0) {
-        const tableOverride = strategyParams.targetTableOverride;
-        const targetProfitRate = lookupTargetProfitRate(T, tableOverride);
-        const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
-        const orderPrice = takeProfitOrderPrice(avgPrice * (1 + targetProfitRate));
-        const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
-        const secondSellQty = holdQty - firstSellQty;
-        const secondaryTargetRate = targetProfitRate + lookupSecondaryBonusRate(T, tableOverride);
-        const secondaryTargetPrice = takeProfitOrderPrice(avgPrice * (1 + secondaryTargetRate));
+      const sameCycleBuyPrices = signals
+        .filter((signal) => signal.side === 'BUY' && typeof signal.price === 'number')
+        .map((signal) => signal.price as number);
+      const sameCycleProfitMetadata = sameCycleBuyPrices.length > 0
+        ? { sameCycleMinProfitRate }
+        : {};
+      const tableOverride = strategyParams.targetTableOverride;
+      const targetProfitRate = lookupTargetProfitRate(T, tableOverride);
+      const targetPrice = roundPrice(avgPrice * (1 + targetProfitRate));
+      const orderPrice = takeProfitOrderPrice(avgPrice * (1 + targetProfitRate), sameCycleBuyPrices);
+      const firstSellQty = holdQty >= 2 ? Math.ceil(holdQty / 2) : holdQty;
+      const secondSellQty = holdQty - firstSellQty;
+      const secondaryTargetRate = targetProfitRate + lookupSecondaryBonusRate(T, tableOverride);
+      const secondaryTargetPrice = takeProfitOrderPrice(
+        avgPrice * (1 + secondaryTargetRate),
+        sameCycleBuyPrices,
+      );
+      const takeProfitNote = takeProfitPriceNote(orderPrice, targetPrice, sameCycleBuyPrices);
 
-        if (orderPrice > 0) {
-          signals.push({
-            market,
-            exchangeCode,
-            stockCode: watchStock.stockCode,
-            side: 'SELL',
-            quantity: firstSellQty,
-            price: orderPrice,
-            reason:
-              secondSellQty > 0
-                ? `Take profit 1: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitPriceNote(orderPrice, targetPrice)}`
-                : `Take profit: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitPriceNote(orderPrice, targetPrice)}`,
-            orderDivision: '00',
-            metadata: secondSellQty > 0
-              ? {
-                  phase: 'take-profit-1',
-                  targetPrice,
-                  secondaryTargetPrice,
-                  secondaryTargetRate,
-                  secondaryTargetQuantity: secondSellQty,
-                  sameDaySecondaryEligible: shouldUseSameDaySecondTarget(ctx),
-                }
+      if (orderPrice > 0) {
+        signals.push({
+          market,
+          exchangeCode,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: firstSellQty,
+          price: orderPrice,
+          reason:
+            secondSellQty > 0
+              ? `Take profit 1: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitNote}`
+              : `Take profit: T=${T.toFixed(1)}, +${(targetProfitRate * 100).toFixed(1)}%, ${firstSellQty}주 @ ${orderPrice}${takeProfitNote}`,
+          orderDivision: '00',
+          metadata: secondSellQty > 0
+            ? {
+                phase: 'take-profit-1',
+                targetPrice,
+                secondaryTargetPrice,
+                secondaryTargetRate,
+                secondaryTargetQuantity: secondSellQty,
+                sameDaySecondaryEligible: shouldUseSameDaySecondTarget(ctx),
+                ...sameCycleProfitMetadata,
+              }
+            : sameCycleBuyPrices.length > 0
+              ? sameCycleProfitMetadata
               : undefined,
-          });
-        }
+        });
       }
+    }
     if (!hasPosition && !buyAllowed) {
       // 포지션 없고 매수 불가
       if (maxCyclesReached) {

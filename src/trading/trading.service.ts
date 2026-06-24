@@ -349,13 +349,14 @@ export class TradingService {
           },
         );
 
-        const { executableSignals, blockedBuySignals } = this.preventSameCycleOppositeOrders(signals);
+        const { executableSignals, blockedBuySignals, minProfitRate } =
+          this.preventSameCycleOppositeOrders(signals);
         const allBuysBlocked =
           blockedBuySignals.length > 0
           && !executableSignals.some((signal) => signal.side === 'BUY');
         if (blockedBuySignals.length > 0) {
           this.logger.warn(
-            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) — price collides with SELL signal in same cycle (self-trade prevention)`,
+            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) — same-cycle SELL does not clear minimum profit gap`,
           );
           // 전부 차단된 경우에만 quota carry 등록. 다른 가격대 BUY가 살아있으면
           // 그 시도의 성공/실패에 따라 아래에서 reset/carry가 결정된다.
@@ -365,10 +366,11 @@ export class TradingService {
           await this.logWatchStockExecution(
             ctx,
             WatchStockExecutionEventType.SKIPPED,
-            '자전거래 방지: 매수가가 매도가와 동일하여 해당 매수 스킵',
+            '자전거래/수수료 방지: 매수·매도 가격 간격이 부족하여 해당 매수 스킵',
             {
-              skipReason: 'SAME_PRICE_OPPOSITE_ORDER_PREVENTION',
+              skipReason: 'INSUFFICIENT_SAME_CYCLE_PROFIT_GAP',
               selfTradePrevention: true,
+              minProfitRate,
               actionTaken: allBuysBlocked ? 'SELL_SUBMITTED_BUY_SKIPPED' : 'PARTIAL_BUY_SKIPPED',
               carryQueued: allBuysBlocked && ['infinite-buy', 'daily-dca'].includes(strategy.name),
               strategyName: strategy.name,
@@ -462,38 +464,56 @@ export class TradingService {
   }
 
   /**
-   * 같은 사이클에서 BUY 가격이 SELL 가격과 정확히 일치하면 KIS 자전거래 의심으로
-   * 거부되므로 그 BUY만 차단한다. take-profit 목표가가 현재가보다 낮을 때 시그널이
-   * 현재가로 보정되면서(BUY1과 동일가) 발생하는 충돌이 실제 차단 대상.
-   * 가격이 다른 BUY(예: dip 매수)는 자전거래 위험이 없으므로 통과시킨다.
+   * 같은 사이클에서 BUY/SELL이 동시에 나오면 SELL 가격이 BUY 가격 대비
+   * 최소 비용버퍼를 넘는 경우에만 BUY를 허용한다. 버퍼가 없으면 동일가/역전가만 차단한다.
    */
   private preventSameCycleOppositeOrders(signals: TradingSignal[]): {
     executableSignals: TradingSignal[];
     blockedBuySignals: TradingSignal[];
+    minProfitRate: number;
   } {
-    const sellPrices = new Set(
-      signals
-        .filter((signal) => signal.side === 'SELL' && typeof signal.price === 'number')
-        .map((signal) => signal.price as number),
+    const sellSignals = signals.filter(
+      (signal) => signal.side === 'SELL' && typeof signal.price === 'number',
     );
-    if (sellPrices.size === 0) {
-      return { executableSignals: signals, blockedBuySignals: [] };
+    if (sellSignals.length === 0) {
+      return { executableSignals: signals, blockedBuySignals: [], minProfitRate: 0 };
     }
 
     const executableSignals: TradingSignal[] = [];
     const blockedBuySignals: TradingSignal[] = [];
+    const blockedMinProfitRates: number[] = [];
     for (const signal of signals) {
-      if (
-        signal.side === 'BUY'
-        && typeof signal.price === 'number'
-        && sellPrices.has(signal.price)
-      ) {
+      const blockingSell = signal.side === 'BUY' && typeof signal.price === 'number'
+        ? sellSignals.find((sellSignal) => this.isSameCycleProfitGapInsufficient(signal, sellSignal))
+        : undefined;
+      if (blockingSell) {
         blockedBuySignals.push(signal);
+        blockedMinProfitRates.push(this.getSameCycleMinProfitRate(blockingSell));
       } else {
         executableSignals.push(signal);
       }
     }
-    return { executableSignals, blockedBuySignals };
+    return {
+      executableSignals,
+      blockedBuySignals,
+      minProfitRate: blockedMinProfitRates.length > 0 ? Math.max(...blockedMinProfitRates) : 0,
+    };
+  }
+
+  private isSameCycleProfitGapInsufficient(buySignal: TradingSignal, sellSignal: TradingSignal): boolean {
+    if (typeof buySignal.price !== 'number' || typeof sellSignal.price !== 'number') {
+      return false;
+    }
+    const minProfitRate = this.getSameCycleMinProfitRate(sellSignal);
+    if (minProfitRate <= 0) {
+      return sellSignal.price <= buySignal.price;
+    }
+    return sellSignal.price + Number.EPSILON < buySignal.price * (1 + minProfitRate);
+  }
+
+  private getSameCycleMinProfitRate(signal: TradingSignal): number {
+    const configured = Number(signal.metadata?.sameCycleMinProfitRate);
+    return Number.isFinite(configured) && configured >= 0 ? configured : 0;
   }
 
   /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
