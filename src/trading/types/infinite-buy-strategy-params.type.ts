@@ -28,5 +28,7 @@ export interface InfiniteBuyStrategyParams {
   rsiPolicy?: RsiPolicy;
   /** 일일 투입 상한 (perCycleQuota의 배수). hard-stop 정책 후 누적 quota 일괄 투입 방지. 기본 3. */
   maxDailyQuotaMultiple?: number;
+  /** 같은 사이클 BUY/SELL 동시 발생 시 왕복 비용을 넘기기 위한 최소 가격 간격. 기본 0.006(0.6%). */
+  sameCycleMinProfitRate?: number;
   [key: string]: any;
 }
