@@ -221,7 +221,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `일일 매매 요약 | ${this.getKstDateString()}`,
+        text: ctx.summaryTitle ?? `일일 매매 요약 | ${this.getKstDateString()}`,
       });
       return true;
     } catch (e) {
@@ -815,6 +815,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
 
   formatDailySummary(ctx: DailySummaryContext): KnownBlock[] {
     const today = this.getKstDateString();
+    const title = ctx.summaryTitle ?? `일일 매매 요약 | ${today}`;
     const marketSummaries = ctx.marketSummaries && ctx.marketSummaries.length > 0
       ? ctx.marketSummaries
       : [
@@ -835,7 +836,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `:clipboard: *일일 매매 요약 | ${today}*`,
+          text: `:clipboard: *${title}*`,
         },
       },
       { type: 'divider' },

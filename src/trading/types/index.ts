@@ -20,3 +20,4 @@ export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-
 export { PositionQuantitySnapshot } from './order-reconciliation.type';
 export { OrderSyncOptions } from './order-sync-options.type';
 export { OrderSyncWindow } from './order-sync-window.type';
+export { DailySummaryScope } from './daily-summary-scope.type';

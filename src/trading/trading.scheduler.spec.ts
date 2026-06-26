@@ -1,4 +1,5 @@
 import { TradingScheduler } from './trading.scheduler';
+import { CronJob } from 'cron';
 
 describe('TradingScheduler', () => {
   let scheduler: TradingScheduler;
@@ -7,6 +8,8 @@ describe('TradingScheduler', () => {
     isBusy: jest.fn(() => false),
     executeDomestic: jest.fn(),
     executeOverseas: jest.fn(),
+    sendDomesticDailySummary: jest.fn(),
+    sendUsDailySummary: jest.fn(),
     runMarketRegimeDetection: jest.fn(),
     runMarketRegimeDetectionForExchanges: jest.fn(),
     triggerWatchStockNow: jest.fn(),
@@ -64,5 +67,38 @@ describe('TradingScheduler', () => {
     mockMarketStateSync.isExchangeHoliday.mockReturnValueOnce(Promise.resolve(true) as any);
     await expect(scheduler.isExchangeHoliday('KRX')).resolves.toBe(true);
     expect(mockMarketStateSync.isExchangeHoliday).toHaveBeenCalledWith('KRX');
+  });
+
+  it('registers separate domestic and US close daily summary jobs when trading is enabled', () => {
+    const startSpy = jest.spyOn(CronJob.prototype, 'start').mockImplementation(() => undefined as any);
+    const enabledConfigService = {
+      get: jest.fn((key: string) => {
+        if (key === 'trading.enabled') return true;
+        return undefined;
+      }),
+    };
+    scheduler = new TradingScheduler(
+      mockOrchestrator as any,
+      mockMarketStateSync as any,
+      enabledConfigService as any,
+      mockSchedulerRegistry as any,
+    );
+
+    scheduler.onModuleInit();
+
+    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
+      'daily-summary-domestic-close',
+      expect.any(CronJob),
+    );
+    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
+      'daily-summary-us-close-dst',
+      expect.any(CronJob),
+    );
+    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
+      'daily-summary-us-close-standard',
+      expect.any(CronJob),
+    );
+
+    startSpy.mockRestore();
   });
 });

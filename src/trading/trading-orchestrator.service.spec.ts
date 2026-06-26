@@ -66,6 +66,10 @@ describe('TradingOrchestrator', () => {
       findUnique: jest.fn(),
       count: jest.fn(),
     },
+    appSetting: {
+      create: jest.fn(),
+      delete: jest.fn(),
+    },
   };
 
   const mockConfigService = {
@@ -78,6 +82,16 @@ describe('TradingOrchestrator', () => {
 
   const mockMarketDataCache = {
     getSecFundamentals: jest.fn(),
+  };
+
+  const mockSlackService = {
+    isEnabled: jest.fn(),
+    sendDailySummary: jest.fn(),
+    sendRiskAlert: jest.fn(),
+  };
+
+  const mockSlackCommandsService = {
+    buildDailySummary: jest.fn(),
   };
 
   beforeEach(() => {
@@ -103,6 +117,35 @@ describe('TradingOrchestrator', () => {
     mockOrderSyncService.syncMarketOrders.mockResolvedValue(undefined);
     mockMarketStateSync.cancelUnfilledOrders.mockResolvedValue(undefined);
     mockMarketStateSync.syncMarketPortfolioOnly.mockResolvedValue(undefined);
+    mockPrisma.appSetting.create.mockResolvedValue({});
+    mockPrisma.appSetting.delete.mockResolvedValue({});
+    mockSlackService.isEnabled.mockReturnValue(false);
+    mockSlackService.sendDailySummary.mockResolvedValue(true);
+    mockSlackService.sendRiskAlert.mockResolvedValue(undefined);
+    mockSlackCommandsService.buildDailySummary.mockResolvedValue({
+      positions: [],
+      todayBuyCount: 1,
+      todaySellCount: 0,
+      skipCount: 0,
+      skipReasons: [],
+      totalInvested: 100,
+      totalEvaluation: 101,
+      totalPnl: 1,
+      totalPnlRate: 1,
+      marketSummaries: [
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          label: '미국',
+          positions: [],
+          totalInvested: 100,
+          totalEvaluation: 101,
+          totalPnl: 1,
+          totalPnlRate: 1,
+        },
+      ],
+      marketConditions: [],
+    });
     mockMarketStateSync.getUnfilledOrders.mockResolvedValue([
       {
         orderNo: 'order-1',
@@ -150,7 +193,13 @@ describe('TradingOrchestrator', () => {
       mockPrisma as any,
       mockConfigService as any,
       mockMarketDataCache as any,
+      mockSlackService as any,
+      mockSlackCommandsService as any,
     );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('should skip overseas exchange execution on exchange holiday', async () => {
@@ -336,5 +385,148 @@ describe('TradingOrchestrator', () => {
         price: 58.42,
       },
     ]);
+  });
+
+  it('does not send daily summary during once-daily strategy execution', async () => {
+    mockSlackService.isEnabled.mockReturnValue(true);
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      {
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        isActive: true,
+      },
+    ]);
+
+    expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
+    expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
+  });
+
+  it('sends domestic daily summary after domestic close using only domestic scope', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockPrisma.position.findMany.mockResolvedValueOnce([
+      {
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '027410',
+        quantity: 1,
+      },
+    ]);
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockOrderSyncService.syncMarketOrders).toHaveBeenCalledWith(
+      'DOMESTIC',
+      [
+        {
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '027410',
+          quantity: 1,
+        },
+      ],
+      { force: true },
+    );
+    expect(mockSlackCommandsService.buildDailySummary).toHaveBeenCalledWith({
+      summaryTitle: '국내장 매매 요약 | 2026-06-24',
+      market: 'DOMESTIC',
+      exchangeCodes: ['KRX'],
+      tradeStart: new Date('2026-06-24T00:00:00+09:00'),
+      tradeEnd: new Date('2026-06-24T23:59:59.999+09:00'),
+    });
+    expect(mockSlackService.sendDailySummary).toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
+  it('does not send close daily summary when latest market state sync fails and releases the claim', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockMarketStateSync.syncMarketPortfolioOnly.mockRejectedValueOnce(new Error('KIS timeout'));
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
+    expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
+    expect(mockPrisma.appSetting.delete).toHaveBeenCalledWith({
+      where: { key: 'daily-summary-sent:DOMESTIC:KRX:CLOSE:2026-06-24' },
+    });
+
+    jest.useRealTimers();
+  });
+
+  it('sends close daily summary when session trades exist even if no positions remain', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockSlackCommandsService.buildDailySummary.mockResolvedValueOnce({
+      positions: [],
+      todayBuyCount: 1,
+      todaySellCount: 1,
+      skipCount: 0,
+      skipReasons: [],
+      totalInvested: 0,
+      totalEvaluation: 0,
+      totalPnl: 0,
+      totalPnlRate: 0,
+      marketSummaries: [],
+      marketConditions: [],
+    });
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockSlackService.sendDailySummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        todayBuyCount: 1,
+        todaySellCount: 1,
+        marketSummaries: [],
+      }),
+    );
+    expect(mockPrisma.appSetting.delete).not.toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
+  it('sends US daily summary after US close using the previous KST session date', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T20:10:00Z')); // 2026-06-25 05:10 KST, US DST close + 10m
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockPrisma.position.findMany.mockResolvedValueOnce([
+      {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 37,
+      },
+    ]);
+
+    await orchestrator.sendUsDailySummary();
+
+    expect(mockOrderSyncService.syncMarketOrders).toHaveBeenCalledWith(
+      'OVERSEAS',
+      [
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          quantity: 37,
+        },
+      ],
+      { force: true },
+    );
+    expect(mockSlackCommandsService.buildDailySummary).toHaveBeenCalledWith({
+      summaryTitle: '미국장 매매 요약 | 2026-06-24 거래일',
+      market: 'OVERSEAS',
+      exchangeCodes: ['NASD', 'NYSE', 'AMEX'],
+      tradeStart: new Date('2026-06-24T22:30:00+09:00'),
+      tradeEnd: new Date('2026-06-25T05:00:00+09:00'),
+    });
+    expect(mockSlackService.sendDailySummary).toHaveBeenCalled();
+
+    jest.useRealTimers();
   });
 });
