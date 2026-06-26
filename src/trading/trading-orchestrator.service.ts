@@ -20,6 +20,7 @@ import {
   PerStockTradingStrategy,
   StockIndicators,
   PositionQuantitySnapshot,
+  DailySummaryScope,
 } from './types';
 import { SlackService } from '../notification/slack.service';
 import { SlackCommandsService } from '../notification/slack-commands.service';
@@ -380,8 +381,6 @@ export class TradingOrchestrator {
       await this.marketStateSync.cancelUnfilledOrders(market, cancelableUnfilledOrders);
     }
 
-    const hasOnceDailyNow = executableOnceDailyStocks.length > 0;
-
     const today = this.getKSTDate();
     const investorTradeCache = new Map<string, Promise<any[] | undefined>>();
     const dividendScheduleCache = new Map<string, Promise<any[] | undefined>>();
@@ -459,32 +458,118 @@ export class TradingOrchestrator {
 
     await this.riskManagement.saveRiskSnapshot(market, totalPortfolioValue, cashAvailable);
 
-    // 8. Daily summary (once-daily 전략 실행 시각에만)
-    if (hasOnceDailyNow && this.slackService?.isEnabled() && this.slackCommandsService) {
-      const summaryDate = this.getKSTDate();
-      const claimed = await this.claimDailySummary(summaryDate, market, exchangeCode);
+  }
 
-      if (claimed) {
-        try {
-          const summary = await this.slackCommandsService.buildDailySummary();
-          if ((summary.marketSummaries?.length ?? 0) === 0) {
-            this.logger.debug(`Skipping daily summary for ${summaryDate} because there are no held positions`);
-            return;
-          }
+  private async syncLatestMarketStateBeforeDailySummary(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
+    try {
+      await this.marketStateSync.syncMarketPortfolioOnly(market);
+      const latestPositions = await this.prisma.position.findMany({
+        where: { market: market as Market },
+      });
 
-          const sent = await this.slackService.sendDailySummary(summary);
-          if (!sent) {
-            await this.releaseDailySummaryClaim(summaryDate);
-            this.logger.warn(`Daily summary was not sent for ${summaryDate}; claim released for retry`);
-          }
-        } catch (e) {
-          await this.releaseDailySummaryClaim(summaryDate);
-          this.logger.warn(`Failed to send daily summary to Slack: ${e.message}`);
-        }
-      } else {
-        this.logger.debug(`Daily summary already sent for ${summaryDate}, skipping`);
-      }
+      await this.orderSyncService.syncMarketOrders(
+        market,
+        latestPositions.map((position) => this.toPositionSnapshot(position)),
+        { force: true },
+      );
+      return true;
+    } catch (e) {
+      this.logger.warn(`Failed to sync latest ${market} state before daily summary: ${e.message}`);
+      return false;
     }
+  }
+
+  async sendDomesticDailySummary(): Promise<void> {
+    if (await this.marketStateSync.isHoliday('DOMESTIC')) return;
+
+    const summaryDate = this.getKSTDate();
+    await this.sendCloseDailySummary({
+      summaryDate,
+      claimScope: 'DOMESTIC:KRX:CLOSE',
+      summaryTitle: `국내장 매매 요약 | ${summaryDate}`,
+      market: 'DOMESTIC',
+      exchangeCodes: ['KRX'],
+      tradeStart: this.kstDateTime(summaryDate, 0, 0, 0, 0),
+      tradeEnd: this.kstDateTime(summaryDate, 23, 59, 59, 999),
+    });
+  }
+
+  async sendUsDailySummary(): Promise<void> {
+    if (await this.marketStateSync.isExchangeHoliday('NASD')) return;
+
+    const scope = this.buildUsDailySummaryScope();
+    if (!scope) return;
+
+    await this.sendCloseDailySummary(scope);
+  }
+
+  private async sendCloseDailySummary(scope: DailySummaryScope): Promise<void> {
+    if (!this.slackService?.isEnabled() || !this.slackCommandsService) return;
+
+    const claimed = await this.claimDailySummary(scope.summaryDate, scope.market, scope.claimScope);
+    if (!claimed) {
+      this.logger.debug(`Daily summary already sent for ${scope.claimScope}:${scope.summaryDate}, skipping`);
+      return;
+    }
+
+    try {
+      const synced = await this.syncLatestMarketStateBeforeDailySummary(scope.market);
+      if (!synced) {
+        await this.releaseDailySummaryClaim(scope.summaryDate, scope.claimScope);
+        this.logger.warn(`Daily summary was not sent for ${scope.claimScope}:${scope.summaryDate}; claim released after sync failure`);
+        return;
+      }
+
+      const summary = await this.slackCommandsService.buildDailySummary({
+        summaryTitle: scope.summaryTitle,
+        market: scope.market,
+        exchangeCodes: scope.exchangeCodes,
+        tradeStart: scope.tradeStart,
+        tradeEnd: scope.tradeEnd,
+      });
+
+      const hasHeldPositions = (summary.marketSummaries?.length ?? 0) > 0;
+      const hasSessionTrades = summary.todayBuyCount > 0 || summary.todaySellCount > 0;
+      if (!hasHeldPositions && !hasSessionTrades) {
+        this.logger.debug(`Skipping ${scope.claimScope} daily summary for ${scope.summaryDate} because there are no held positions or session trades`);
+        return;
+      }
+
+      const sent = await this.slackService.sendDailySummary(summary);
+      if (!sent) {
+        await this.releaseDailySummaryClaim(scope.summaryDate, scope.claimScope);
+        this.logger.warn(`Daily summary was not sent for ${scope.claimScope}:${scope.summaryDate}; claim released for retry`);
+      }
+    } catch (e) {
+      await this.releaseDailySummaryClaim(scope.summaryDate, scope.claimScope);
+      this.logger.warn(`Failed to send ${scope.claimScope} daily summary to Slack: ${e.message}`);
+    }
+  }
+
+  private buildUsDailySummaryScope(now: Date = new Date()): DailySummaryScope | undefined {
+    const exchangeCode = 'NASD';
+    const hours = getMarketHours(exchangeCode, now);
+    if (!hours?.overnight) return undefined;
+
+    const kstTime = this.getKSTTime(now);
+    const currentMinutes = kstTime.hour * 60 + kstTime.minute;
+    const openMinutes = hours.open.hour * 60 + hours.open.minute;
+    const closeMinutes = hours.close.hour * 60 + hours.close.minute;
+    if (currentMinutes < closeMinutes || currentMinutes >= openMinutes) return undefined;
+
+    const closeDate = this.getKSTDate(now);
+    const summaryDate = this.addKstDays(closeDate, -1);
+    const closeDateForSession = this.addKstDays(summaryDate, 1);
+
+    return {
+      summaryDate,
+      claimScope: 'OVERSEAS:US:CLOSE',
+      summaryTitle: `미국장 매매 요약 | ${summaryDate} 거래일`,
+      market: 'OVERSEAS',
+      exchangeCodes: ['NASD', 'NYSE', 'AMEX'],
+      tradeStart: this.kstDateTime(summaryDate, hours.open.hour, hours.open.minute),
+      tradeEnd: this.kstDateTime(closeDateForSession, hours.close.hour, hours.close.minute),
+    };
   }
 
   // ========== 컨텍스트 빌드 ==========
@@ -1202,8 +1287,7 @@ export class TradingOrchestrator {
 
   // ========== 유틸 ==========
 
-  private getKSTTime(): KstExecutionTime {
-    const now = new Date();
+  private getKSTTime(now = new Date()): KstExecutionTime {
     const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
     return {
       hour: kst.getUTCHours(),
@@ -1211,8 +1295,27 @@ export class TradingOrchestrator {
     };
   }
 
-  private getKSTDate(): string {
-    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  private getKSTDate(now = new Date()): string {
+    return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  private addKstDays(date: string, days: number): string {
+    const base = new Date(`${date}T00:00:00+09:00`);
+    return this.getKSTDate(new Date(base.getTime() + days * 24 * 60 * 60 * 1000));
+  }
+
+  private kstDateTime(
+    date: string,
+    hour: number,
+    minute: number,
+    second = 0,
+    millisecond = 0,
+  ): Date {
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    const ss = String(second).padStart(2, '0');
+    const ms = String(millisecond).padStart(3, '0');
+    return new Date(`${date}T${hh}:${mm}:${ss}.${ms}+09:00`);
   }
 
   private getKstDayRange(): { gte: Date; lte: Date } {
@@ -1239,23 +1342,23 @@ export class TradingOrchestrator {
 
   // ========== Daily summary claim ==========
 
-  private getDailySummarySentKey(date: string): string {
-    return `${DAILY_SUMMARY_SENT_KEY_PREFIX}:${date}`;
+  private getDailySummarySentKey(date: string, scope = 'GLOBAL'): string {
+    return `${DAILY_SUMMARY_SENT_KEY_PREFIX}:${scope}:${date}`;
   }
 
   private async claimDailySummary(
     date: string,
     market: 'DOMESTIC' | 'OVERSEAS',
-    exchangeCode: string,
+    scope: string,
   ): Promise<boolean> {
     try {
       await this.prisma.appSetting.create({
         data: {
-          key: this.getDailySummarySentKey(date),
+          key: this.getDailySummarySentKey(date, scope),
           value: {
             date,
             market,
-            exchangeCode,
+            scope,
             claimedAt: new Date().toISOString(),
           } as Prisma.InputJsonValue,
         },
@@ -1271,10 +1374,10 @@ export class TradingOrchestrator {
     }
   }
 
-  private async releaseDailySummaryClaim(date: string): Promise<void> {
+  private async releaseDailySummaryClaim(date: string, scope = 'GLOBAL'): Promise<void> {
     try {
       await this.prisma.appSetting.delete({
-        where: { key: this.getDailySummarySentKey(date) },
+        where: { key: this.getDailySummarySentKey(date, scope) },
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {

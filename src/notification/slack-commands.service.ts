@@ -7,6 +7,7 @@ import { SlackService } from './slack.service';
 import {
   PositionInfo,
   DailySummaryContext,
+  DailySummaryBuildOptions,
   DailySummaryMarketConditionSummary,
   DailySummaryMarketSummary,
 } from './types/notification.types';
@@ -230,8 +231,9 @@ export class SlackCommandsService implements OnModuleInit {
 
   // --- Data helpers ---
 
-  private async getPositions(): Promise<PositionInfo[]> {
+  private async getPositions(options: DailySummaryBuildOptions = {}): Promise<PositionInfo[]> {
     const positions = await this.prisma.position.findMany({
+      where: this.buildMarketWhere(options),
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -284,11 +286,11 @@ export class SlackCommandsService implements OnModuleInit {
     };
   }
 
-  async buildDailySummary(): Promise<DailySummaryContext> {
-    const positions = await this.getPositions();
+  async buildDailySummary(options: DailySummaryBuildOptions = {}): Promise<DailySummaryContext> {
+    const positions = await this.getPositions(options);
     const kstDate = this.getKstDateString();
-    const todayStart = new Date(`${kstDate}T00:00:00+09:00`);
-    const todayEnd = new Date(`${kstDate}T23:59:59.999+09:00`);
+    const todayStart = options.tradeStart ?? new Date(`${kstDate}T00:00:00+09:00`);
+    const todayEnd = options.tradeEnd ?? new Date(`${kstDate}T23:59:59.999+09:00`);
 
     const todayTrades = await this.prisma.tradeRecord.findMany({
       where: {
@@ -297,6 +299,7 @@ export class SlackCommandsService implements OnModuleInit {
           lte: todayEnd,
         },
         status: 'FILLED',
+        ...this.buildMarketWhere(options),
       },
       select: {
         side: true,
@@ -316,6 +319,7 @@ export class SlackCommandsService implements OnModuleInit {
     const marketConditions = await this.buildMarketConditions(positions);
 
     return {
+      summaryTitle: options.summaryTitle,
       positions,
       todayBuyCount,
       todaySellCount,
@@ -329,6 +333,20 @@ export class SlackCommandsService implements OnModuleInit {
       marketConditions,
       marketCondition: marketConditions.length === 1 ? marketConditions[0].condition : undefined,
     };
+  }
+
+  private buildMarketWhere(options: DailySummaryBuildOptions): Record<string, any> | undefined {
+    const where: Record<string, any> = {};
+
+    if (options.market) {
+      where.market = options.market as Market;
+    }
+
+    if (options.exchangeCodes && options.exchangeCodes.length > 0) {
+      where.exchangeCode = { in: options.exchangeCodes };
+    }
+
+    return Object.keys(where).length > 0 ? where : undefined;
   }
 
   private buildMarketSummaries(positions: PositionInfo[]): DailySummaryMarketSummary[] {

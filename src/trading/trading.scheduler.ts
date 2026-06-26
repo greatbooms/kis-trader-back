@@ -66,6 +66,11 @@ export class TradingScheduler implements OnModuleInit {
     krPortfolioSyncCloseJob.start();
     this.logger.log('Trading domestic portfolio sync cron registered: every 10min 09:00-15:20 KST');
 
+    const krDailySummaryJob = new CronJob('40 15 * * 1-5', () => this.orchestrator.sendDomesticDailySummary(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('daily-summary-domestic-close', krDailySummaryJob);
+    krDailySummaryJob.start();
+    this.logger.log('Daily summary domestic cron registered: 15:40 KST');
+
     // ========== 해외 시장 ==========
 
     // 해외 아시아 거래 루프: 매 1분, 09:00-16:59 KST
@@ -111,6 +116,15 @@ export class TradingScheduler implements OnModuleInit {
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-portfolio-sync', usMorningPortfolioSyncJob);
     usMorningPortfolioSyncJob.start();
     this.logger.log('Trading overseas portfolio sync cron registered: every 10min during overseas sessions');
+
+    const usDailySummaryDstJob = new CronJob('10 5 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('daily-summary-us-close-dst', usDailySummaryDstJob);
+    usDailySummaryDstJob.start();
+
+    const usDailySummaryStandardJob = new CronJob('10 6 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
+    this.schedulerRegistry.addCronJob('daily-summary-us-close-standard', usDailySummaryStandardJob);
+    usDailySummaryStandardJob.start();
+    this.logger.log('Daily summary US cron registered: 05:10/06:10 KST (DST aware)');
 
     // ========== 시장 레짐 판별 (각 시장 장전) ==========
 

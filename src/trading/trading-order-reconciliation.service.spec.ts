@@ -145,6 +145,100 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
 
+    it('includes infinite-buy T value in the trade fill alert strategy details', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-inf-1',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 75.12,
+          executedQty: null,
+          executedPrice: null,
+          orderNo: '0030768238',
+          status: 'PENDING',
+          strategyName: 'infinite-buy',
+          createdAt: new Date('2026-06-23T15:30:00Z'),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-inf-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 75.12,
+        executedQty: 2,
+        executedPrice: 75.11,
+        orderNo: '0030768238',
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        maxCycles: 40,
+      });
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        message: '주문 접수',
+        details: {
+          side: 'BUY',
+          quantity: 2,
+          price: 75.12,
+          orderDivision: '00',
+          reason: 'Buy1: T=11.7, 70%+잔여재배분, 2주 @ 75.12',
+        },
+      });
+      mockPrisma.position.findFirst.mockResolvedValue({
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        exchangeCode: 'NASD',
+        market: 'OVERSEAS',
+        quantity: 37,
+        avgPrice: 78.79,
+        currentPrice: 75.11,
+        profitLoss: -136.01,
+        profitRate: -4.66,
+        totalInvested: 2915.08,
+      });
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 37 }],
+        [],
+        [
+          {
+            orderNo: '0030768238',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            orderQuantity: 2,
+            filledQuantity: 2,
+            remainingQuantity: 0,
+            filledPrice: 75.11,
+            exchangeCode: 'NASD',
+          },
+        ],
+      );
+
+      expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          strategyDetails: expect.objectContaining({
+            tValue: 11.7,
+            maxCycles: 40,
+          }),
+        }),
+      );
+    });
+
     it('should cancel a pending order when it disappears without any filled quantity', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {

@@ -38,6 +38,7 @@ export interface TradeAlertContext {
 }
 
 export interface DailySummaryContext {
+  summaryTitle?: string;
   positions: PositionInfo[];
   todayBuyCount: number;
   todaySellCount: number;
@@ -50,6 +51,14 @@ export interface DailySummaryContext {
   marketCondition?: MarketCondition;
   marketSummaries?: DailySummaryMarketSummary[];
   marketConditions?: DailySummaryMarketConditionSummary[];
+}
+
+export interface DailySummaryBuildOptions {
+  summaryTitle?: string;
+  tradeStart?: Date;
+  tradeEnd?: Date;
+  market?: 'DOMESTIC' | 'OVERSEAS';
+  exchangeCodes?: string[];
 }
 
 export interface DailySummaryMarketSummary {

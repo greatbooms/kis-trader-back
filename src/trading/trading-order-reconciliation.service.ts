@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Market, OrderStatus, Side, WatchStockExecutionEventType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
+import type { TradeAlertContext } from '../notification/types/notification.types';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PositionQuantitySnapshot, TradingSignal } from './types';
 import { TradingService } from './trading.service';
@@ -506,6 +507,7 @@ export class TradingOrderReconciliationService {
     const executedPrice = Number(record.executedPrice ?? signal.price ?? record.price);
     const totalExecutedQty = record.executedQty || filledNowQty;
     const remainingQty = Math.max(0, record.quantity - totalExecutedQty);
+    const strategyDetails = await this.buildTradeAlertStrategyDetails(record, signal);
 
     await this.slackService.sendTradeAlert({
       signal: {
@@ -538,6 +540,49 @@ export class TradingOrderReconciliationService {
             totalInvested: Number(position.totalInvested),
           }
         : undefined,
+      ...(strategyDetails ? { strategyDetails } : {}),
     });
+  }
+
+  private async buildTradeAlertStrategyDetails(
+    record: {
+      strategyName?: string | null;
+      market: Market;
+      exchangeCode: string;
+      stockCode: string;
+    },
+    signal: TradingSignal,
+  ): Promise<TradeAlertContext['strategyDetails'] | undefined> {
+    if (record.strategyName !== 'infinite-buy') return undefined;
+
+    const tValue = this.extractInfiniteBuyTValue(signal);
+    if (tValue === undefined) return undefined;
+
+    const watchStock = await this.prisma.watchStock.findUnique({
+      where: {
+        market_exchangeCode_stockCode: {
+          market: record.market,
+          exchangeCode: record.exchangeCode,
+          stockCode: record.stockCode,
+        },
+      },
+      select: { maxCycles: true },
+    });
+
+    return {
+      tValue,
+      maxCycles: watchStock?.maxCycles,
+    };
+  }
+
+  private extractInfiniteBuyTValue(signal: TradingSignal): number | undefined {
+    const metadataTValue = Number(signal.metadata?.tValue ?? signal.metadata?.T);
+    if (Number.isFinite(metadataTValue)) return metadataTValue;
+
+    const match = signal.reason.match(/\bT=(\d+(?:\.\d+)?)/);
+    if (!match) return undefined;
+
+    const tValue = Number(match[1]);
+    return Number.isFinite(tValue) ? tValue : undefined;
   }
 }
