@@ -504,7 +504,8 @@ export class TradingOrchestrator {
   }
 
   private async sendCloseDailySummary(scope: DailySummaryScope): Promise<void> {
-    if (!this.slackService?.isEnabled() || !this.slackCommandsService) return;
+    if (!this.slackService || !this.slackCommandsService) return;
+    if (!this.slackService.isConfigured()) return;
 
     const claimed = await this.claimDailySummary(scope.summaryDate, scope.market, scope.claimScope);
     if (!claimed) {

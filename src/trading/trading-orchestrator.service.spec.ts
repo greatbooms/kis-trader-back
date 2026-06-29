@@ -85,6 +85,7 @@ describe('TradingOrchestrator', () => {
   };
 
   const mockSlackService = {
+    isConfigured: jest.fn(),
     isEnabled: jest.fn(),
     sendDailySummary: jest.fn(),
     sendRiskAlert: jest.fn(),
@@ -119,6 +120,7 @@ describe('TradingOrchestrator', () => {
     mockMarketStateSync.syncMarketPortfolioOnly.mockResolvedValue(undefined);
     mockPrisma.appSetting.create.mockResolvedValue({});
     mockPrisma.appSetting.delete.mockResolvedValue({});
+    mockSlackService.isConfigured.mockReturnValue(true);
     mockSlackService.isEnabled.mockReturnValue(false);
     mockSlackService.sendDailySummary.mockResolvedValue(true);
     mockSlackService.sendRiskAlert.mockResolvedValue(undefined);
@@ -488,6 +490,39 @@ describe('TradingOrchestrator', () => {
       }),
     );
     expect(mockPrisma.appSetting.delete).not.toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
+  it('attempts close daily summary even when Slack socket is disconnected so SlackService can reconnect', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(false);
+    mockPrisma.position.findMany.mockResolvedValue([
+      {
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '027410',
+        quantity: 1,
+      },
+    ]);
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockSlackService.sendDailySummary).toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
+  it('skips close daily summary before broker sync when Slack is not configured', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isConfigured.mockReturnValue(false);
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockPrisma.appSetting.create).not.toHaveBeenCalled();
+    expect(mockMarketStateSync.syncMarketPortfolioOnly).not.toHaveBeenCalled();
+    expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
+    expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
 
     jest.useRealTimers();
   });

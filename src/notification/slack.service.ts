@@ -183,6 +183,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     return this.enabled && this.connected && this.app !== null;
   }
 
+  isConfigured(): boolean {
+    return this.enabled && !!this.botToken && !!this.appToken;
+  }
+
   /** 메시지 전송 시 연결 끊겨있으면 재접속 시도 후 전송 */
   private async ensureConnected(): Promise<boolean> {
     if (this.connected && this.app) return true;
