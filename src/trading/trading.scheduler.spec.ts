@@ -69,7 +69,7 @@ describe('TradingScheduler', () => {
     expect(mockMarketStateSync.isExchangeHoliday).toHaveBeenCalledWith('KRX');
   });
 
-  it('registers separate domestic and US close daily summary jobs when trading is enabled', () => {
+  it('registers separate domestic and US close daily summary retry windows when trading is enabled', () => {
     const startSpy = jest.spyOn(CronJob.prototype, 'start').mockImplementation(() => undefined as any);
     const enabledConfigService = {
       get: jest.fn((key: string) => {
@@ -86,18 +86,15 @@ describe('TradingScheduler', () => {
 
     scheduler.onModuleInit();
 
-    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
-      'daily-summary-domestic-close',
-      expect.any(CronJob),
+    const registeredJobs = new Map<string, CronJob>(
+      mockSchedulerRegistry.addCronJob.mock.calls.map(([name, job]) => [name, job]),
     );
-    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
-      'daily-summary-us-close-dst',
-      expect.any(CronJob),
-    );
-    expect(mockSchedulerRegistry.addCronJob).toHaveBeenCalledWith(
-      'daily-summary-us-close-standard',
-      expect.any(CronJob),
-    );
+    expect((registeredJobs.get('daily-summary-domestic-close') as any).cronTime.source)
+      .toBe('40,45,50 15 * * 1-5');
+    expect((registeredJobs.get('daily-summary-us-close-dst') as any).cronTime.source)
+      .toBe('10,15,20 5 * * 2-6');
+    expect((registeredJobs.get('daily-summary-us-close-standard') as any).cronTime.source)
+      .toBe('10,15,20 6 * * 2-6');
 
     startSpy.mockRestore();
   });

@@ -66,10 +66,10 @@ export class TradingScheduler implements OnModuleInit {
     krPortfolioSyncCloseJob.start();
     this.logger.log('Trading domestic portfolio sync cron registered: every 10min 09:00-15:20 KST');
 
-    const krDailySummaryJob = new CronJob('40 15 * * 1-5', () => this.orchestrator.sendDomesticDailySummary(), null, false, 'Asia/Seoul');
+    const krDailySummaryJob = new CronJob('40,45,50 15 * * 1-5', () => this.orchestrator.sendDomesticDailySummary(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('daily-summary-domestic-close', krDailySummaryJob);
     krDailySummaryJob.start();
-    this.logger.log('Daily summary domestic cron registered: 15:40 KST');
+    this.logger.log('Daily summary domestic cron registered: 15:40/15:45/15:50 KST');
 
     // ========== 해외 시장 ==========
 
@@ -117,14 +117,14 @@ export class TradingScheduler implements OnModuleInit {
     usMorningPortfolioSyncJob.start();
     this.logger.log('Trading overseas portfolio sync cron registered: every 10min during overseas sessions');
 
-    const usDailySummaryDstJob = new CronJob('10 5 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
+    const usDailySummaryDstJob = new CronJob('10,15,20 5 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('daily-summary-us-close-dst', usDailySummaryDstJob);
     usDailySummaryDstJob.start();
 
-    const usDailySummaryStandardJob = new CronJob('10 6 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
+    const usDailySummaryStandardJob = new CronJob('10,15,20 6 * * 2-6', () => this.orchestrator.sendUsDailySummary(), null, false, 'Asia/Seoul');
     this.schedulerRegistry.addCronJob('daily-summary-us-close-standard', usDailySummaryStandardJob);
     usDailySummaryStandardJob.start();
-    this.logger.log('Daily summary US cron registered: 05:10/06:10 KST (DST aware)');
+    this.logger.log('Daily summary US cron registered: 05:10/05:15/05:20 and 06:10/06:15/06:20 KST (DST aware)');
 
     // ========== 시장 레짐 판별 (각 시장 장전) ==========
 
