@@ -29,6 +29,12 @@ describe('Synology container deployment', () => {
     expect(compose).toContain('restart: unless-stopped');
   });
 
+  it('caps Docker json-file logs at 500MB per container', () => {
+    expect(compose).toContain('driver: "json-file"');
+    expect(compose).toContain('max-size: "100m"');
+    expect(compose).toContain('max-file: "5"');
+  });
+
   it('requires the preserved runtime env file and uses sudo docker on Synology', () => {
     expect(script).toContain('RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-.env.prod}"');
     expect(script).toContain('sudo -n "$DOCKER_BIN"');
