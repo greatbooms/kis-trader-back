@@ -57,7 +57,7 @@ jobs:
       - name: SSH 설정
         env:
           REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
-          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '22' }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '2008' }}
           REMOTE_USER: ${{ secrets.SYNOLOGY_USER }}
         run: |
           mkdir -p ~/.ssh
@@ -76,7 +76,7 @@ jobs:
       - name: Tailscale 연결 확인
         env:
           REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
-          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '22' }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '2008' }}
         run: |
           echo "Runner Tailscale IPv4:"
           tailscale ip -4 || true
