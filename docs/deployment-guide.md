@@ -33,6 +33,8 @@
 - 헬스체크: `http://<NAS_TAILSCALE_IP>:20000/health`
 - GraphQL/API: `http://<NAS_TAILSCALE_IP>:20000/graphql`
 
+Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20000`으로 NAS 호스트 포트에 직접 바인딩되고, 같은 NAS의 Docker PostgreSQL 포트(`15432`)도 호스트 주소로 접근합니다.
+
 개발 포트:
 
 - 백엔드: `10100`
@@ -191,6 +193,7 @@ sudo -n /usr/local/bin/docker logs --tail 200 kis-trader-back
 
 - `.env.prod` 누락
 - `DATABASE_URL` 오타 또는 DB 접근 실패
+- Compose의 `network_mode: host` 누락으로 컨테이너에서 NAS 호스트 PostgreSQL 포트에 접근하지 못함
 - `ADMIN_PASSWORD`, `JWT_SECRET` 누락
 - KIS/Slack 토큰 오타
 

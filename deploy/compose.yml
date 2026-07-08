@@ -2,14 +2,13 @@ services:
   kis-trader-back:
     image: ${IMAGE:-ghcr.io/greatbooms/kis-trader-back:latest}
     container_name: kis-trader-back
+    network_mode: host
     restart: unless-stopped
     env_file:
       - .env.prod
     environment:
       NODE_ENV: production
       PORT: "20000"
-    ports:
-      - "20000:20000"
     healthcheck:
       test:
         [

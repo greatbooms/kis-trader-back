@@ -4,14 +4,14 @@
 
 **Goal:** Move production deployment from Mac Studio PM2 to Synology NAS Container Manager using GHCR images and Docker Compose.
 
-**Architecture:** GitHub Actions builds a production Docker image, pushes it to GHCR, connects to the NAS through Tailscale SSH, uploads the Compose/deploy files, and runs `docker compose pull` plus `docker compose up -d`. Runtime secrets stay on the NAS in `.env.prod`, and the container exposes the app on port `20000`.
+**Architecture:** GitHub Actions builds a production Docker image, pushes it to GHCR, connects to the NAS through Tailscale SSH, uploads the Compose/deploy files, and runs `docker compose pull` plus `docker compose up -d`. Runtime secrets stay on the NAS in `.env.prod`, and the container uses host networking so the app binds NAS port `20000` directly and can reach the NAS-hosted PostgreSQL port.
 
 **Tech Stack:** GitHub Actions, GHCR, Tailscale, SSH, Docker Compose v2, Synology Container Manager, NestJS, Prisma.
 
 ## Global Constraints
 
 - Real trading is production-sensitive; runtime `.env.prod` must stay off chat and out of committed artifacts.
-- NAS external and container port are both `20000`.
+- NAS application port is `20000`.
 - Deployment account is `eric`; Docker must run through `sudo -n /usr/local/bin/docker`.
 - Container must use the already cloned database `kis_trader_back`.
 - Keep legacy PM2 files for reference until the NAS deployment proves stable.
@@ -33,7 +33,7 @@
 - [x] Align Docker runtime with Node 24 and Yarn 1.
 - [x] Provide a dummy build-time `DATABASE_URL` for Prisma client generation.
 - [x] Expose and run the app on port `20000`.
-- [x] Add `deploy/compose.yml` with `restart: unless-stopped`, `.env.prod`, `20000:20000`, and a `/health` healthcheck.
+- [x] Add `deploy/compose.yml` with `restart: unless-stopped`, `.env.prod`, host networking, `PORT=20000`, and a `/health` healthcheck.
 
 ### Task 2: NAS Deploy Script
 

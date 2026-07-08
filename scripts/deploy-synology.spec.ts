@@ -23,8 +23,9 @@ describe('Synology container deployment', () => {
   it('runs the app on the NAS 20000 port and keeps runtime secrets outside the image', () => {
     expect(compose).toContain('env_file:');
     expect(compose).toContain('.env.prod');
+    expect(compose).toContain('network_mode: host');
     expect(compose).toContain('PORT: "20000"');
-    expect(compose).toContain('"20000:20000"');
+    expect(compose).not.toContain('"20000:20000"');
     expect(compose).toContain('restart: unless-stopped');
   });
 

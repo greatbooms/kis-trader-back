@@ -179,7 +179,7 @@ yarn start:prod          # http://localhost:20000
 
 - `yarn start:prod`는 `.env.prod`를 읽습니다.
 - 운영 서버는 Synology NAS Container Manager의 Docker Compose 프로젝트로 관리합니다.
-- 기본 운영 포트는 `20000`입니다.
+- 기본 운영 포트는 `20000`입니다. Synology 배포 컨테이너는 host network를 사용하므로 `PORT=20000`이 NAS 호스트 포트에 직접 바인딩됩니다.
 - 운영 환경에서는 `ADMIN_PASSWORD`, `JWT_SECRET`가 없으면 서버가 부팅되지 않습니다.
 - 운영 환경에서는 GraphQL Playground와 introspection이 비활성화됩니다.
 
