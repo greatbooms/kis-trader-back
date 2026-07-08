@@ -105,8 +105,8 @@ jobs:
           DEPLOY_PATH: ${{ secrets.SYNOLOGY_DEPLOY_PATH }}
         run: |
           ssh -o ConnectTimeout=10 synology "mkdir -p ${DEPLOY_PATH}"
-          scp -o ConnectTimeout=10 deploy/compose.yml synology:${DEPLOY_PATH}/compose.yml
-          scp -o ConnectTimeout=10 scripts/deploy-synology.sh synology:${DEPLOY_PATH}/deploy-synology.sh
+          ssh -o ConnectTimeout=10 synology "cat > ${DEPLOY_PATH}/compose.yml" < deploy/compose.yml
+          ssh -o ConnectTimeout=10 synology "cat > ${DEPLOY_PATH}/deploy-synology.sh" < scripts/deploy-synology.sh
 
       - name: 배포 실행
         env:
