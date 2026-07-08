@@ -7,10 +7,8 @@ IMAGE="${IMAGE:?IMAGE is required}"
 DOCKER_BIN="${DOCKER_BIN:-/usr/local/bin/docker}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-.env.prod}"
-CONTAINER_ENV_FILE="${CONTAINER_ENV_FILE:-.container.env}"
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-.deploy.env}"
 USE_SUDO_DOCKER="${USE_SUDO_DOCKER:-true}"
-DATABASE_HOST_OVERRIDE="${DATABASE_HOST_OVERRIDE:-}"
 
 docker_cmd() {
   if [ "$USE_SUDO_DOCKER" = "true" ]; then
@@ -22,58 +20,37 @@ docker_cmd() {
 
 cd "$DEPLOY_PATH"
 
-rewrite_database_url_host() {
-  database_url="$1"
-  database_host="$2"
-
-  case "$database_url" in
-    postgresql://*@*)
-      before_at="${database_url%@*}"
-      after_at="${database_url##*@}"
-      case "$after_at" in
-        *:*)
-          host_suffix=":${after_at#*:}"
-          ;;
-        */*)
-          host_suffix="/${after_at#*/}"
-          ;;
-        *)
-          host_suffix=""
-          ;;
-      esac
-      printf '%s@%s%s\n' "$before_at" "$database_host" "$host_suffix"
-      ;;
-    *)
-      printf '%s\n' "$database_url"
-      ;;
-  esac
+image_repository() {
+  image_without_digest="${IMAGE%%@*}"
+  printf '%s\n' "${image_without_digest%:*}"
 }
 
-render_container_env_file() {
-  database_url_found=false
-  : > "$CONTAINER_ENV_FILE"
-  chmod 600 "$CONTAINER_ENV_FILE"
+cleanup_unused_app_images() {
+  repository="$(image_repository)"
+  current_image_id="$(docker_cmd image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
 
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      DATABASE_URL=*)
-        database_url_found=true
-        database_url="${line#DATABASE_URL=}"
-        if [ -n "$DATABASE_HOST_OVERRIDE" ]; then
-          database_url="$(rewrite_database_url_host "$database_url" "$DATABASE_HOST_OVERRIDE")"
-        fi
-        printf 'DATABASE_URL=%s\n' "$database_url" >> "$CONTAINER_ENV_FILE"
-        ;;
-      *)
-        printf '%s\n' "$line" >> "$CONTAINER_ENV_FILE"
-        ;;
-    esac
-  done < "$RUNTIME_ENV_FILE"
-
-  if [ "$database_url_found" != "true" ]; then
-    echo "[error] Missing DATABASE_URL in ${DEPLOY_PATH}/${RUNTIME_ENV_FILE}"
-    exit 1
+  if [ -z "$repository" ] || [ -z "$current_image_id" ]; then
+    echo "[warn] Skipping image cleanup: current image not found"
+    return
   fi
+
+  echo "[info] Cleaning unused images for ${repository}"
+  docker_cmd images "$repository" --format '{{.ID}}' | while IFS= read -r image_id; do
+    if [ -z "$image_id" ]; then
+      continue
+    fi
+
+    full_image_id="$(docker_cmd image inspect -f '{{.Id}}' "$image_id" 2>/dev/null || true)"
+    if [ "$full_image_id" = "$current_image_id" ]; then
+      continue
+    fi
+
+    if docker_cmd rmi "$image_id" >/dev/null 2>&1; then
+      echo "[info] Removed unused image ${image_id}"
+    else
+      echo "[warn] Skipped image ${image_id}; it may still be in use"
+    fi
+  done
 }
 
 if [ ! -f "$RUNTIME_ENV_FILE" ]; then
@@ -86,12 +63,7 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
-render_container_env_file
-
-{
-  printf 'IMAGE=%s\n' "$IMAGE"
-  printf 'RUNTIME_CONTAINER_ENV_FILE=%s\n' "$CONTAINER_ENV_FILE"
-} > "$DEPLOY_ENV_FILE"
+printf 'IMAGE=%s\n' "$IMAGE" > "$DEPLOY_ENV_FILE"
 chmod 600 "$DEPLOY_ENV_FILE"
 
 echo "[info] Pulling ${IMAGE}"
@@ -107,6 +79,7 @@ while [ "$i" -le 60 ]; do
 
   if [ "$status" = "healthy" ]; then
     echo "[info] ${APP_NAME} is healthy"
+    cleanup_unused_app_images
     exit 0
   fi
 

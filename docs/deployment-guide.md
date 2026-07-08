@@ -17,6 +17,7 @@
 8. NAS에서 `docker compose pull`
 9. NAS에서 `docker compose up -d --remove-orphans`
 10. Docker healthcheck로 `/health` 확인
+11. 현재 실행 중인 이미지를 제외한 이 프로젝트의 예전 GHCR 이미지 정리
 
 관련 파일:
 
@@ -33,7 +34,7 @@
 - 헬스체크: `http://<NAS_TAILSCALE_IP>:20000/health`
 - GraphQL/API: `http://<NAS_TAILSCALE_IP>:20000/graphql`
 
-Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20000`으로 NAS 호스트 포트에 직접 바인딩됩니다. 배포 스크립트는 NAS의 원본 `.env.prod`를 읽어 `.container.env`를 만들고, 컨테이너 런타임에서는 `DATABASE_URL` host를 `127.0.0.1`로 바꿔 같은 NAS의 Docker PostgreSQL 포트(`15432`)에 접근합니다.
+Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20000`으로 NAS 호스트 포트에 직접 바인딩됩니다. NAS의 `.env.prod`에서 `DATABASE_URL` host는 같은 NAS의 Docker PostgreSQL 포트(`15432`)에 접근하도록 `127.0.0.1`을 사용합니다.
 
 개발 포트:
 
@@ -93,7 +94,7 @@ vi /volume1/docker/kis-trader-back/.env.prod
 필수 예시:
 
 ```env
-DATABASE_URL=postgresql://postgres:<password>@100.89.219.8:15432/kis_trader_back?schema=public
+DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:15432/kis_trader_back?schema=public
 PORT=20000
 NODE_ENV=production
 TRADING_ENABLED=true
@@ -193,7 +194,7 @@ sudo -n /usr/local/bin/docker logs --tail 200 kis-trader-back
 
 - `.env.prod` 누락
 - `DATABASE_URL` 오타 또는 DB 접근 실패
-- Compose의 `network_mode: host` 누락 또는 `.container.env`의 `DATABASE_URL` host 변환 실패
+- NAS `.env.prod`의 `DATABASE_URL` host가 `100.89.219.8`처럼 NAS 자기 Tailscale IP를 가리킴. 같은 NAS 내부에서는 `127.0.0.1`을 사용
 - `ADMIN_PASSWORD`, `JWT_SECRET` 누락
 - KIS/Slack 토큰 오타
 
