@@ -4,7 +4,7 @@
 
 **Goal:** Move production deployment from Mac Studio PM2 to Synology NAS Container Manager using GHCR images and Docker Compose.
 
-**Architecture:** GitHub Actions builds a production Docker image, pushes it to GHCR, connects to the NAS through Tailscale SSH, uploads the Compose/deploy files, and runs `docker compose pull` plus `docker compose up -d`. Runtime secrets stay on the NAS in `.env.prod`, and the container uses host networking so the app binds NAS port `20000` directly and can reach the NAS-hosted PostgreSQL port.
+**Architecture:** GitHub Actions builds a production Docker image, pushes it to GHCR, connects to the NAS through Tailscale SSH, uploads the Compose/deploy files, and runs `docker compose pull` plus `docker compose up -d`. Runtime secrets stay on the NAS in `.env.prod`; the deploy script renders a local `.container.env` for Docker, and the container uses host networking so the app binds NAS port `20000` directly and can reach the NAS-hosted PostgreSQL port through `127.0.0.1`.
 
 **Tech Stack:** GitHub Actions, GHCR, Tailscale, SSH, Docker Compose v2, Synology Container Manager, NestJS, Prisma.
 
@@ -46,6 +46,7 @@
 - Produces: Updated NAS Compose project and a healthy `kis-trader-back` container.
 
 - [x] Validate that `.env.prod` and `compose.yml` exist on the NAS before deploying.
+- [x] Render `.container.env` from `.env.prod` so the container can use the NAS-local database host.
 - [x] Write `.deploy.env` containing the immutable image tag.
 - [x] Run `sudo -n /usr/local/bin/docker compose pull`.
 - [x] Run `sudo -n /usr/local/bin/docker compose up -d --remove-orphans`.

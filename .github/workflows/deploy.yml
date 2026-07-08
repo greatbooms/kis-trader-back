@@ -118,6 +118,7 @@ jobs:
              DEPLOY_PATH=${DEPLOY_PATH} \
              IMAGE=${IMAGE} \
              APP_NAME=kis-trader-back \
+             DATABASE_HOST_OVERRIDE=127.0.0.1 \
              ${DEPLOY_PATH}/deploy-synology.sh"
 
       - name: SSH 키 정리

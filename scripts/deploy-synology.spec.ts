@@ -22,15 +22,18 @@ describe('Synology container deployment', () => {
 
   it('runs the app on the NAS 20000 port and keeps runtime secrets outside the image', () => {
     expect(compose).toContain('env_file:');
-    expect(compose).toContain('.env.prod');
+    expect(compose).toContain('${RUNTIME_CONTAINER_ENV_FILE:-.env.prod}');
     expect(compose).toContain('network_mode: host');
     expect(compose).toContain('PORT: "20000"');
     expect(compose).not.toContain('"20000:20000"');
     expect(compose).toContain('restart: unless-stopped');
   });
 
-  it('requires the preserved runtime env file and uses sudo docker on Synology', () => {
+  it('requires the preserved runtime env file, renders a container env file, and uses sudo docker on Synology', () => {
     expect(script).toContain('RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-.env.prod}"');
+    expect(script).toContain('CONTAINER_ENV_FILE="${CONTAINER_ENV_FILE:-.container.env}"');
+    expect(script).toContain('DATABASE_HOST_OVERRIDE="${DATABASE_HOST_OVERRIDE:-}"');
+    expect(script).toContain('render_container_env_file');
     expect(script).toContain('sudo -n "$DOCKER_BIN"');
     expect(script).toContain('Missing runtime env file');
     expect(script).toContain('did not become healthy');
