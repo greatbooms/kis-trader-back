@@ -8,10 +8,15 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: deploy-production
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   deploy:
@@ -22,6 +27,26 @@ jobs:
       - name: 체크아웃
         uses: actions/checkout@v5
 
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+
+      - name: GHCR 로그인
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
       - name: Tailscale 연결
         uses: tailscale/github-action@v4
         with:
@@ -30,31 +55,41 @@ jobs:
           tags: tag:ci
 
       - name: SSH 설정
+        env:
+          REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '22' }}
+          REMOTE_USER: ${{ secrets.SYNOLOGY_USER }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.MAC_STUDIO_SSH_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.SYNOLOGY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           cat >> ~/.ssh/config <<EOF
-          Host ${{ secrets.MAC_STUDIO_HOST }}
+          Host synology
+            HostName ${REMOTE_HOST}
+            Port ${REMOTE_PORT}
+            User ${REMOTE_USER}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
             IdentityFile ~/.ssh/deploy_key
           EOF
 
       - name: Tailscale 연결 확인
+        env:
+          REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '22' }}
         run: |
           echo "Runner Tailscale IPv4:"
           tailscale ip -4 || true
           echo "Tailscale status:"
           tailscale status || true
 
-          echo "Mac Studio 연결 대기..."
+          echo "Synology NAS 연결 대기..."
           for i in $(seq 1 30); do
-            if tailscale ping --timeout=2s ${{ secrets.MAC_STUDIO_HOST }} >/dev/null 2>&1; then
+            if tailscale ping --timeout=2s ${REMOTE_HOST} >/dev/null 2>&1; then
               echo "Tailscale ping 성공"
               exit 0
             fi
-            if nc -zvw3 ${{ secrets.MAC_STUDIO_HOST }} 22 >/dev/null 2>&1; then
+            if nc -zvw3 ${REMOTE_HOST} ${REMOTE_PORT} >/dev/null 2>&1; then
               echo "SSH 포트 연결 성공"
               exit 0
             fi
@@ -62,53 +97,30 @@ jobs:
             sleep 2
           done
 
-          echo "Mac Studio에 연결하지 못했습니다."
+          echo "Synology NAS에 연결하지 못했습니다."
           exit 1
 
-      - name: 원격 배포 스크립트 업로드
+      - name: NAS 배포 파일 업로드
         env:
-          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
-          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH: ${{ secrets.SYNOLOGY_DEPLOY_PATH }}
         run: |
-          ARCHIVE_PATH="${RUNNER_TEMP}/release.tar.gz"
-
-          tar \
-            --exclude=.git \
-            --exclude=node_modules \
-            --exclude=client/node_modules \
-            --exclude=dist \
-            --exclude=client/dist \
-            -czf "$ARCHIVE_PATH" .
-
-          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${DEPLOY_PATH}/scripts ${DEPLOY_PATH}/artifacts"
-          scp -o ConnectTimeout=10 scripts/deploy.sh ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/scripts/deploy.sh
-          scp -o ConnectTimeout=10 "$ARCHIVE_PATH" ${REMOTE_USER}@${REMOTE_HOST}:${DEPLOY_PATH}/artifacts/release.tar.gz
+          ssh -o ConnectTimeout=10 synology "mkdir -p ${DEPLOY_PATH}"
+          scp -o ConnectTimeout=10 deploy/compose.yml synology:${DEPLOY_PATH}/compose.yml
+          scp -o ConnectTimeout=10 scripts/deploy-synology.sh synology:${DEPLOY_PATH}/deploy-synology.sh
 
       - name: 배포 실행
         env:
-          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
-          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH: ${{ secrets.SYNOLOGY_DEPLOY_PATH }}
+          IMAGE: ${{ env.IMAGE_NAME }}:${{ github.sha }}
         run: |
-          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
-            "export DEPLOY_DIR=${DEPLOY_PATH} \
+          ssh -o ConnectTimeout=10 synology \
+            "chmod +x ${DEPLOY_PATH}/deploy-synology.sh && \
+             DEPLOY_PATH=${DEPLOY_PATH} \
+             IMAGE=${IMAGE} \
              APP_NAME=kis-trader-back \
-             SOURCE_ARCHIVE=${DEPLOY_PATH}/artifacts/release.tar.gz && \
-             /bin/bash ${DEPLOY_PATH}/scripts/deploy.sh"
-
-      - name: 헬스체크
-        env:
-          REMOTE_HOST: ${{ secrets.MAC_STUDIO_HOST }}
-          REMOTE_USER: ${{ secrets.MAC_STUDIO_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          sleep 5
-          ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST} \
-            "set -a; source ${DEPLOY_PATH}/.env.prod 2>/dev/null; set +a; curl -sf --max-time 10 http://localhost:\${PORT:-8888}/health > /dev/null && echo 'Health check passed'"
+             ${DEPLOY_PATH}/deploy-synology.sh"
 
       - name: SSH 키 정리
         if: always()
         run: |
           rm -f ~/.ssh/deploy_key
-          rm -f "${RUNNER_TEMP}/release.tar.gz"

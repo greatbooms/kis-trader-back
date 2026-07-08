@@ -1,0 +1,15 @@
+.git
+.github
+.serena
+node_modules
+client/node_modules
+dist
+client/dist
+coverage
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

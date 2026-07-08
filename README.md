@@ -100,7 +100,7 @@ cp .env.example .env.prod
   - `CLIENT_PORT=10101`
   - `TRADING_ENABLED=false`
 - `.env.prod`
-  - `PORT=8888`
+  - `PORT=20000`
   - `TRADING_ENABLED=true`
 
 주요 변수:
@@ -159,13 +159,13 @@ yarn client:dev          # 프론트엔드 (port 10101)
 
 # 프로덕션 빌드
 yarn build:all
-yarn start:prod          # http://localhost:8888
+yarn start:prod          # http://localhost:20000
 ```
 
 - 개발 GraphQL: `http://localhost:10100/graphql`
 - 개발 헬스체크: `http://localhost:10100/health`
-- 운영 GraphQL: `http://localhost:8888/graphql`
-- 운영 헬스체크: `http://localhost:8888/health`
+- 운영 GraphQL: `http://localhost:20000/graphql`
+- 운영 헬스체크: `http://localhost:20000/health`
 
 ## 개발/운영 실행 구조
 
@@ -178,45 +178,45 @@ yarn start:prod          # http://localhost:8888
 ### 운영 환경
 
 - `yarn start:prod`는 `.env.prod`를 읽습니다.
-- 운영 서버는 `pm2`로 관리합니다.
-- 기본 운영 포트는 `8888`입니다.
+- 운영 서버는 Synology NAS Container Manager의 Docker Compose 프로젝트로 관리합니다.
+- 기본 운영 포트는 `20000`입니다.
 - 운영 환경에서는 `ADMIN_PASSWORD`, `JWT_SECRET`가 없으면 서버가 부팅되지 않습니다.
 - 운영 환경에서는 GraphQL Playground와 introspection이 비활성화됩니다.
 
-## PM2 로그 확인
+## 컨테이너 로그 확인
 
 빠른 확인:
 
 ```bash
-pm2 list
-pm2 logs kis-trader-back
-pm2 describe kis-trader-back
+cd /volume1/docker/kis-trader-back
+sudo -n /usr/local/bin/docker compose --env-file .deploy.env -f compose.yml ps
+sudo -n /usr/local/bin/docker logs --tail 120 kis-trader-back
 ```
-
-로그 파일 경로는 `ecosystem.config.js`의 `PM2_LOG_DIR` 설정을 따릅니다.
 
 ## GitHub Actions 배포
 
-`main` 브랜치에 push하면 GitHub Actions가 self-hosted macOS 서버로 자동 배포합니다.
+`main` 브랜치에 push하면 GitHub Actions가 Synology NAS Container Manager로 자동 배포합니다.
 
 배포 흐름:
 - GitHub Actions 실행
+- Docker 이미지 빌드
+- GHCR에 이미지 push
 - Tailscale OAuth로 tailnet 연결
-- 운영 서버에 SSH 접속
-- 소스 아카이브 업로드
-- 원격 `scripts/deploy.sh` 실행
-- `yarn install`, `yarn build:all`, `prisma migrate deploy`
-- `pm2 startOrRestart ecosystem.config.js --only kis-trader-back`
-- `/health` 헬스체크
+- Synology NAS에 SSH 접속
+- `deploy/compose.yml`, `scripts/deploy-synology.sh` 업로드
+- `docker compose pull`
+- `docker compose up -d --remove-orphans`
+- Docker healthcheck로 `/health` 확인
 
 필수 GitHub Secrets:
 
 - `TS_OAUTH_CLIENT_ID`
 - `TS_OAUTH_SECRET`
-- `MAC_STUDIO_HOST`
-- `MAC_STUDIO_USER`
-- `MAC_STUDIO_SSH_KEY`
-- `DEPLOY_PATH`
+- `SYNOLOGY_HOST`
+- `SYNOLOGY_PORT`
+- `SYNOLOGY_USER`
+- `SYNOLOGY_SSH_KEY`
+- `SYNOLOGY_DEPLOY_PATH`
 
 원격 서버 준비와 로그/자동 시작 구성은 [배포 가이드](docs/deployment-guide.md)를 참고하세요.
 

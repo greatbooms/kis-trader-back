@@ -39,6 +39,7 @@ client/dist
 
 # duo-agent
 .duo-agent
+.serena/
 
 # Backtest report outputs (generated artifacts, not tracked)
 docs/backtest-reports/
