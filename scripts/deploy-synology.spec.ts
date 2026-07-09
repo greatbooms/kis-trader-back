@@ -17,6 +17,9 @@ describe('Synology container deployment', () => {
     expect(workflow).toContain('tailscale/github-action');
     expect(workflow).toContain('SYNOLOGY_HOST');
     expect(workflow).toContain('SYNOLOGY_PORT');
+    expect(workflow).toContain('Missing required secret');
+    expect(workflow).toContain('REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT }}');
+    expect(workflow).not.toContain("|| '2008'");
     expect(workflow).toContain('scripts/deploy-synology.sh');
   });
 

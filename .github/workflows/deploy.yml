@@ -37,6 +37,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 배포 시크릿 확인
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+          SYNOLOGY_HOST: ${{ secrets.SYNOLOGY_HOST }}
+          SYNOLOGY_PORT: ${{ secrets.SYNOLOGY_PORT }}
+          SYNOLOGY_USER: ${{ secrets.SYNOLOGY_USER }}
+          SYNOLOGY_SSH_KEY: ${{ secrets.SYNOLOGY_SSH_KEY }}
+          SYNOLOGY_DEPLOY_PATH: ${{ secrets.SYNOLOGY_DEPLOY_PATH }}
+        run: |
+          for name in TS_OAUTH_CLIENT_ID TS_OAUTH_SECRET SYNOLOGY_HOST SYNOLOGY_PORT SYNOLOGY_USER SYNOLOGY_SSH_KEY SYNOLOGY_DEPLOY_PATH; do
+            if [ -z "$(eval "printf '%s' \"\${${name}}\"")" ]; then
+              echo "Missing required secret: ${name}"
+              exit 1
+            fi
+          done
+
       - name: 이미지 빌드 및 푸시
         uses: docker/build-push-action@v6
         with:
@@ -57,7 +74,7 @@ jobs:
       - name: SSH 설정
         env:
           REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
-          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '2008' }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT }}
           REMOTE_USER: ${{ secrets.SYNOLOGY_USER }}
         run: |
           mkdir -p ~/.ssh
@@ -76,7 +93,7 @@ jobs:
       - name: Tailscale 연결 확인
         env:
           REMOTE_HOST: ${{ secrets.SYNOLOGY_HOST }}
-          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT || '2008' }}
+          REMOTE_PORT: ${{ secrets.SYNOLOGY_PORT }}
         run: |
           echo "Runner Tailscale IPv4:"
           tailscale ip -4 || true
