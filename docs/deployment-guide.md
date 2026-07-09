@@ -126,7 +126,7 @@ Repository → `Settings` → `Secrets and variables` → `Actions`
 - `SYNOLOGY_HOST`
   - NAS의 Tailscale IP 또는 hostname
 - `SYNOLOGY_PORT`
-  - NAS SSH 포트. 현재 환경은 `2008`
+  - NAS SSH 포트. 환경마다 다르므로 GitHub Secret에 명시적으로 설정합니다.
 - `SYNOLOGY_USER`
   - NAS 배포 계정. 현재 환경은 `eric`
 - `SYNOLOGY_SSH_KEY`
