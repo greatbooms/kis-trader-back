@@ -13,6 +13,15 @@ describe('Synology container deployment', () => {
     expect(workflow).toContain('${{ github.sha }}');
   });
 
+  it('uses Docker actions that run on the Node 24 runtime', () => {
+    expect(workflow).toContain('docker/setup-buildx-action@v4');
+    expect(workflow).toContain('docker/login-action@v4');
+    expect(workflow).toContain('docker/build-push-action@v7');
+    expect(workflow).not.toContain('docker/setup-buildx-action@v3');
+    expect(workflow).not.toContain('docker/login-action@v3');
+    expect(workflow).not.toContain('docker/build-push-action@v6');
+  });
+
   it('deploys to Synology through Tailscale SSH with a configurable port', () => {
     expect(workflow).toContain('tailscale/github-action');
     expect(workflow).toContain('SYNOLOGY_HOST');
