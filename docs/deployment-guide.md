@@ -9,15 +9,16 @@
 
 1. `main` 브랜치에 push 또는 `workflow_dispatch`
 2. GitHub Actions 실행
-3. Docker 이미지 빌드
-4. GHCR에 `latest`와 commit SHA 태그 push
-5. Tailscale OAuth로 tailnet 접속
-6. Synology NAS에 SSH 접속
+3. Tailscale OAuth로 tailnet 접속
+4. Synology NAS Tailscale/SSH 연결 preflight 확인
+5. Docker 이미지 빌드
+6. GHCR에 `latest`와 commit SHA 태그 push
 7. `deploy/compose.yml`, `scripts/deploy-synology.sh` 업로드
-8. NAS에서 `docker compose pull`
-9. NAS에서 `docker compose up -d --remove-orphans`
-10. Docker healthcheck로 `/health` 확인
-11. 현재 실행 중인 이미지를 제외한 이 프로젝트의 예전 GHCR 이미지 정리
+8. Synology NAS에 SSH 접속해 배포 스크립트 실행
+9. NAS에서 `docker compose pull`
+10. NAS에서 `docker compose up -d --remove-orphans`
+11. Docker healthcheck로 `/health` 확인
+12. 현재 실행 중인 이미지를 제외한 이 프로젝트의 예전 GHCR 이미지 정리
 
 관련 파일:
 
