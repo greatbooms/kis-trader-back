@@ -14,7 +14,7 @@
 - NAS application port is `20000`.
 - Deployment account is `eric`; Docker must run through `sudo -n /usr/local/bin/docker`.
 - Container must use the already cloned database `kis_trader_back`.
-- Keep legacy PM2 files for reference until the NAS deployment proves stable.
+- Legacy PM2 deploy files have been removed after the NAS Docker deployment stabilized.
 
 ---
 
@@ -82,7 +82,7 @@
 - [x] Document port `20000` as the production port.
 - [x] Document NAS `.env.prod` and GHCR login requirements.
 - [x] Document Synology GitHub secrets.
-- [x] Mark Mac Studio PM2 deployment as legacy.
+- [x] Remove Mac Studio PM2 deployment files after Docker deployment stabilization.
 - [ ] Run focused tests for deployment scripts.
 - [ ] Run Docker build verification.
 - [ ] Review `git diff` for accidental secret exposure.

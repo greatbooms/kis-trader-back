@@ -207,10 +207,7 @@ sudo -n /usr/local/bin/docker logs --tail 200 kis-trader-back
 - 원격 PostgreSQL 접속 가능 여부
 - 대상 DB가 운영용으로 분리되어 있는지
 
-## Legacy: Mac Studio PM2 배포
+## Removed: Mac Studio PM2 배포
 
-이전 배포 방식은 `GitHub Actions + Tailscale + SSH + PM2`였습니다.
-관련 파일은 호환성과 참고용으로 남겨둡니다.
-
-- [scripts/deploy.sh](/Users/shinsanghoon/workspace/kis-trader-back/scripts/deploy.sh)
-- [ecosystem.config.js](/Users/shinsanghoon/workspace/kis-trader-back/ecosystem.config.js)
+이전 `GitHub Actions + Tailscale + SSH + PM2` 배포 파일은 Synology Docker 배포 안정화 후 제거했습니다.
+현재 운영 배포는 GitHub Actions에서 GHCR 이미지를 빌드한 뒤 NAS의 Docker Compose 프로젝트를 갱신합니다.

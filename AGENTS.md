@@ -196,6 +196,7 @@ client/src/
 - **브랜치명 형식**: 에이전트/도구 이름 prefix를 쓰지 말고 Conventional Commits의 type을 앞세운다.
   - 예: `fix/deploy-pm2-release-path`, `feat/news-scoring`, `docs/update-agent-rules`
   - 금지 예: `codex/fix-deploy-pm2-release-path`, `claude/...`, `agent/...`
+- **작업 시작 절차**: 작업 전에는 항상 `main` 브랜치로 전환해 최신 원격 변경을 pull 받은 뒤, 그 최신 `main`을 베이스로 작업 브랜치를 생성하고 작업을 진행한다.
 - **커밋 단위 작게**: 한 커밋 = 한 논리적 변경
 - **리팩토링과 기능 변경 섞지 말 것**: `refactor:` 먼저, 이어서 `feat:`
 - 커밋/푸시는 **사용자가 요청할 때만** 수행

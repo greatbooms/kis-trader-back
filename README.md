@@ -61,7 +61,7 @@ NestJS 백엔드와 React 프론트엔드가 하나의 레포에 통합된 풀�
 | Chart | Recharts 3 |
 | Auth | Passport + JWT (Cookie 기반) |
 | Notification | Slack Bolt 4 (Socket Mode) |
-| Deploy | PM2 + GitHub Actions + Tailscale |
+| Deploy | Docker + GHCR + GitHub Actions + Tailscale + Synology NAS |
 
 ## 요구사항
 
@@ -148,6 +148,22 @@ docker run -d --name kis-postgres \
 
 ```bash
 yarn prisma migrate dev --name init
+```
+
+### 운영 DB를 로컬 DB로 복제
+
+`.env.prod`의 `DATABASE_URL`을 source로, `.env`의 `DATABASE_URL`을 target으로 사용합니다.
+target DB의 `schema`는 복제 전에 삭제되므로 반드시 로컬/개발 DB에만 실행합니다.
+
+```bash
+# 먼저 redacted 계획만 확인
+yarn db:sync:prod-to-env -- --dry-run --confirm-target kis_trader_back
+
+# 실제 복제
+yarn db:sync:prod-to-env -- --confirm-target kis_trader_back
+
+# source PostgreSQL이 로컬 pg_dump보다 최신 버전이면 Docker 클라이언트 사용
+yarn db:sync:prod-to-env -- --pg-client-image postgres:18-alpine --confirm-target kis_trader_back
 ```
 
 ### 5. 실행
@@ -277,7 +293,8 @@ kis-trader-back/
 | `yarn start:dev` | 백엔드 개발 서버 (10100, 실거래 차단) |
 | `yarn client:dev` | 프론트엔드 개발 서버 (10101) |
 | `yarn build:all` | 프론트엔드 + 백엔드 전체 빌드 |
-| `yarn start:prod` | 프로덕션 실행 (8888) |
+| `yarn start:prod` | 프로덕션 실행 (20000) |
+| `yarn db:sync:prod-to-env -- --confirm-target <db>` | `.env.prod` DB를 `.env` DB로 복제 |
 | `yarn client:codegen` | GraphQL 타입 코드 생성 |
 | `yarn test` | 테스트 실행 |
 | `yarn prisma:studio` | Prisma DB 관리 UI |
@@ -286,7 +303,7 @@ kis-trader-back/
 
 - [KIS API 키 발급 가이드](docs/kis-api-setup.md)
 - [보조 시장데이터 설정 가이드](docs/market-data-setup.md)
-- [배포 가이드](docs/deployment-guide.md) — Mac Studio + GitHub Actions + Tailscale
+- [배포 가이드](docs/deployment-guide.md) — Synology NAS Docker + GHCR + GitHub Actions + Tailscale
 - [Slack 설정 가이드](docs/slack-setup-guide.md)
 
 ## 라이선스
