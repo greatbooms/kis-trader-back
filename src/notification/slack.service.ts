@@ -764,7 +764,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       } else {
         lines.push(`*사유:* ${signal.reason}`);
         if (sd.tValue !== undefined && sd.maxCycles !== undefined) {
-          lines.push(`*T값:* ${sd.tValue.toFixed(1)} / ${sd.maxCycles} (${((sd.tValue / sd.maxCycles) * 100).toFixed(1)}%)`);
+          lines.push(`*주문 당시 T:* ${this.formatCycleProgress(sd.tValue, sd.maxCycles)}`);
+        }
+        if (sd.postFillTValue !== undefined && sd.maxCycles !== undefined) {
+          lines.push(`*체결 후 T:* ${this.formatCycleProgress(sd.postFillTValue, sd.maxCycles)}`);
         }
         if (sd.pivotPrice !== undefined) {
           lines.push(`*기준가(pivot):* ${this.fmtPrice(sd.pivotPrice, signal.market)}`);
@@ -815,6 +818,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
 
     return blocks;
+  }
+
+  private formatCycleProgress(value: number, maxCycles: number): string {
+    return `${value.toFixed(1)} / ${maxCycles} (${((value / maxCycles) * 100).toFixed(1)}%)`;
   }
 
   formatDailySummary(ctx: DailySummaryContext): KnownBlock[] {

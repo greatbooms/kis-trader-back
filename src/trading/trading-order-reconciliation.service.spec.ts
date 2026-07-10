@@ -145,7 +145,7 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
 
-    it('includes infinite-buy T value in the trade fill alert strategy details', async () => {
+    it('includes infinite-buy order-time and post-fill T values in the trade fill alert strategy details', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
           id: 'trade-inf-1',
@@ -183,6 +183,7 @@ describe('TradingOrderReconciliationService', () => {
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
+        quota: 10000,
         maxCycles: 40,
       });
       mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue({
@@ -208,7 +209,7 @@ describe('TradingOrderReconciliationService', () => {
         currentPrice: 75.11,
         profitLoss: -136.01,
         profitRate: -4.66,
-        totalInvested: 2915.08,
+        totalInvested: 4560.63,
       });
 
       await service.reconcileOpenOrders(
@@ -233,6 +234,7 @@ describe('TradingOrderReconciliationService', () => {
         expect.objectContaining({
           strategyDetails: expect.objectContaining({
             tValue: 11.7,
+            postFillTValue: expect.closeTo(18.24252, 5),
             maxCycles: 40,
           }),
         }),

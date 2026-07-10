@@ -77,4 +77,53 @@ describe('SlackService', () => {
       ]),
     );
   });
+
+  it('무한매수 체결 알림은 주문 당시 T와 체결 후 T를 분리해서 표시한다', () => {
+    const blocks = service.formatTradeAlert({
+      signal: {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 75.78,
+        reason: 'Buy1: T=17.6, 70%+잔여재배분, 2주 @ 75.78',
+        orderDivision: '00',
+      },
+      result: {
+        success: true,
+        orderNo: '0031304419',
+        message: '체결 완료',
+      },
+      execution: {
+        quantity: 2,
+        price: 75.76,
+        remainingQuantity: 0,
+        status: 'FILLED',
+      },
+      position: {
+        stockCode: 'TQQQ',
+        stockName: 'PROSHARES QQQ 3X',
+        exchangeCode: 'NASD',
+        market: 'OVERSEAS',
+        quantity: 59,
+        avgPrice: 77.3,
+        currentPrice: 75.85,
+        totalInvested: 4560.63,
+        profitRate: -1.87,
+        profitLoss: -85.48,
+      },
+      strategyDetails: {
+        tValue: 17.6,
+        postFillTValue: 18.2,
+        maxCycles: 40,
+      } as any,
+    });
+
+    const text = blocks.map((block: any) => block.text?.text ?? '').join('\n');
+
+    expect(text).toContain('*주문 당시 T:* 17.6 / 40 (44.0%)');
+    expect(text).toContain('*체결 후 T:* 18.2 / 40 (45.5%)');
+    expect(text).not.toContain('*T값:* 17.6 / 40');
+  });
 });
