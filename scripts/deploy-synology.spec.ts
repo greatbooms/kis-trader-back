@@ -48,6 +48,9 @@ describe('Synology container deployment', () => {
   });
 
   it('runs the app on the NAS 20000 port and keeps runtime secrets outside the image', () => {
+    expect(compose).toContain('services:\n  app:');
+    expect(compose).not.toMatch(/^  kis-trader-back:$/m);
+    expect(compose).toContain('container_name: kis-trader-back');
     expect(compose).toContain('env_file:');
     expect(compose).toContain('.env.prod');
     expect(compose).toContain('network_mode: host');

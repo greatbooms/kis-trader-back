@@ -1,5 +1,5 @@
 services:
-  kis-trader-back:
+  app:
     image: ${IMAGE:-ghcr.io/greatbooms/kis-trader-back:latest}
     container_name: kis-trader-back
     network_mode: host
