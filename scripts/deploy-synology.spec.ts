@@ -3,8 +3,10 @@ import { join } from 'path';
 
 describe('Synology container deployment', () => {
   const workflow = readFileSync(join(process.cwd(), '.github/workflows/deploy.yml'), 'utf8');
+  const dockerfile = readFileSync(join(process.cwd(), 'Dockerfile'), 'utf8');
   const compose = readFileSync(join(process.cwd(), 'deploy/compose.yml'), 'utf8');
   const script = readFileSync(join(process.cwd(), 'scripts/deploy-synology.sh'), 'utf8');
+  const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
 
   it('builds and pushes the production image to GHCR before deploying', () => {
     expect(workflow).toContain('packages: write');
@@ -57,6 +59,14 @@ describe('Synology container deployment', () => {
     expect(compose).toContain('PORT: "20000"');
     expect(compose).not.toContain('"20000:20000"');
     expect(compose).toContain('restart: unless-stopped');
+  });
+
+  it('runs the Docker deployment directly with node instead of PM2', () => {
+    expect(dockerfile).toContain('node dist/main');
+    expect(dockerfile).not.toMatch(/\bpm2\b/i);
+    expect(script).not.toMatch(/\bpm2\b/i);
+    expect(readme).toContain('| Deploy | Docker + GHCR + GitHub Actions + Tailscale + Synology NAS |');
+    expect(readme).not.toContain('| Deploy | PM2 + GitHub Actions + Tailscale |');
   });
 
   it('caps Docker json-file logs at 500MB per container', () => {
