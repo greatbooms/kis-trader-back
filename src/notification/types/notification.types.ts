@@ -26,6 +26,7 @@ export interface TradeAlertContext {
   };
   strategyDetails?: {
     tValue?: number;
+    postFillTValue?: number;
     maxCycles?: number;
     pivotPrice?: number;
     adjustedQuota?: number;

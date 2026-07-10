@@ -507,7 +507,7 @@ export class TradingOrderReconciliationService {
     const executedPrice = Number(record.executedPrice ?? signal.price ?? record.price);
     const totalExecutedQty = record.executedQty || filledNowQty;
     const remainingQty = Math.max(0, record.quantity - totalExecutedQty);
-    const strategyDetails = await this.buildTradeAlertStrategyDetails(record, signal);
+    const strategyDetails = await this.buildTradeAlertStrategyDetails(record, signal, position);
 
     await this.slackService.sendTradeAlert({
       signal: {
@@ -552,6 +552,7 @@ export class TradingOrderReconciliationService {
       stockCode: string;
     },
     signal: TradingSignal,
+    position?: { totalInvested: unknown } | null,
   ): Promise<TradeAlertContext['strategyDetails'] | undefined> {
     if (record.strategyName !== 'infinite-buy') return undefined;
 
@@ -566,12 +567,21 @@ export class TradingOrderReconciliationService {
           stockCode: record.stockCode,
         },
       },
-      select: { maxCycles: true },
+      select: { quota: true, maxCycles: true },
     });
+
+    const quota = Number(watchStock?.quota ?? 0);
+    const maxCycles = watchStock?.maxCycles;
+    const perCycleQuota = quota > 0 && maxCycles ? quota / maxCycles : 0;
+    const totalInvested = Number(position?.totalInvested ?? 0);
+    const postFillTValue = perCycleQuota > 0 && totalInvested > 0
+      ? totalInvested / perCycleQuota
+      : undefined;
 
     return {
       tValue,
-      maxCycles: watchStock?.maxCycles,
+      postFillTValue,
+      maxCycles,
     };
   }
 
