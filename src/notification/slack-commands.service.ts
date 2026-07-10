@@ -100,7 +100,7 @@ export class SlackCommandsService implements OnModuleInit {
       }
     });
 
-    // 손절 승인 버튼
+    // 매도 승인 버튼
     app.action('stop_loss_approve', async ({ ack, body, respond }) => {
       await ack();
       try {
@@ -136,14 +136,14 @@ export class SlackCommandsService implements OnModuleInit {
 
         // 주문 실행
         await this.tradingService.executeApprovedStopLoss(approvalId);
-        this.logger.log(`Stop-loss approved: ${approval.stockCode} (${approvalId})`);
+        this.logger.log(`Sell approved: ${approval.stockCode} (${approvalId})`);
       } catch (e) {
-        this.logger.error(`Stop-loss approve error: ${e.message}`);
+        this.logger.error(`Sell approve error: ${e.message}`);
         await respond({ text: `:x: 승인 처리 실패: ${e.message}`, replace_original: false });
       }
     });
 
-    // 손절 거절 버튼
+    // 매도 거절 버튼
     app.action('stop_loss_reject', async ({ ack, body, respond }) => {
       await ack();
       try {
@@ -171,7 +171,7 @@ export class SlackCommandsService implements OnModuleInit {
         });
         await this.prisma.tradeRecord.update({
           where: { id: approval.tradeRecordId },
-          data: { status: OrderStatus.CANCELLED, reason: 'Stop-loss rejected by user' },
+          data: { status: OrderStatus.CANCELLED, reason: 'Sell approval rejected by user' },
         });
 
         if (approval.slackMessageTs && approval.slackChannel) {
@@ -180,9 +180,9 @@ export class SlackCommandsService implements OnModuleInit {
           );
         }
 
-        this.logger.log(`Stop-loss rejected: ${approval.stockCode} (${approvalId})`);
+        this.logger.log(`Sell rejected: ${approval.stockCode} (${approvalId})`);
       } catch (e) {
-        this.logger.error(`Stop-loss reject error: ${e.message}`);
+        this.logger.error(`Sell reject error: ${e.message}`);
         await respond({ text: `:x: 거절 처리 실패: ${e.message}`, replace_original: false });
       }
     });

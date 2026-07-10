@@ -5,6 +5,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 
 ## 주요 서비스
 - `trading.service.ts` — 전략 호출 → 주문 실행의 핵심 흐름 (signal executor)
+- `trading-sell-approval.service.ts` — 손절/청산성 SELL 및 고 T 무한매수 익절의 Slack 승인 대기/재알림 흐름
 - `trading-position-sync.service.ts` — Broker 잔고를 DB `Position` 테이블에 반영
 - `trading-order-reconciliation.service.ts` — 미체결 주문 상태 추적, 취소/체결 확정 + 전략별 후처리(carry 리셋 등)
 - `trading-orchestrator.service.ts` — 국내/해외 시장별 거래 루프 (전략 그룹핑, 컨텍스트 빌드, 신호 평가 + 주문, 리스크 알림, 시장 레짐 감지, 수동 실행 엔트리)
@@ -51,7 +52,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
   - `MarketStateSyncService` 휴장일 캐시 — 일 1회 KIS API 갱신
 - **백테스트와의 관계**: 전략 클래스(`*.strategy.ts`)는 `BacktestEngine`/`SimulationTickEngine`에서도 동일 인스턴스를 재사용. 즉 전략의 `evaluate()` 시그니처(`PerStockTradingStrategy`)는 backtest/simulation/실거래의 공유 계약 — breaking change는 3곳 모두 영향
 - **`@Optional() SlackService`**: trading 모듈은 Slack이 없어도 부팅돼야 함. 모든 Slack 호출 분기는 `if (this.slackService)` 가드 또는 try/catch
-- **momentum-breakout 청산 reason은 한글 유지 (의도된 설계)**: `TradingService.isStopLossSignal`은 영문 'stop loss'가 포함된 SELL reason을 수동 승인 대기(Slack 알림 후 수동 매도)로 보낸다. 당일청산 전략의 손절/청산('손절청산'/'당일청산' 등)은 **자동 실행되어야 하므로** reason에 'stop loss' 문구를 쓰지 않는다 — 영문으로 통일하면 장중 청산이 마비됨
+- **청산성 SELL은 관리자 승인 대기**: 손절, 리스크 전량청산, 당일청산, 이월청산, 트레일링 스탑 등 청산성 매도는 reason 언어와 무관하게 `TradingService`에서 KIS 주문 제출 전 `StopLossApproval` 기반 Slack 승인 요청으로 전환한다. 일반 익절은 자동 실행을 유지하되, `infinite-buy` 익절에서 T가 20 이상이면 승인 대기로 보낸다.
 - **'관망:' prefix 스킵은 무로깅**: continuous 전략이 매분 반복하는 정상 대기 상태(돌파 대기, 시간 윈도우 외, 미체결 대기 등)는 `TradingService.executePerStockStrategy`가 실행 로그/Slack 없이 조용히 건너뜀 (`isSilentWaitSkip`). 미동작 진단은 시뮬레이션 세션 또는 `triggerWatchStockNow`로 수행
 - **ctx.hasOpenBuyOrder / hasOpenSellOrder**: orchestrator가 broker 미체결 주문 + **당일 로컬 PENDING TradeRecord**를 종목별로 매핑해 전달 — continuous 전략의 중복 주문 방지. 시장가 주문은 제출~reconciliation 사이에 broker 목록에서 이미 빠져 있을 수 있어 로컬 PENDING을 함께 봐야 그 공백(수 초~수십 초)의 중복 제출을 막는다. `undefined`는 "정보 없음"이며 차단하지 않음 (수동 트리거 경로는 자체 가드 보유)
 - **ctx.evaluationMode**: `'daily-bar'`는 백테스트의 일봉 단위 평가. momentum-breakout은 이 모드에서 장중 의존 조건(시간/추격/soft)을 생략하고 `metadata.fillModel='stop-entry'` 조건부 신호를 발행 — 체결 판정은 backtest 엔진 책임

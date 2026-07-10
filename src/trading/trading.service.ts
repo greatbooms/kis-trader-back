@@ -15,6 +15,7 @@ import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStoc
 import { SlackService } from '../notification/slack.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
 
 @Injectable()
@@ -29,6 +30,7 @@ export class TradingService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private positionSyncService: TradingPositionSyncService,
+    private sellApprovalService: TradingSellApprovalService,
     @Optional() private slackService?: SlackService,
   ) {
     this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
@@ -460,7 +462,8 @@ export class TradingService {
 
   /** 손절 시그널 여부 판별 */
   private isStopLossSignal(signal: TradingSignal): boolean {
-    return signal.side === 'SELL' && (signal.reason?.toLowerCase().includes('stop loss') ?? false);
+    const reason = signal.reason || '';
+    return signal.side === 'SELL' && (reason.toLowerCase().includes('stop loss') || reason.includes('손절'));
   }
 
   /**
@@ -519,7 +522,7 @@ export class TradingService {
   /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
   async executeApprovedStopLoss(approvalId: string): Promise<void> {
     if (!this.tradingEnabled) {
-      this.logger.warn(`Skipping approved stop-loss execution because TRADING_ENABLED=false (${approvalId})`);
+      this.logger.warn(`Skipping approved sell execution because TRADING_ENABLED=false (${approvalId})`);
       return;
     }
 
@@ -529,7 +532,7 @@ export class TradingService {
     });
 
     if (!approval || approval.status !== ApprovalStatus.APPROVED) {
-      this.logger.warn(`Stop-loss approval ${approvalId} not found or not approved`);
+      this.logger.warn(`Sell approval ${approvalId} not found or not approved`);
       return;
     }
 
@@ -537,11 +540,27 @@ export class TradingService {
     const signal = approval.signal as any as TradingSignal;
 
     try {
+      const executableSignal = await this.prepareApprovedSellSignal(record, signal);
+      if (!executableSignal) return;
+
+      await this.sellApprovalService.logApprovedOrderSubmission(record, executableSignal);
+
       let result;
-      if (signal.market === 'DOMESTIC') {
-        result = await this.kisDomestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
+      if (executableSignal.market === 'DOMESTIC') {
+        result = await this.kisDomestic.orderSell(
+          executableSignal.stockCode,
+          executableSignal.quantity,
+          executableSignal.price,
+          executableSignal.orderDivision,
+        );
       } else {
-        result = await this.kisOverseas.orderSell(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision);
+        result = await this.kisOverseas.orderSell(
+          executableSignal.exchangeCode!,
+          executableSignal.stockCode,
+          executableSignal.quantity,
+          executableSignal.price!,
+          executableSignal.orderDivision,
+        );
       }
 
       await this.prisma.tradeRecord.update({
@@ -554,17 +573,61 @@ export class TradingService {
       });
 
       if (result.success) {
-        this.logger.log(`Stop-loss order submitted (approved): SELL ${signal.stockCode} x ${signal.quantity}`);
+        this.logger.log(`Approved sell order submitted: SELL ${executableSignal.stockCode} x ${executableSignal.quantity}`);
       } else {
-        this.logger.error(`Stop-loss order failed: ${result.message}`);
+        this.logger.error(`Approved sell order failed: ${result.message}`);
       }
     } catch (e) {
       await this.prisma.tradeRecord.update({
         where: { id: record.id },
         data: { status: OrderStatus.FAILED, reason: e.message },
       });
-      this.logger.error(`Stop-loss execution exception: ${e.message}`);
+      this.logger.error(`Approved sell execution exception: ${e.message}`);
     }
+  }
+
+  private async prepareApprovedSellSignal(
+    record: {
+      id: string;
+      market: Market;
+      exchangeCode: string;
+      stockCode: string;
+    },
+    signal: TradingSignal,
+  ): Promise<TradingSignal | null> {
+    await this.refreshMarketPositionsBeforeOrder(record.market as 'DOMESTIC' | 'OVERSEAS');
+
+    const latestPosition = await this.prisma.position.findFirst({
+      where: {
+        market: record.market,
+        exchangeCode: record.exchangeCode,
+        stockCode: record.stockCode,
+      },
+    });
+    const heldQuantity = latestPosition?.quantity || 0;
+    if (heldQuantity <= 0) {
+      await this.prisma.tradeRecord.update({
+        where: { id: record.id },
+        data: {
+          status: OrderStatus.CANCELLED,
+          reason: '승인 매도 스킵: 보유 수량 없음',
+        },
+      });
+      this.logger.warn(`Skipping approved sell for ${record.stockCode}: no current holdings`);
+      return null;
+    }
+
+    const quantity = Math.min(signal.quantity, heldQuantity);
+    if (quantity < signal.quantity) {
+      this.logger.warn(
+        `Clamping approved sell quantity for ${record.stockCode}: requested=${signal.quantity}, held=${heldQuantity}`,
+      );
+    }
+
+    return {
+      ...signal,
+      quantity,
+    };
   }
 
   /** 주문 실행 */
@@ -586,60 +649,8 @@ export class TradingService {
       orderType = OrderType.MARKET;
     }
 
-    // 손절 시그널 → Slack 알림만 전송하고, 실제 청산은 관리자가 수동 매도
-    if (this.isStopLossSignal(signal)) {
-      const avgPrice = ctx?.position?.avgPrice || Number(signal.price);
-      const currentPrice = ctx?.price?.currentPrice || Number(signal.price);
-      const lossRate = avgPrice > 0 ? (avgPrice - currentPrice) / avgPrice : 0;
-      const watchStockId = ctx?.watchStock?.id;
-      let alreadyAlerted = false;
-      if (watchStockId) {
-        const todayStart = new Date(this.getTodayDate() + 'T00:00:00+09:00');
-        const todayEnd = new Date(this.getTodayDate() + 'T23:59:59+09:00');
-        alreadyAlerted = !!(await this.prisma.watchStockExecutionLog.findFirst({
-          where: {
-            watchStockId,
-            eventType: WatchStockExecutionEventType.SKIPPED,
-            message: { contains: '손절 알림 전송' },
-            createdAt: { gte: todayStart, lte: todayEnd },
-          },
-        }));
-      }
-
-      const slackService = this.slackService;
-      const shouldSendSlackAlert = !alreadyAlerted && slackService?.isEnabled();
-      if (shouldSendSlackAlert) {
-        await slackService!.sendStopLossAlert({
-          stockCode: signal.stockCode,
-          stockName: ctx?.watchStock?.stockName || signal.stockCode,
-          exchangeCode: signal.exchangeCode,
-          market: signal.market,
-          strategyName,
-          quantity: signal.quantity,
-          currentPrice,
-          avgPrice,
-          lossRate,
-        });
-      }
-
-      await this.logWatchStockExecution(
-        ctx,
-        WatchStockExecutionEventType.SKIPPED,
-        `손절 알림 전송: 포트폴리오에서 수동 매도 필요`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          reason: signal.reason,
-          lossRate,
-          currentPrice,
-          avgPrice,
-          slackAlertSent: shouldSendSlackAlert,
-        },
-      );
-
-      this.logger.log(`Stop-loss alert registered for ${signal.stockCode}; awaiting manual sell`);
-      return false;
+    if (this.sellApprovalService.shouldRequireApproval(signal, strategyName, ctx)) {
+      return this.sellApprovalService.requestApproval(signal, strategyName, ctx, orderType);
     }
 
     const record = await this.prisma.tradeRecord.create({
@@ -1061,6 +1072,8 @@ export class TradingService {
     ) {
       return false;
     }
+    const tValue = this.readMetadataNumber(signal.metadata, 'tValue', 'T', 't', 'postFillTValue');
+    const tMetadata = tValue !== undefined ? { tValue } : {};
 
     const followUpSignal: TradingSignal = {
       market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
@@ -1070,12 +1083,14 @@ export class TradingService {
       quantity: secondTargetQuantity,
       price: secondTargetPrice,
       reason:
-        `Take profit 2: same-day trend, +${(secondTargetRate * 100).toFixed(1)}%, ` +
+        `Take profit 2: ${tValue !== undefined ? `T=${tValue.toFixed(1)}, ` : ''}` +
+        `same-day trend, +${(secondTargetRate * 100).toFixed(1)}%, ` +
         `${secondTargetQuantity}주 @ ${secondTargetPrice}`,
       orderDivision: '00',
       metadata: {
         phase: 'take-profit-2',
         sameDayTriggered: true,
+        ...tMetadata,
       },
     };
 
@@ -1112,6 +1127,14 @@ export class TradingService {
     };
 
     return this.executeSignal(followUpSignal, 'infinite-buy', ctx);
+  }
+
+  private readMetadataNumber(metadata: Record<string, any> | undefined, ...keys: string[]): number | undefined {
+    for (const key of keys) {
+      const parsed = Number(metadata?.[key]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
   }
 
   private async buildInfiniteBuyFollowUpContext(

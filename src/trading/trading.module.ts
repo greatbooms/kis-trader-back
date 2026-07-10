@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TradingService } from './trading.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { TradingOrchestrator } from './trading-orchestrator.service';
 import { MarketStateSyncService } from './market-state-sync.service';
@@ -27,6 +28,7 @@ import { NotificationModule } from '../notification/notification.module';
   providers: [
     TradingService,
     TradingPositionSyncService,
+    TradingSellApprovalService,
     TradingOrderReconciliationService,
     OrderSyncService,
     TradingOrchestrator,
@@ -49,6 +51,7 @@ import { NotificationModule } from '../notification/notification.module';
   exports: [
     TradingService,
     TradingPositionSyncService,
+    TradingSellApprovalService,
     TradingOrderReconciliationService,
     OrderSyncService,
     TradingOrchestrator,

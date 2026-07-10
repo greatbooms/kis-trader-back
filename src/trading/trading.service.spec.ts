@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TradingService } from './trading.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
@@ -13,6 +14,7 @@ describe('TradingService', () => {
 
   const mockKisDomestic = {
     getPrice: jest.fn(),
+    getBalance: jest.fn(),
     orderBuy: jest.fn(),
     orderSell: jest.fn(),
     getOrderExecutions: jest.fn(),
@@ -20,6 +22,7 @@ describe('TradingService', () => {
 
   const mockKisOverseas = {
     getPrice: jest.fn(),
+    getBalance: jest.fn(),
     orderBuy: jest.fn(),
     orderSell: jest.fn(),
     getOrderExecutions: jest.fn(),
@@ -47,12 +50,19 @@ describe('TradingService', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
     },
+    stopLossApproval: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
   };
 
   const mockSlackService = {
     isEnabled: jest.fn().mockReturnValue(true),
     sendFilterLog: jest.fn(),
     sendInsufficientFundsAlert: jest.fn(),
+    sendStopLossApproval: jest.fn(),
     sendStopLossAlert: jest.fn(),
     sendTradeAlert: jest.fn(),
   };
@@ -77,6 +87,7 @@ describe('TradingService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TradingService,
+        TradingSellApprovalService,
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
@@ -870,6 +881,343 @@ describe('TradingService', () => {
     });
   });
 
+  describe('manual SELL approvals', () => {
+    const baseContext = {
+      watchStock: {
+        id: 'ws-approval',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 10000,
+        cycle: 0,
+        maxCycles: 40,
+        stopLossRate: 0.3,
+        maxPortfolioRate: 1,
+        strategyParams: {},
+      },
+      price: { currentPrice: 220 } as any,
+      position: {
+        stockCode: 'TQQQ',
+        quantity: 10,
+        avgPrice: 200,
+        currentPrice: 220,
+        totalInvested: 2000,
+      },
+      alreadyExecutedToday: false,
+      marketCondition: {} as any,
+      stockIndicators: {} as any,
+      buyableAmount: 0,
+      totalPortfolioValue: 0,
+    };
+
+    beforeEach(() => {
+      jest.spyOn(service as any, 'refreshMarketPositionsBeforeOrder').mockResolvedValue(undefined);
+      mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'trade-approval' });
+      mockPrisma.tradeRecord.update.mockResolvedValue({});
+      mockPrisma.stopLossApproval.findFirst.mockResolvedValue(null);
+      mockPrisma.stopLossApproval.create.mockResolvedValue({ id: 'approval-1' });
+      mockPrisma.stopLossApproval.update.mockResolvedValue({});
+      mockSlackService.sendStopLossApproval.mockResolvedValue({ ts: '123.45', channel: '#test' });
+      mockKisDomestic.orderSell.mockResolvedValue({ success: true, orderNo: 'D-1', message: 'SELL order placed' });
+      mockKisOverseas.orderSell.mockResolvedValue({ success: true, orderNo: 'O-1', message: 'SELL order placed' });
+    });
+
+    it('requires approval for Korean stop-loss liquidation signals instead of submitting a sell order', async () => {
+      const result = await (service as any).executeSignal(
+        {
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'SELL',
+          quantity: 3,
+          price: undefined,
+          reason: '손절청산: -2.1% <= -2.0%',
+          metadata: { phase: 'intraday-stop' },
+        },
+        'momentum-breakout',
+        {
+          ...baseContext,
+          watchStock: {
+            ...baseContext.watchStock,
+            market: 'DOMESTIC',
+            exchangeCode: 'KRX',
+            stockCode: '005930',
+            stockName: '삼성전자',
+            strategyName: 'momentum-breakout',
+          },
+          price: { currentPrice: 68000 } as any,
+          position: {
+            stockCode: '005930',
+            quantity: 3,
+            avgPrice: 70000,
+            currentPrice: 68000,
+            totalInvested: 210000,
+          },
+        },
+      );
+
+      expect(result).toBe(false);
+      expect(mockKisDomestic.orderSell).not.toHaveBeenCalled();
+      expect(mockPrisma.stopLossApproval.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          stockCode: '005930',
+          quantity: 3,
+          status: 'PENDING',
+          signal: expect.objectContaining({
+            reason: '손절청산: -2.1% <= -2.0%',
+            metadata: expect.objectContaining({ phase: 'intraday-stop' }),
+          }),
+        }),
+      });
+      expect(mockSlackService.sendStopLossApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approvalId: 'approval-1',
+          stockCode: '005930',
+          approvalReason: '손절청산: -2.1% <= -2.0%',
+          expectedPnl: -6000,
+          expectedPnlRate: expect.closeTo(-0.028571, 6),
+        }),
+      );
+    });
+
+    it('requires approval for infinite-buy take-profit signals when T is 20 or higher', async () => {
+      const result = await (service as any).executeSignal(
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 4,
+          price: 220,
+          reason: 'Take profit 1: T=20.5, target +8.0%',
+          orderDivision: '00',
+          metadata: { phase: 'take-profit-1', tValue: 20.5 },
+        },
+        'infinite-buy',
+        baseContext,
+      );
+
+      expect(result).toBe(false);
+      expect(mockKisOverseas.orderSell).not.toHaveBeenCalled();
+      expect(mockSlackService.sendStopLossApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stockCode: 'TQQQ',
+          approvalReason: 'Take profit 1: T=20.5, target +8.0%',
+          expectedPnl: 80,
+          expectedPnlRate: 0.1,
+        }),
+      );
+    });
+
+    it('requires approval for trend-following trend-exit sell signals', async () => {
+      const result = await (service as any).executeSignal(
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 10,
+          price: 190,
+          reason: '추세소멸: ADX=18.5 < 20',
+        },
+        'trend-following',
+        {
+          ...baseContext,
+          watchStock: {
+            ...baseContext.watchStock,
+            strategyName: 'trend-following',
+          },
+          price: { currentPrice: 190 } as any,
+          position: {
+            stockCode: 'TQQQ',
+            quantity: 10,
+            avgPrice: 200,
+            currentPrice: 190,
+            totalInvested: 2000,
+          },
+        },
+      );
+
+      expect(result).toBe(false);
+      expect(mockKisOverseas.orderSell).not.toHaveBeenCalled();
+      expect(mockPrisma.tradeRecord.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          status: 'AWAITING_APPROVAL',
+          reason: '추세소멸: ADX=18.5 < 20',
+        }),
+      });
+      expect(mockSlackService.sendStopLossApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stockCode: 'TQQQ',
+          approvalReason: '추세소멸: ADX=18.5 < 20',
+          approvalType: 'LIQUIDATION',
+        }),
+      );
+    });
+
+    it('keeps ordinary infinite-buy take-profit under T20 automatic', async () => {
+      const result = await (service as any).executeSignal(
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 4,
+          price: 220,
+          reason: 'Take profit 1: T=19.9, target +8.0%',
+          orderDivision: '00',
+          metadata: { phase: 'take-profit-1', tValue: 19.9 },
+        },
+        'infinite-buy',
+        baseContext,
+      );
+
+      expect(result).toBe(true);
+      expect(mockKisOverseas.orderSell).toHaveBeenCalledWith('NASD', 'TQQQ', 4, 220, '00');
+      expect(mockSlackService.sendStopLossApproval).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('executeApprovedStopLoss', () => {
+    it('logs the submitted sell signal so reconciliation can send fill alerts and run strategy cleanup', async () => {
+      const signal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 4,
+        price: 220,
+        reason: 'Take profit 1: T=20.5, target +8.0%',
+        orderDivision: '00',
+        metadata: { phase: 'take-profit-1', tValue: 20.5 },
+      };
+      mockPrisma.stopLossApproval.findUnique.mockResolvedValue({
+        id: 'approval-1',
+        status: 'APPROVED',
+        tradeRecordId: 'trade-approval',
+        signal,
+        tradeRecord: {
+          id: 'trade-approval',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+        },
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-approval',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+      });
+      mockKisOverseas.getBalance.mockResolvedValue([]);
+      mockPrisma.position.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 4,
+        avgPrice: 200,
+        currentPrice: 220,
+        totalInvested: 800,
+      });
+      mockPrisma.tradeRecord.update.mockResolvedValue({});
+      mockKisOverseas.orderSell.mockResolvedValue({
+        success: true,
+        orderNo: 'O-1',
+        message: 'SELL order placed',
+      });
+
+      await service.executeApprovedStopLoss('approval-1');
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          watchStockId: 'ws-approval',
+          tradeRecordId: 'trade-approval',
+          eventType: 'ORDER_SUBMITTED',
+          message: '주문 제출: SELL 4주',
+          details: expect.objectContaining({
+            side: 'SELL',
+            quantity: 4,
+            price: 220,
+            reason: 'Take profit 1: T=20.5, target +8.0%',
+            metadata: expect.objectContaining({ phase: 'take-profit-1', tValue: 20.5 }),
+          }),
+        }),
+      });
+    });
+
+    it('refreshes positions and clamps approved sell quantity before submitting the order', async () => {
+      const signal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 4,
+        price: 220,
+        reason: 'Take profit 1: T=20.5, target +8.0%',
+        orderDivision: '00',
+        metadata: { phase: 'take-profit-1', tValue: 20.5 },
+      };
+      mockPrisma.stopLossApproval.findUnique.mockResolvedValue({
+        id: 'approval-1',
+        status: 'APPROVED',
+        tradeRecordId: 'trade-approval',
+        signal,
+        tradeRecord: {
+          id: 'trade-approval',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+        },
+      });
+      mockKisOverseas.getBalance.mockResolvedValue([]);
+      mockPrisma.position.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quantity: 2,
+        avgPrice: 200,
+        currentPrice: 220,
+        totalInvested: 400,
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-approval',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.tradeRecord.update.mockResolvedValue({});
+      mockKisOverseas.orderSell.mockResolvedValue({
+        success: true,
+        orderNo: 'O-1',
+        message: 'SELL order placed',
+      });
+
+      await service.executeApprovedStopLoss('approval-1');
+
+      expect(mockKisOverseas.getBalance).toHaveBeenCalled();
+      expect(mockPositionSyncService.syncPositions).toHaveBeenCalledWith('OVERSEAS', []);
+      expect(mockKisOverseas.orderSell).toHaveBeenCalledWith('NASD', 'TQQQ', 2, 220, '00');
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          details: expect.objectContaining({
+            quantity: 2,
+            approvedSell: true,
+          }),
+        }),
+      });
+    });
+  });
+
   describe('infinite-buy hybrid second target', () => {
     it('should not clear pending second target plan when a buy fill is reconciled later', async () => {
       const clearPlanSpy = jest.spyOn(service as any, 'clearInfiniteBuySecondaryExitPlan');
@@ -970,6 +1318,7 @@ describe('TradingService', () => {
             secondaryTargetPrice: 59.88,
             secondaryTargetRate: 0.19,
             secondaryTargetQuantity: 2,
+            tValue: 20.5,
           },
         },
         3,
@@ -983,6 +1332,7 @@ describe('TradingService', () => {
           metadata: expect.objectContaining({
             phase: 'take-profit-2',
             sameDayTriggered: true,
+            tValue: 20.5,
           }),
         }),
         'infinite-buy',

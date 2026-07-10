@@ -126,4 +126,33 @@ describe('SlackService', () => {
     expect(text).toContain('*체결 후 T:* 18.2 / 40 (45.5%)');
     expect(text).not.toContain('*T값:* 17.6 / 40');
   });
+
+  it('매도 승인 요청에는 지금 매도 시 예상 손익을 표시한다', async () => {
+    postMessage.mockResolvedValue({ ts: '123.45', channel: '#test' });
+
+    await service.sendStopLossApproval({
+      approvalId: 'approval-1',
+      tradeRecordId: 'trade-1',
+      stockCode: 'TQQQ',
+      stockName: 'TQQQ',
+      exchangeCode: 'NASD',
+      market: 'OVERSEAS',
+      strategyName: 'infinite-buy',
+      quantity: 4,
+      currentPrice: 220,
+      avgPrice: 200,
+      lossRate: -0.1,
+      expectedPnl: 80,
+      expectedPnlRate: 0.1,
+      approvalReason: 'Take profit 1: T=20.5, target +8.0%',
+      timeoutMinutes: 30,
+    });
+
+    const payload = postMessage.mock.calls[0][0];
+    const text = payload.blocks.map((block: any) => block.text?.text ?? '').join('\n');
+
+    expect(text).toContain('매도 승인 요청');
+    expect(text).toContain('*지금 매도 시 예상 손익:* +$80.00 (+10.00%)');
+    expect(text).toContain('*승인 사유:* Take profit 1: T=20.5, target +8.0%');
+  });
 });
