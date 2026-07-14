@@ -3,6 +3,7 @@ import { PortfolioFilters } from '@/pages/portfolio/PortfolioFilters'
 import { AccountSummaryCard } from '@/pages/portfolio/AccountSummaryCard'
 import { PositionsCard } from '@/pages/portfolio/PositionsCard'
 import { TradesCard } from '@/pages/portfolio/TradesCard'
+import { UnknownOrderReconciliationCard } from '@/pages/portfolio/UnknownOrderReconciliationCard'
 
 export function PortfolioPage() {
   const { countryFilter, setCountryFilter, marketFilter } = useCountryFilter()
@@ -20,6 +21,7 @@ export function PortfolioPage() {
 
       <AccountSummaryCard countryFilter={countryFilter} />
       <PositionsCard market={market} countryFilter={countryFilter} />
+      <UnknownOrderReconciliationCard />
       <TradesCard market={market} countryFilter={countryFilter} />
     </div>
   )

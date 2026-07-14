@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import {
-  GetTradesDocument,
   useGetTradesQuery,
   useCancelTradeOrderMutation,
   type Side,
@@ -24,7 +23,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
   const [sideFilter, setSideFilter] = useState<Side | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const today = formatDateInputInTimeZone(new Date())
-  const weekAgo = formatDateInputInTimeZone(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+  const weekAgo = formatDateInputInTimeZone(new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000))
   const [dateFrom, setDateFrom] = useState<string>(weekAgo)
   const [dateTo, setDateTo] = useState<string>(today)
   const [page, setPage] = useState(0)
@@ -58,7 +57,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
             tradeRecordId: tradeId,
           },
         },
-        refetchQueries: [GetTradesDocument],
+        refetchQueries: ['GetTrades', 'GetBrokerOrderRecoveryItems'],
         awaitRefetchQueries: true,
       })
 
@@ -68,8 +67,9 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
       }
 
       alert(result?.cancelTradeOrder.message || '주문 취소 실패')
-    } catch (e: any) {
-      alert(`주문 취소 실패: ${e.message}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '알 수 없는 오류'
+      alert(`주문 취소 실패: ${message}`)
     }
   }
 

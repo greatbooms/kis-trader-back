@@ -13,6 +13,9 @@ query GetTrades($input: TradeFilterInput) {
     executedQty
     orderNo
     status
+    cancellationStatus
+    cancellationMessage
+    brokerMessage
     strategyName
     reason
     createdAt
@@ -34,6 +37,9 @@ query GetTrade($id: ID!) {
     executedQty
     orderNo
     status
+    cancellationStatus
+    cancellationMessage
+    brokerMessage
     strategyName
     reason
     createdAt

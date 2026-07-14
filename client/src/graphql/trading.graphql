@@ -24,3 +24,112 @@ query GetMarketRegime($input: MarketRegimeFilterInput!) {
     exchangeCode
   }
 }
+
+fragment BrokerOrderRecoveryItemFields on BrokerOrderRecoveryItemType {
+  tradeRecordId
+  lifecycle
+  market
+  exchangeCode
+  stockCode
+  stockName
+  side
+  orderType
+  quantity
+  price
+  orderNo
+  status
+  submissionStartedAt
+  brokerOrderDate
+  brokerOrderTime
+  submissionResolvedAt
+  submissionResolvedBy
+  submissionResolution
+  cancellationStatus
+  cancellationStartedAt
+  cancellationResolvedAt
+  cancellationResolvedBy
+  cancellationMessage
+  brokerContextAssigned
+  currentBrokerEnvironment
+  maskedCurrentAccount
+  brokerContextMatchesCurrent
+  createdAt
+  updatedAt
+}
+
+query GetBrokerOrderRecoveryItems {
+  brokerOrderRecoveryItems {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+query GetCurrentBrokerContextPreview {
+  currentBrokerContextPreview {
+    environment
+    maskedAccount
+    contextToken
+  }
+}
+
+mutation InspectBrokerOrderCandidates($input: BrokerOrderRecoveryTradeInput!) {
+  inspectBrokerOrderCandidates(input: $input) {
+    recoveryItem {
+      ...BrokerOrderRecoveryItemFields
+    }
+    candidates {
+      orderNo
+      stockCode
+      side
+      orderQuantity
+      filledQuantity
+      remainingQuantity
+      orderPrice
+      filledPrice
+      exchangeCode
+      orderDate
+      orderTime
+      rejectionState
+      rejected
+      rejectedReason
+      existingTradeRecordId
+      collisionType
+    }
+    inspectedAt
+  }
+}
+
+mutation AssignCurrentBrokerContext($input: AssignBrokerContextInput!) {
+  assignCurrentBrokerContext(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+mutation LinkBrokerOrderCandidate($input: BrokerOrderCandidateIdentityInput!) {
+  linkBrokerOrderCandidate(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+mutation ConfirmBrokerOrderNotSubmitted($input: BrokerOrderRecoveryTradeInput!) {
+  confirmBrokerOrderNotSubmitted(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+mutation ConfirmBrokerOrderMatchesExisting($input: MatchExistingBrokerOrderInput!) {
+  confirmBrokerOrderMatchesExisting(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+mutation InspectUnknownCancellation($input: BrokerOrderRecoveryTradeInput!) {
+  inspectUnknownCancellation(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
+
+mutation ConfirmCancellationNotAccepted($input: BrokerOrderRecoveryTradeInput!) {
+  confirmCancellationNotAccepted(input: $input) {
+    ...BrokerOrderRecoveryItemFields
+  }
+}
