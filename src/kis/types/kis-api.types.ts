@@ -1,3 +1,8 @@
+import type {
+  BrokerOrderCandidate,
+  BrokerOrderRejectionState,
+} from './broker-order-candidate.type';
+
 /** KIS API 공통 응답 */
 export interface KisApiResponse<T = any> {
   rt_cd: string; // '0' = 성공
@@ -7,6 +12,10 @@ export interface KisApiResponse<T = any> {
   output1?: T;
   output2?: any;
   output3?: any;
+  ctx_area_fk100?: string;
+  ctx_area_nk100?: string;
+  ctx_area_fk200?: string;
+  ctx_area_nk200?: string;
 }
 
 /** 국내 현재가 응답 */
@@ -51,11 +60,13 @@ export interface DomesticPriceOutput {
 }
 
 /** 국내 주문 응답 */
-export interface DomesticOrderOutput {
+export interface KisOrderOutput {
   KRX_FWDG_ORD_ORGNO: string; // 원주문번호
   ODNO: string;                // 주문번호
   ORD_TMD: string;             // 주문시각
 }
+
+export interface DomesticOrderOutput extends KisOrderOutput {}
 
 /** 국내 잔고 항목 */
 export interface DomesticBalanceItem {
@@ -101,11 +112,7 @@ export interface OverseasPriceOutput {
 }
 
 /** 해외 주문 응답 */
-export interface OverseasOrderOutput {
-  KRX_FWDG_ORD_ORGNO: string;
-  ODNO: string;
-  ORD_TMD: string;
-}
+export interface OverseasOrderOutput extends KisOrderOutput {}
 
 /** 해외 잔고 항목 */
 export interface OverseasBalanceItem {
@@ -222,11 +229,7 @@ export interface StockPriceResult {
 }
 
 /** 주문 결과 */
-export interface OrderResult {
-  success: boolean;
-  orderNo?: string;
-  message: string;
-}
+export type { OrderResult } from './order-result.type';
 
 /** 잔고 항목 (통합) */
 export interface BalanceItem {
@@ -289,20 +292,10 @@ export interface UnfilledOrder {
 }
 
 /** 주문 체결/미체결 상태 (브로커 조회 기준) */
-export interface BrokerOrderStatus {
-  orderNo: string;
-  stockCode: string;
-  side: 'BUY' | 'SELL';
-  orderQuantity: number;
-  filledQuantity: number;
-  remainingQuantity: number;
-  orderPrice?: number;
-  filledPrice?: number;
-  exchangeCode?: string;
-  orderDate?: string;
-  orderTime?: string;
-  rejected?: boolean;
-  rejectedReason?: string;
+export interface BrokerOrderStatus
+  extends Omit<BrokerOrderCandidate, 'rejectionState'> {
+  /** 신규 KIS 조회는 항상 채우며, 기존 내부 fixture 호환을 위해 optional로 둔다. */
+  rejectionState?: BrokerOrderRejectionState;
 }
 
 /** 해외 주문 구분 (00=지정가, 32=장전시간외, 33=장후시간외, 34=LOC) */

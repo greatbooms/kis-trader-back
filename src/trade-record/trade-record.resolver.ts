@@ -1,6 +1,7 @@
 import { Resolver, Query, Mutation, Args, ID, Int } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { TradeRecordService } from './trade-record.service';
+import { TradeRecordManualOrderService } from './trade-record-manual-order.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import {
   TradeRecordType,
@@ -24,6 +25,7 @@ import {
 export class TradeRecordResolver {
   constructor(
     private tradeRecordService: TradeRecordService,
+    private tradeRecordManualOrderService: TradeRecordManualOrderService,
   ) {}
 
   @Query(() => [TradeRecordType], { name: 'trades' })
@@ -92,13 +94,13 @@ export class TradeRecordResolver {
 
   @Mutation(() => ManualSellResult, { name: 'manualSell' })
   async manualSell(@Args('input') input: ManualSellInput): Promise<ManualSellResult> {
-    return this.tradeRecordService.manualSell(input);
+    return this.tradeRecordManualOrderService.manualSell(input);
   }
 
   @Mutation(() => CancelTradeOrderResult, { name: 'cancelTradeOrder' })
   async cancelTradeOrder(
     @Args('input') input: CancelTradeOrderInput,
   ): Promise<CancelTradeOrderResult> {
-    return this.tradeRecordService.cancelTradeOrder(input);
+    return this.tradeRecordManualOrderService.cancelTradeOrder(input);
   }
 }

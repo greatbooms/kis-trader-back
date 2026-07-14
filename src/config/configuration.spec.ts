@@ -1,0 +1,30 @@
+import configuration from './configuration';
+
+describe('trading.enabled', () => {
+  afterEach(() => delete process.env.TRADING_ENABLED);
+
+  it.each([undefined, '', 'false', '1', 'yes'])('is disabled for %p', (value) => {
+    if (value !== undefined) process.env.TRADING_ENABLED = value;
+    expect(configuration().trading.enabled).toBe(false);
+  });
+
+  it.each(['true', ' TRUE ', 'True'])('is enabled only for normalized true: %s', (value) => {
+    process.env.TRADING_ENABLED = value;
+    expect(configuration().trading.enabled).toBe(true);
+  });
+});
+
+describe('slack.approverUserIds', () => {
+  afterEach(() => delete process.env.SLACK_APPROVER_USER_IDS);
+
+  it.each([undefined, '', '   ', ',,'])('is fail-closed for %p', (value) => {
+    if (value !== undefined) process.env.SLACK_APPROVER_USER_IDS = value;
+    expect(configuration().slack.approverUserIds).toEqual([]);
+  });
+
+  it('trims, filters, and de-duplicates comma-separated Slack user IDs', () => {
+    process.env.SLACK_APPROVER_USER_IDS = ' U123, U456, U123, ,U789 ';
+
+    expect(configuration().slack.approverUserIds).toEqual(['U123', 'U456', 'U789']);
+  });
+});

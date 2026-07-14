@@ -1,17 +1,17 @@
-import { Injectable, Inject, Logger, OnModuleInit, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { TradeRecordService } from '../trade-record/trade-record.service';
-import { TradingService } from '../trading/trading.service';
-import { MarketAnalysisService } from '../trading/market-analysis.service';
-import { SlackService } from './slack.service';
+import { TradingSellApprovalWorkflowService } from './trading-sell-approval-workflow.service';
+import { MarketAnalysisService } from './market-analysis.service';
+import { SlackService } from '../notification/slack.service';
 import {
   PositionInfo,
   DailySummaryContext,
   DailySummaryBuildOptions,
   DailySummaryMarketConditionSummary,
   DailySummaryMarketSummary,
-} from './types/notification.types';
-import { Market, ApprovalStatus, OrderStatus } from '@prisma/client';
+} from '../notification/types/notification.types';
+import { ApprovalStatus, Market } from '@prisma/client';
+import { SellApprovalWorkflowResult } from './types/sell-approval-workflow-result.type';
 
 const SUMMARY_COUNTRY_GROUPS = [
   { code: 'KR', label: '국내', market: Market.DOMESTIC, exchanges: ['KRX'], regimeExchangeCode: 'KRX' },
@@ -30,13 +30,12 @@ const EXCHANGE_TO_COUNTRY = SUMMARY_COUNTRY_GROUPS.reduce<Record<string, (typeof
 }, {});
 
 @Injectable()
-export class SlackCommandsService implements OnModuleInit {
-  private readonly logger = new Logger(SlackCommandsService.name);
+export class TradingSlackCommandsService implements OnModuleInit {
+  private readonly logger = new Logger(TradingSlackCommandsService.name);
 
   constructor(
     private prisma: PrismaService,
-    private tradeRecordService: TradeRecordService,
-    @Inject(forwardRef(() => TradingService)) private tradingService: TradingService,
+    private approvalWorkflow: TradingSellApprovalWorkflowService,
     private marketAnalysisService: MarketAnalysisService,
     private slackService: SlackService,
   ) {}
@@ -103,87 +102,60 @@ export class SlackCommandsService implements OnModuleInit {
     // 매도 승인 버튼
     app.action('stop_loss_approve', async ({ ack, body, respond }) => {
       await ack();
+      const approvalId = (body as any).actions?.[0]?.value;
+      if (!approvalId) return;
+      const slackUserId = (body as any).user?.id;
+      let result: SellApprovalWorkflowResult;
       try {
-        const approvalId = (body as any).actions?.[0]?.value;
-        if (!approvalId) return;
-
-        const approval = await this.prisma.stopLossApproval.findUnique({ where: { id: approvalId } }).catch(() => null);
-        if (!approval) {
-          await respond({ text: ':warning: 존재하지 않는 요청입니다.', replace_original: false });
-          return;
-        }
-        if (approval.status !== ApprovalStatus.PENDING) {
-          if (approval.status === ApprovalStatus.EXPIRED) {
-            await respond({ text: ':hourglass: 만료된 요청입니다. 사이트에서 현재 상태를 확인해주세요.', replace_original: false });
-          } else {
-            const statusLabel = approval.status === ApprovalStatus.APPROVED ? '승인' : '거절';
-            await respond({ text: `:information_source: 이미 처리된 요청입니다. (${statusLabel})`, replace_original: false });
-          }
-          return;
-        }
-
-        await this.prisma.stopLossApproval.update({
-          where: { id: approvalId },
-          data: { status: ApprovalStatus.APPROVED, respondedAt: new Date() },
-        });
-
-        // 메시지 업데이트 (버튼 제거)
-        if (approval.slackMessageTs && approval.slackChannel) {
-          await this.slackService.updateStopLossApprovalMessage(
-            approval.slackChannel, approval.slackMessageTs, approval.stockCode, 'APPROVED',
-          );
-        }
-
-        // 주문 실행
-        await this.tradingService.executeApprovedStopLoss(approvalId);
-        this.logger.log(`Sell approved: ${approval.stockCode} (${approvalId})`);
+        result = await this.approvalWorkflow.approve(approvalId, slackUserId);
       } catch (e) {
         this.logger.error(`Sell approve error: ${e.message}`);
-        await respond({ text: `:x: 승인 처리 실패: ${e.message}`, replace_original: false });
+        try {
+          await respond({ text: `:x: 승인 처리 실패: ${e.message}`, replace_original: false });
+        } catch (respondError) {
+          this.logger.warn(
+            `[APPROVAL ${approvalId}] Slack failure response failed: ${respondError.message}`,
+          );
+        }
+        return;
+      }
+      try {
+        await this.presentApprovalWorkflowResult(result, respond);
+      } catch (e) {
+        this.logger.warn(`[APPROVAL ${approvalId}] Slack presentation failed: ${e.message}`);
+      }
+      if (result.claimed) {
+        this.logger.log(`[APPROVAL ${approvalId}] Sell approval workflow completed`);
       }
     });
 
     // 매도 거절 버튼
     app.action('stop_loss_reject', async ({ ack, body, respond }) => {
       await ack();
+      const approvalId = (body as any).actions?.[0]?.value;
+      if (!approvalId) return;
+      const slackUserId = (body as any).user?.id;
+      let result: SellApprovalWorkflowResult;
       try {
-        const approvalId = (body as any).actions?.[0]?.value;
-        if (!approvalId) return;
-
-        const approval = await this.prisma.stopLossApproval.findUnique({ where: { id: approvalId } }).catch(() => null);
-        if (!approval) {
-          await respond({ text: ':warning: 존재하지 않는 요청입니다.', replace_original: false });
-          return;
-        }
-        if (approval.status !== ApprovalStatus.PENDING) {
-          if (approval.status === ApprovalStatus.EXPIRED) {
-            await respond({ text: ':hourglass: 만료된 요청입니다. 사이트에서 현재 상태를 확인해주세요.', replace_original: false });
-          } else {
-            const statusLabel = approval.status === ApprovalStatus.APPROVED ? '승인' : '거절';
-            await respond({ text: `:information_source: 이미 처리된 요청입니다. (${statusLabel})`, replace_original: false });
-          }
-          return;
-        }
-
-        await this.prisma.stopLossApproval.update({
-          where: { id: approvalId },
-          data: { status: ApprovalStatus.REJECTED, respondedAt: new Date() },
-        });
-        await this.prisma.tradeRecord.update({
-          where: { id: approval.tradeRecordId },
-          data: { status: OrderStatus.CANCELLED, reason: 'Sell approval rejected by user' },
-        });
-
-        if (approval.slackMessageTs && approval.slackChannel) {
-          await this.slackService.updateStopLossApprovalMessage(
-            approval.slackChannel, approval.slackMessageTs, approval.stockCode, 'REJECTED',
-          );
-        }
-
-        this.logger.log(`Sell rejected: ${approval.stockCode} (${approvalId})`);
+        result = await this.approvalWorkflow.reject(approvalId, slackUserId);
       } catch (e) {
         this.logger.error(`Sell reject error: ${e.message}`);
-        await respond({ text: `:x: 거절 처리 실패: ${e.message}`, replace_original: false });
+        try {
+          await respond({ text: `:x: 거절 처리 실패: ${e.message}`, replace_original: false });
+        } catch (respondError) {
+          this.logger.warn(
+            `[APPROVAL ${approvalId}] Slack failure response failed: ${respondError.message}`,
+          );
+        }
+        return;
+      }
+      try {
+        await this.presentApprovalWorkflowResult(result, respond);
+      } catch (e) {
+        this.logger.warn(`[APPROVAL ${approvalId}] Slack presentation failed: ${e.message}`);
+      }
+      if (result.claimed) {
+        this.logger.log(`[APPROVAL ${approvalId}] Sell rejection workflow completed`);
       }
     });
 
@@ -227,6 +199,76 @@ export class SlackCommandsService implements OnModuleInit {
         await say({ text: `:x: 처리 중 오류: ${e.message}` });
       }
     });
+  }
+
+  private async presentApprovalWorkflowResult(
+    result: SellApprovalWorkflowResult,
+    respond: any,
+  ): Promise<void> {
+    if (result.reason === 'UNAUTHORIZED') {
+      await respond({
+        text: ':no_entry: 이 매도 요청을 처리할 권한이 없습니다.',
+        replace_original: false,
+      });
+      return;
+    }
+    if (result.reason === 'ALREADY_HANDLED') {
+      const statusLabel = result.approvalStatus === ApprovalStatus.APPROVED
+        ? '승인'
+        : result.approvalStatus === ApprovalStatus.REJECTED
+          ? '거절'
+          : '처리 완료';
+      await respond({
+        text: `:information_source: 이미 처리된 요청입니다. (${statusLabel})`,
+        replace_original: false,
+      });
+      return;
+    }
+    if (result.reason === 'EXPIRED') {
+      await respond({
+        text: ':hourglass: 만료된 요청입니다. 사이트에서 현재 상태를 확인해주세요.',
+        replace_original: false,
+      });
+      return;
+    }
+
+    let text: string | undefined;
+    switch (result.reason) {
+      case 'NOT_FOUND':
+        text = ':warning: 존재하지 않는 요청입니다.';
+        break;
+      case 'DELIVERY_NOT_READY':
+        text = ':hourglass: Slack 전달이 완료되지 않은 요청입니다. 사이트에서 현재 상태를 확인해주세요.';
+        break;
+      case 'TRADING_DISABLED':
+        text = ':no_entry: 실전 거래가 비활성 상태여서 주문을 제출하지 않았습니다.';
+        break;
+      case 'BROKER_CONTEXT_MISMATCH':
+        text = ':no_entry: 승인 요청의 KIS 계좌가 현재 계좌와 일치하지 않아 주문을 제출하지 않았습니다.';
+        break;
+      case 'REFRESH_FAILED':
+        text = ':x: 포지션 새로고침 실패로 주문을 제출하지 않았습니다.';
+        break;
+      case 'NO_HOLDING':
+        text = ':information_source: 현재 보유 수량이 없어 주문을 제출하지 않았습니다.';
+        break;
+      case 'SUBMISSION_CLAIM_LOST':
+      case 'STATE_CHANGED':
+        text = ':information_source: 주문 상태가 이미 변경되어 추가 제출하지 않았습니다.';
+        break;
+      case 'BROKER_REJECTED':
+        text = ':x: KIS가 주문을 거절했습니다.';
+        break;
+      case 'BROKER_UNKNOWN':
+        text = ':warning: KIS 주문 결과를 확인해야 합니다. 추가 주문은 제출하지 마세요.';
+        break;
+      case 'ACCEPTED_PERSISTENCE_PENDING':
+        text = ':warning: KIS 주문은 접수됐지만 DB 저장 확인이 필요합니다.';
+        break;
+    }
+    if (text) {
+      await respond({ text, replace_original: false });
+    }
   }
 
   // --- Data helpers ---

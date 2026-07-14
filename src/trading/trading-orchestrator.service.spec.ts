@@ -66,6 +66,9 @@ describe('TradingOrchestrator', () => {
       findUnique: jest.fn(),
       count: jest.fn(),
     },
+    watchStockExecutionLog: {
+      create: jest.fn(),
+    },
     appSetting: {
       create: jest.fn(),
       delete: jest.fn(),
@@ -248,6 +251,48 @@ describe('TradingOrchestrator', () => {
     expect(mockPrisma.tradeRecord.findFirst).not.toHaveBeenCalled();
   });
 
+  it('blocks manual execution for any locked unresolved instrument intent regardless of strategy', async () => {
+    mockPrisma.watchStock.findUnique.mockResolvedValue({
+      id: 'ws-locked',
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      stockName: 'TQQQ',
+      strategyName: 'conservative',
+      isActive: true,
+    });
+    mockMarketStateSync.isMarketOpen.mockReturnValue(true);
+    mockPrisma.tradeRecord.findFirst.mockResolvedValue({
+      id: 'unknown-other-strategy',
+      orderNo: null,
+      status: 'SUBMISSION_UNKNOWN',
+      strategyName: 'daily-dca',
+    });
+    mockPrisma.watchStockExecutionLog.create.mockResolvedValue({});
+
+    await expect(orchestrator.triggerWatchStockNow('ws-locked')).resolves.toEqual({
+      success: false,
+      message: '이미 열린 주문이 있어 중복 주문을 막았습니다.',
+    });
+
+    expect(mockPrisma.tradeRecord.findFirst).toHaveBeenCalledWith({
+      where: {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        OR: [
+          {
+            status: {
+              in: ['AWAITING_APPROVAL', 'SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING'],
+            },
+          },
+          { status: 'PARTIAL', orderNo: { not: null } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  });
+
   it('should map unfilled orders to hasOpenBuyOrder/hasOpenSellOrder in strategy contexts', async () => {
     jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
     mockMarketStateSync.getUnfilledOrders.mockResolvedValue([
@@ -321,6 +366,51 @@ describe('TradingOrchestrator', () => {
     expect(tqqq.alreadyExecutedToday).toBe(false); // PENDING은 아직 체결 확정이 아님
   });
 
+  it('treats approval/submitting/unknown as unresolved side intents without counting them executed', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    mockPrisma.tradeRecord.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { status: 'AWAITING_APPROVAL', side: 'BUY' },
+        { status: 'SUBMITTING', side: 'SELL' },
+        { status: 'SUBMISSION_UNKNOWN', side: 'SELL' },
+      ]);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      {
+        id: 'ws-locked',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'conservative',
+        isActive: true,
+      },
+    ]);
+
+    const context = mockTradingService.executePerStockStrategy.mock.calls[0][1][0];
+    expect(context.hasOpenBuyOrder).toBe(true);
+    expect(context.hasOpenSellOrder).toBe(true);
+    expect(context.alreadyExecutedToday).toBe(false);
+    expect(mockPrisma.tradeRecord.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        OR: [
+          {
+            status: {
+              in: ['AWAITING_APPROVAL', 'SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING'],
+            },
+          },
+          { status: 'PARTIAL', orderNo: { not: null } },
+        ],
+      },
+      select: { status: true, side: true },
+    });
+  });
+
   it('should not cancel unfilled orders when only continuous strategies exist', async () => {
     const shouldExecuteNowSpy = jest
       .spyOn(orchestrator as any, 'shouldExecuteNow')
@@ -387,6 +477,15 @@ describe('TradingOrchestrator', () => {
         price: 58.42,
       },
     ]);
+    const cancellationQuery = mockPrisma.tradeRecord.findMany.mock.calls
+      .map(([query]) => query)
+      .find((query: any) => query?.where?.orderNo?.in);
+    expect(cancellationQuery.where.AND[0]).toEqual({
+      OR: [
+        { cancellationStatus: null },
+        { cancellationStatus: { in: ['REJECTED', 'RESOLVED'] } },
+      ],
+    });
   });
 
   it('does not send daily summary during once-daily strategy execution', async () => {

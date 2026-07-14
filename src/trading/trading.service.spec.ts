@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TradingService } from './trading.service';
-import { TradingPositionSyncService } from './trading-position-sync.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
@@ -8,6 +7,9 @@ import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
 import { ConfigService } from '@nestjs/config';
 import { MarketAnalysisService } from './market-analysis.service';
+import { TradingOrderExecutionService } from './trading-order-execution.service';
+import { TradingBrokerContextService } from './trading-broker-context.service';
+import { TradingOrderGuardService } from './trading-order-guard.service';
 
 describe('TradingService', () => {
   let service: TradingService;
@@ -29,6 +31,7 @@ describe('TradingService', () => {
   };
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     tradeRecord: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -52,9 +55,11 @@ describe('TradingService', () => {
     },
     stopLossApproval: {
       create: jest.fn(),
+      findMany: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
 
@@ -79,11 +84,27 @@ describe('TradingService', () => {
     getIntradayVwap: jest.fn(),
   };
 
-  const mockPositionSyncService = {
-    syncPositions: jest.fn(),
+  const mockOrderExecutionService = {
+    execute: jest.fn().mockResolvedValue(true),
+  };
+
+  const mockBrokerContext = {
+    getCurrentContext: jest.fn().mockReturnValue({
+      environment: 'PAPER',
+      accountHash: 'account-hash',
+      maskedAccount: '****1234-01',
+    }),
+  };
+
+  const mockOrderGuard = {
+    admit: jest.fn(),
   };
 
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma));
+    mockPrisma.stopLossApproval.findMany.mockResolvedValue([]);
+    mockPrisma.stopLossApproval.updateMany.mockResolvedValue({ count: 1 });
+    mockOrderGuard.admit.mockImplementation(async (_key, createWithTx) => createWithTx(mockPrisma));
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TradingService,
@@ -93,7 +114,9 @@ describe('TradingService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: TradingPositionSyncService, useValue: mockPositionSyncService },
+        { provide: TradingOrderExecutionService, useValue: mockOrderExecutionService },
+        { provide: TradingBrokerContextService, useValue: mockBrokerContext },
+        { provide: TradingOrderGuardService, useValue: mockOrderGuard },
         { provide: SlackService, useValue: mockSlackService },
       ],
     }).compile();
@@ -806,8 +829,46 @@ describe('TradingService', () => {
   });
 
   describe('executeSignal diagnostics logging', () => {
-    it('should include buyable diagnostics in order submitted logs', async () => {
-      jest.spyOn(service as any, 'refreshMarketPositionsBeforeOrder').mockResolvedValue(undefined);
+    it('keeps approval classification in TradingService and delegates ordinary execution unchanged', async () => {
+      const executionService = {
+        execute: jest.fn().mockResolvedValue(true),
+      };
+      (service as any).orderExecutionService = executionService;
+      mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'legacy-path' });
+      mockPrisma.tradeRecord.update.mockResolvedValue({});
+      mockKisDomestic.orderBuy.mockResolvedValue({
+        outcome: 'ACCEPTED',
+        success: true,
+        orderNo: 'legacy-order',
+        brokerOrderDate: '20260713',
+        orderTime: '101112',
+        message: '접수',
+      });
+      const signal = {
+        market: 'DOMESTIC' as const,
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        side: 'BUY' as const,
+        quantity: 1,
+        price: 70_000,
+        reason: 'ordinary buy',
+      };
+      const details = { adjustedQuota: 70_000 };
+
+      await expect(
+        (service as any).executeSignal(signal, 'daily-dca', undefined, details),
+      ).resolves.toBe(true);
+
+      expect(executionService.execute).toHaveBeenCalledWith(
+        signal,
+        'daily-dca',
+        undefined,
+        details,
+      );
+      expect(mockKisDomestic.orderBuy).not.toHaveBeenCalled();
+    });
+
+    it('passes buyable diagnostics to the automatic execution service', async () => {
       mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'trade-1' });
       mockPrisma.tradeRecord.update.mockResolvedValue({});
       mockKisOverseas.orderBuy.mockResolvedValue({
@@ -864,20 +925,27 @@ describe('TradingService', () => {
         },
       );
 
-      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          eventType: 'ORDER_SUBMITTED',
-          message: '주문 제출: BUY 1주',
-          details: expect.objectContaining({
-            buyableAmount: 109.2,
-            buyableAmountSource: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
-            buyableAmountMaxQuantity: 1,
-            preCashCappedQuota: 212.5,
-            adjustedQuota: 109.2,
-            cashCapApplied: true,
+      expect(mockOrderExecutionService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          market: 'OVERSEAS',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+        }),
+        'infinite-buy',
+        expect.objectContaining({
+          buyableAmount: 109.2,
+          buyableMeta: expect.objectContaining({
+            source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+            maxQuantity: 1,
           }),
         }),
-      });
+        expect.objectContaining({
+          preCashCappedQuota: 212.5,
+          adjustedQuota: 109.2,
+          buy1Qty: 1,
+          buy2Qty: 0,
+        }),
+      );
     });
   });
 
@@ -913,13 +981,15 @@ describe('TradingService', () => {
     };
 
     beforeEach(() => {
-      jest.spyOn(service as any, 'refreshMarketPositionsBeforeOrder').mockResolvedValue(undefined);
       mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'trade-approval' });
       mockPrisma.tradeRecord.update.mockResolvedValue({});
       mockPrisma.stopLossApproval.findFirst.mockResolvedValue(null);
       mockPrisma.stopLossApproval.create.mockResolvedValue({ id: 'approval-1' });
       mockPrisma.stopLossApproval.update.mockResolvedValue({});
-      mockSlackService.sendStopLossApproval.mockResolvedValue({ ts: '123.45', channel: '#test' });
+      mockSlackService.sendStopLossApproval.mockImplementation(async () => ({
+        ts: String(Date.now() / 1000),
+        channel: '#test',
+      }));
       mockKisDomestic.orderSell.mockResolvedValue({ success: true, orderNo: 'D-1', message: 'SELL order placed' });
       mockKisOverseas.orderSell.mockResolvedValue({ success: true, orderNo: 'O-1', message: 'SELL order placed' });
     });
@@ -965,12 +1035,17 @@ describe('TradingService', () => {
           stockCode: '005930',
           quantity: 3,
           status: 'PENDING',
+          expiresAt: expect.any(Date),
           signal: expect.objectContaining({
             reason: '손절청산: -2.1% <= -2.0%',
             metadata: expect.objectContaining({ phase: 'intraday-stop' }),
           }),
         }),
       });
+      const createdApproval = mockPrisma.stopLossApproval.create.mock.calls[0][0].data;
+      expect(createdApproval.expiresAt.getTime() - createdApproval.requestedAt.getTime()).toBe(
+        2 * 60 * 1000,
+      );
       expect(mockSlackService.sendStopLossApproval).toHaveBeenCalledWith(
         expect.objectContaining({
           approvalId: 'approval-1',
@@ -1011,50 +1086,48 @@ describe('TradingService', () => {
       );
     });
 
-    it('requires approval for trend-following trend-exit sell signals', async () => {
-      const result = await (service as any).executeSignal(
-        {
-          market: 'OVERSEAS',
-          exchangeCode: 'NASD',
+    it('keeps trend-following trend-exit sell signals automatic', async () => {
+      const signal = {
+        market: 'OVERSEAS' as const,
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL' as const,
+        quantity: 10,
+        price: 190,
+        reason: '추세소멸: ADX=18.5 < 20',
+      };
+      const context = {
+        ...baseContext,
+        watchStock: {
+          ...baseContext.watchStock,
+          strategyName: 'trend-following',
+        },
+        price: { currentPrice: 190 } as any,
+        position: {
           stockCode: 'TQQQ',
-          side: 'SELL',
           quantity: 10,
-          price: 190,
-          reason: '추세소멸: ADX=18.5 < 20',
+          avgPrice: 200,
+          currentPrice: 190,
+          totalInvested: 2000,
         },
+      };
+
+      const result = await (service as any).executeSignal(
+        signal,
         'trend-following',
-        {
-          ...baseContext,
-          watchStock: {
-            ...baseContext.watchStock,
-            strategyName: 'trend-following',
-          },
-          price: { currentPrice: 190 } as any,
-          position: {
-            stockCode: 'TQQQ',
-            quantity: 10,
-            avgPrice: 200,
-            currentPrice: 190,
-            totalInvested: 2000,
-          },
-        },
+        context,
       );
 
-      expect(result).toBe(false);
-      expect(mockKisOverseas.orderSell).not.toHaveBeenCalled();
-      expect(mockPrisma.tradeRecord.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          status: 'AWAITING_APPROVAL',
-          reason: '추세소멸: ADX=18.5 < 20',
-        }),
-      });
-      expect(mockSlackService.sendStopLossApproval).toHaveBeenCalledWith(
-        expect.objectContaining({
-          stockCode: 'TQQQ',
-          approvalReason: '추세소멸: ADX=18.5 < 20',
-          approvalType: 'LIQUIDATION',
-        }),
+      expect(result).toBe(true);
+      expect(mockOrderExecutionService.execute).toHaveBeenCalledWith(
+        signal,
+        'trend-following',
+        context,
+        undefined,
       );
+      expect(mockKisOverseas.orderSell).not.toHaveBeenCalled();
+      expect(mockPrisma.tradeRecord.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendStopLossApproval).not.toHaveBeenCalled();
     });
 
     it('keeps ordinary infinite-buy take-profit under T20 automatic', async () => {
@@ -1075,13 +1148,25 @@ describe('TradingService', () => {
       );
 
       expect(result).toBe(true);
-      expect(mockKisOverseas.orderSell).toHaveBeenCalledWith('NASD', 'TQQQ', 4, 220, '00');
+      expect(mockOrderExecutionService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          market: 'OVERSEAS',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 4,
+          price: 220,
+        }),
+        'infinite-buy',
+        baseContext,
+        undefined,
+      );
+      expect(mockKisOverseas.orderSell).not.toHaveBeenCalled();
       expect(mockSlackService.sendStopLossApproval).not.toHaveBeenCalled();
     });
   });
 
   describe('executeApprovedStopLoss', () => {
-    it('logs the submitted sell signal so reconciliation can send fill alerts and run strategy cleanup', async () => {
+    it('fails closed and directs callers to the actor-aware workflow without side effects', async () => {
       const signal = {
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
@@ -1132,88 +1217,38 @@ describe('TradingService', () => {
         message: 'SELL order placed',
       });
 
-      await service.executeApprovedStopLoss('approval-1');
+      const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation();
+      let thrown: unknown;
+      try {
+        await service.executeApprovedStopLoss('approval-1');
+      } catch (error) {
+        thrown = error;
+      }
 
-      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          watchStockId: 'ws-approval',
-          tradeRecordId: 'trade-approval',
-          eventType: 'ORDER_SUBMITTED',
-          message: '주문 제출: SELL 4주',
-          details: expect.objectContaining({
-            side: 'SELL',
-            quantity: 4,
-            price: 220,
-            reason: 'Take profit 1: T=20.5, target +8.0%',
-            metadata: expect.objectContaining({ phase: 'take-profit-1', tValue: 20.5 }),
-          }),
-        }),
-      });
-    });
-
-    it('refreshes positions and clamps approved sell quantity before submitting the order', async () => {
-      const signal = {
-        market: 'OVERSEAS',
-        exchangeCode: 'NASD',
-        stockCode: 'TQQQ',
-        side: 'SELL',
-        quantity: 4,
-        price: 220,
-        reason: 'Take profit 1: T=20.5, target +8.0%',
-        orderDivision: '00',
-        metadata: { phase: 'take-profit-1', tValue: 20.5 },
-      };
-      mockPrisma.stopLossApproval.findUnique.mockResolvedValue({
-        id: 'approval-1',
-        status: 'APPROVED',
-        tradeRecordId: 'trade-approval',
-        signal,
-        tradeRecord: {
-          id: 'trade-approval',
-          market: 'OVERSEAS',
-          exchangeCode: 'NASD',
-          stockCode: 'TQQQ',
-          stockName: 'TQQQ',
-          strategyName: 'infinite-buy',
-        },
-      });
-      mockKisOverseas.getBalance.mockResolvedValue([]);
-      mockPrisma.position.findFirst.mockResolvedValue({
-        market: 'OVERSEAS',
-        exchangeCode: 'NASD',
-        stockCode: 'TQQQ',
-        quantity: 2,
-        avgPrice: 200,
-        currentPrice: 220,
-        totalInvested: 400,
-      });
-      mockPrisma.watchStock.findUnique.mockResolvedValue({
-        id: 'ws-approval',
-        market: 'OVERSEAS',
-        exchangeCode: 'NASD',
-        stockCode: 'TQQQ',
-        stockName: 'TQQQ',
-        strategyName: 'infinite-buy',
-      });
-      mockPrisma.tradeRecord.update.mockResolvedValue({});
-      mockKisOverseas.orderSell.mockResolvedValue({
-        success: true,
-        orderNo: 'O-1',
-        message: 'SELL order placed',
-      });
-
-      await service.executeApprovedStopLoss('approval-1');
-
-      expect(mockKisOverseas.getBalance).toHaveBeenCalled();
-      expect(mockPositionSyncService.syncPositions).toHaveBeenCalledWith('OVERSEAS', []);
-      expect(mockKisOverseas.orderSell).toHaveBeenCalledWith('NASD', 'TQQQ', 2, 220, '00');
-      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          details: expect.objectContaining({
-            quantity: 2,
-            approvedSell: true,
-          }),
-        }),
+      expect({
+        thrownMessage: thrown instanceof Error ? thrown.message : undefined,
+        warning: warnSpy.mock.calls[0]?.[0],
+        approvalReads: mockPrisma.stopLossApproval.findUnique.mock.calls.length,
+        approvalMutations: mockPrisma.stopLossApproval.update.mock.calls.length
+          + mockPrisma.stopLossApproval.updateMany.mock.calls.length,
+        tradeMutations: mockPrisma.tradeRecord.update.mock.calls.length
+          + mockPrisma.tradeRecord.updateMany.mock.calls.length,
+        positionRefreshes: mockKisDomestic.getBalance.mock.calls.length
+          + mockKisOverseas.getBalance.mock.calls.length
+          + mockPrisma.position.findFirst.mock.calls.length,
+        kisOrders: mockKisDomestic.orderSell.mock.calls.length
+          + mockKisOverseas.orderSell.mock.calls.length,
+        slackCalls: Object.values(mockSlackService)
+          .reduce((count, mock) => count + mock.mock.calls.length, 0),
+      }).toEqual({
+        thrownMessage: expect.stringContaining('TradingSellApprovalWorkflowService'),
+        warning: expect.stringContaining('[APPROVAL approval-1]'),
+        approvalReads: 0,
+        approvalMutations: 0,
+        tradeMutations: 0,
+        positionRefreshes: 0,
+        kisOrders: 0,
+        slackCalls: 0,
       });
     });
   });

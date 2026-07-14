@@ -1,0 +1,7 @@
+export type SlackRecoveryModalAction =
+  | 'ASSIGN_CONTEXT'
+  | 'LINK_CANDIDATE'
+  | 'NOT_SUBMITTED'
+  | 'MATCH_EXISTING'
+  | 'INSPECT_CANCELLATION'
+  | 'CANCELLATION_NOT_ACCEPTED';

@@ -10,6 +10,9 @@ const config: Config = {
   collectCoverageFrom: ['src/**/*.ts', '!src/main.ts', '!src/**/*.module.ts'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  testPathIgnorePatterns: process.env.TEST_DATABASE_URL
+    ? ['/node_modules/']
+    : ['/node_modules/', '<rootDir>/test/.*\\.integration\\.spec\\.ts$'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },

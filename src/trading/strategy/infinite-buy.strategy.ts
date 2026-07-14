@@ -15,6 +15,7 @@ import { lookupTargetProfitRate, lookupSecondaryBonusRate } from './infinite-buy
 import { applyAccumulatedQuota } from './infinite-buy-quota.util';
 import { tickSize } from '../../common/utils/tick-size.util';
 
+const MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT = 0.20;
 const SAME_CYCLE_MIN_PROFIT_RATE_DEFAULT = 0.006;
 
 function pushQuotaAdjustment(
@@ -346,6 +347,42 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       }
       return ` (목표가 ${targetPrice} ≤ 현재가 → ${orderPrice} 즉시 청산, 자전거래 회피)`;
     };
+
+    // 기존 riskState가 전량청산을 요청해도 손실이 큰 종목만 정리한다.
+    // 수익/소폭 손실 종목은 유지해 포트폴리오 MDD가 건강한 종목까지 휩쓸지 않게 한다.
+    if (riskState?.liquidateAll && hasPosition) {
+      const configuredThreshold = strategyParams.mddLiquidateStockLossThreshold;
+      const stockLossThreshold = typeof configuredThreshold === 'number'
+        && Number.isFinite(configuredThreshold)
+        ? configuredThreshold
+        : MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT;
+      const stockLossRate = avgPrice > 0 ? (avgPrice - curPrice) / avgPrice : 0;
+      details.mddTriggered = true;
+      details.mddStockLossRate = stockLossRate;
+      details.mddStockLossThreshold = stockLossThreshold;
+
+      if (stockLossRate >= stockLossThreshold) {
+        this.logger.log(
+          `[${watchStock.stockCode}] RISK LIQUIDATION: ${riskReason}, ` +
+          `stockLoss=${(stockLossRate * 100).toFixed(1)}%, ` +
+          `threshold=${(stockLossThreshold * 100).toFixed(0)}%, quantity=${holdQty}`,
+        );
+        signals.push({
+          market,
+          exchangeCode,
+          stockCode: watchStock.stockCode,
+          side: 'SELL',
+          quantity: holdQty,
+          price: roundPrice(curPrice),
+          reason:
+            `리스크 청산: ${riskReason}, 종목 손실 ${(stockLossRate * 100).toFixed(1)}% ` +
+            `≥ ${(stockLossThreshold * 100).toFixed(0)}%`,
+          orderDivision: '00',
+          metadata: { phase: 'risk-liquidation' },
+        });
+        return { signals, skipReasons };
+      }
+    }
 
     // --- 손절: 포지션 보유 중이면 항상 체크 (alreadyExecutedToday, maxCycles 무관) ---
     if (hasPosition && curPrice < avgPrice * (1 - watchStock.stopLossRate)) {

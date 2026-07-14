@@ -8,25 +8,40 @@ datasource db {
 }
 
 model TradeRecord {
-  id                String                   @id @default(uuid())
-  market            Market
-  exchangeCode      String                   @map("exchange_code")
-  stockCode         String                   @map("stock_code")
-  stockName         String                   @map("stock_name")
-  side              Side
-  orderType         OrderType                @map("order_type")
-  quantity          Int
-  price             Decimal
-  executedPrice     Decimal?                 @map("executed_price")
-  executedQty       Int?                     @map("executed_qty")
-  orderNo           String?                  @map("order_no")
-  status            OrderStatus
-  strategyName      String?                  @map("strategy_name")
-  reason            String?
-  createdAt         DateTime                 @default(now()) @map("created_at")
-  updatedAt         DateTime                 @updatedAt @map("updated_at")
-  stopLossApprovals StopLossApproval[]
-  executionLogs     WatchStockExecutionLog[]
+  id                         String                      @id @default(uuid())
+  market                     Market
+  exchangeCode               String                      @map("exchange_code")
+  stockCode                  String                      @map("stock_code")
+  stockName                  String                      @map("stock_name")
+  side                       Side
+  orderType                  OrderType                   @map("order_type")
+  quantity                   Int
+  price                      Decimal
+  executedPrice              Decimal?                    @map("executed_price")
+  executedQty                Int?                        @map("executed_qty")
+  orderNo                    String?                     @map("order_no")
+  status                     OrderStatus
+  strategyName               String?                     @map("strategy_name")
+  reason                     String?
+  submissionStartedAt        DateTime?                   @map("submission_started_at")
+  brokerOrderDate            String?                     @map("broker_order_date")
+  brokerOrderTime            String?                     @map("broker_order_time")
+  brokerEnvironment          BrokerEnvironment?          @map("broker_environment")
+  brokerAccountHash          String?                     @map("broker_account_hash")
+  brokerMessage              String?                     @map("broker_message")
+  submissionResolvedAt       DateTime?                   @map("submission_resolved_at")
+  submissionResolvedBy       String?                     @map("submission_resolved_by")
+  submissionResolution       SubmissionResolution?       @map("submission_resolution")
+  cancellationStatus         CancellationAttemptStatus?  @map("cancellation_status")
+  cancellationStartedAt      DateTime?                   @map("cancellation_started_at")
+  cancellationResolvedAt     DateTime?                   @map("cancellation_resolved_at")
+  cancellationResolvedBy     String?                     @map("cancellation_resolved_by")
+  cancellationMessage        String?                     @map("cancellation_message")
+  createdAt                  DateTime                    @default(now()) @map("created_at")
+  updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  stopLossApprovals          StopLossApproval[]
+  executionLogs              WatchStockExecutionLog[]
+  brokerOrderActionAuditLogs BrokerOrderActionAuditLog[]
 
   @@map("trade_records")
 }
@@ -395,6 +410,45 @@ enum OrderStatus {
   CANCELLED
   FAILED
   AWAITING_APPROVAL
+  SUBMITTING
+  SUBMISSION_UNKNOWN
+}
+
+enum BrokerEnvironment {
+  PAPER
+  PROD
+}
+
+enum SubmissionResolution {
+  LINKED_BROKER_ORDER
+  CONFIRMED_NOT_SUBMITTED
+  MATCHED_EXISTING_TRADE_RECORD
+}
+
+enum CancellationAttemptStatus {
+  SUBMITTING
+  ACCEPTED
+  REJECTED
+  UNKNOWN
+  RESOLVED
+}
+
+enum BrokerOrderActionChannel {
+  SYSTEM
+  SLACK
+  WEB
+}
+
+enum BrokerOrderAction {
+  UNKNOWN_DETECTED
+  LEGACY_CONTEXT_ASSIGNED
+  CANDIDATES_INSPECTED
+  BROKER_ORDER_LINKED
+  CONFIRMED_NOT_SUBMITTED
+  MATCHED_EXISTING_TRADE_RECORD
+  CANCELLATION_UNKNOWN
+  CANCELLATION_RECONCILED
+  CANCELLATION_NOT_ACCEPTED
 }
 
 enum ApprovalStatus {
@@ -421,11 +475,35 @@ model StopLossApproval {
   slackMessageTs String?        @map("slack_message_ts")
   slackChannel   String?        @map("slack_channel")
   requestedAt    DateTime       @default(now()) @map("requested_at")
+  expiresAt      DateTime       @map("expires_at")
+  notifiedAt     DateTime?      @map("notified_at")
   respondedAt    DateTime?      @map("responded_at")
-  timeoutMinutes Int            @default(5) @map("timeout_minutes")
+  respondedBy    String?        @map("responded_by")
+  timeoutMinutes Int            @default(10) @map("timeout_minutes")
   tradeRecord    TradeRecord    @relation(fields: [tradeRecordId], references: [id])
 
+  @@index([market, exchangeCode, stockCode, status, expiresAt], map: "stop_loss_approvals_active_lookup_idx")
+  @@index([market, exchangeCode, stockCode, notifiedAt], map: "stop_loss_approvals_cooldown_lookup_idx")
   @@map("stop_loss_approvals")
+}
+
+model BrokerOrderActionAuditLog {
+  id              String                   @id @default(uuid())
+  tradeRecordId   String                   @map("trade_record_id")
+  channel         BrokerOrderActionChannel
+  action          BrokerOrderAction
+  actor           String
+  brokerOrderDate String?                  @map("broker_order_date")
+  exchangeCode    String?                  @map("exchange_code")
+  orderNo         String?                  @map("order_no")
+  beforeStatus    OrderStatus?             @map("before_status")
+  afterStatus     OrderStatus?             @map("after_status")
+  details         Json?
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  tradeRecord     TradeRecord              @relation(fields: [tradeRecordId], references: [id], onDelete: Cascade)
+
+  @@index([tradeRecordId, createdAt])
+  @@map("broker_order_action_audit_logs")
 }
 
 enum SimulationStatus {
@@ -447,5 +525,7 @@ enum WatchStockExecutionEventType {
   ORDER_FAILED
   ORDER_AWAITING_APPROVAL
   ORDER_CANCELLED
+  ORDER_SUBMISSION_UNKNOWN
+  ORDER_RECONCILIATION
   ERROR
 }

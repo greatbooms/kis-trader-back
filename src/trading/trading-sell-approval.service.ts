@@ -1,14 +1,26 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { ApprovalStatus, Market, OrderStatus, OrderType, Prisma, Side, WatchStockExecutionEventType } from '@prisma/client';
+import {
+  ApprovalStatus,
+  Market,
+  OrderStatus,
+  OrderType,
+  Prisma,
+  Side,
+  WatchStockExecutionEventType,
+} from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { PrismaService } from '../prisma.service';
+import { TradingBrokerContextService } from './trading-broker-context.service';
+import { TradingOrderGuardService } from './trading-order-guard.service';
 import { StockStrategyContext, TradingSignal } from './types';
 
 @Injectable()
 export class TradingSellApprovalService {
   private readonly logger = new Logger(TradingSellApprovalService.name);
+  private static readonly PROVISIONAL_APPROVAL_MINUTES = 2;
+  private static readonly APPROVAL_VALIDITY_MINUTES = 10;
+  private static readonly SUCCESSFUL_NOTIFICATION_COOLDOWN_MINUTES = 30;
   private static readonly HIGH_T_SELL_APPROVAL_THRESHOLD = 20;
-  private static readonly DEFAULT_SELL_APPROVAL_REMINDER_MINUTES = 30;
   private static readonly MANUAL_SELL_APPROVAL_PHASES = new Set([
     'carryover-exit',
     'eod-exit',
@@ -17,10 +29,18 @@ export class TradingSellApprovalService {
     'stop-loss',
     'trailing-stop',
   ]);
+  private static readonly PROTECTIVE_SELL_REASON_PATTERNS = [
+    /^\s*(?:stop[\s-]?loss|손절(?:청산)?)(?:\s*[:：]|$)/i,
+    /^\s*(?:리스크|mdd)\s*(?:전량)?청산(?:\s*[:：]|$)/i,
+    /^\s*(?:당일|이월)청산(?:\s*[:：]|$)/i,
+    /^\s*트레일링(?:\s*스탑)?(?:\s*[:：]|$)/i,
+  ];
 
   constructor(
-    private prisma: PrismaService,
-    @Optional() private slackService?: SlackService,
+    private readonly prisma: PrismaService,
+    private readonly brokerContext: TradingBrokerContextService,
+    private readonly orderGuard: TradingOrderGuardService,
+    @Optional() private readonly slackService?: SlackService,
   ) {}
 
   shouldRequireApproval(
@@ -39,129 +59,187 @@ export class TradingSellApprovalService {
     ctx: StockStrategyContext | undefined,
     orderType: OrderType,
   ): Promise<boolean> {
-    const avgPrice = this.asFiniteNumber(ctx?.position?.avgPrice, signal.price, ctx?.price?.currentPrice, 0);
-    const currentPrice = this.asFiniteNumber(ctx?.price?.currentPrice, signal.price, avgPrice, 0);
+    signal = this.normalizeApprovalSignal(signal);
+    const avgPrice = this.asFiniteNumber(
+      ctx?.position?.avgPrice,
+      signal.price,
+      ctx?.price?.currentPrice,
+      0,
+    );
+    const currentPrice = this.asFiniteNumber(
+      ctx?.price?.currentPrice,
+      signal.price,
+      avgPrice,
+      0,
+    );
     const expectedPnlRate = avgPrice > 0 ? (currentPrice - avgPrice) / avgPrice : 0;
     const expectedPnl = (currentPrice - avgPrice) * signal.quantity;
     const lossRate = -expectedPnlRate;
-    const reminderMinutes = this.getSellApprovalReminderMinutes(ctx);
     const stockName = ctx?.watchStock?.stockName || signal.stockCode;
     const effectiveStrategyName = strategyName || ctx?.watchStock?.strategyName || 'unknown';
+    const requestedAt = new Date();
 
-    let existingApproval = await this.prisma.stopLossApproval.findFirst({
-      where: {
-        market: signal.market as Market,
-        exchangeCode: signal.exchangeCode,
-        stockCode: signal.stockCode,
-        status: ApprovalStatus.PENDING,
-      },
-      orderBy: { requestedAt: 'desc' },
-    });
-    const hasExistingPendingApproval = !!existingApproval;
-
-    let tradeRecordId = existingApproval?.tradeRecordId;
-    if (existingApproval) {
-      await this.prisma.tradeRecord.update({
-        where: { id: existingApproval.tradeRecordId },
-        data: {
-          orderType,
-          quantity: signal.quantity,
-          price: new Prisma.Decimal(this.asFiniteNumber(signal.price, 0)),
-          status: OrderStatus.AWAITING_APPROVAL,
-          strategyName: effectiveStrategyName,
-          reason: signal.reason,
-        },
-      });
-      await this.prisma.stopLossApproval.update({
-        where: { id: existingApproval.id },
-        data: {
-          signal: signal as unknown as Prisma.InputJsonValue,
-          currentPrice: new Prisma.Decimal(currentPrice),
-          avgPrice: new Prisma.Decimal(avgPrice),
-          quantity: signal.quantity,
-          lossRate: new Prisma.Decimal(lossRate),
-          timeoutMinutes: reminderMinutes,
-        },
-      });
-    } else {
-      const record = await this.prisma.tradeRecord.create({
-        data: {
-          market: signal.market as Market,
+    await this.expireDueApprovalPairs(signal, requestedAt);
+    const brokerContext = this.brokerContext.getCurrentContext();
+    let admitted;
+    try {
+      admitted = await this.orderGuard.admit(
+        {
+          market: signal.market,
           exchangeCode: signal.exchangeCode,
           stockCode: signal.stockCode,
-          stockName,
-          side: signal.side as Side,
-          orderType,
-          quantity: signal.quantity,
-          price: new Prisma.Decimal(this.asFiniteNumber(signal.price, 0)),
-          status: OrderStatus.AWAITING_APPROVAL,
-          strategyName: effectiveStrategyName,
-          reason: signal.reason,
+          side: signal.side,
         },
-      });
-      tradeRecordId = record.id;
+        async (tx) => {
+          const recentNotification = await tx.stopLossApproval.findFirst({
+            where: {
+              market: signal.market as Market,
+              exchangeCode: signal.exchangeCode,
+              stockCode: signal.stockCode,
+              notifiedAt: {
+                gt: new Date(
+                  requestedAt.getTime()
+                    - TradingSellApprovalService.SUCCESSFUL_NOTIFICATION_COOLDOWN_MINUTES
+                      * 60 * 1000,
+                ),
+              },
+            },
+            orderBy: { notifiedAt: 'desc' },
+            select: { id: true },
+          });
+          if (recentNotification) {
+            return {
+              approval: undefined,
+              tradeRecordId: undefined,
+              coolingDown: true,
+            };
+          }
 
-      const approval = await this.prisma.stopLossApproval.create({
-        data: {
-          tradeRecordId,
-          market: signal.market as Market,
-          exchangeCode: signal.exchangeCode,
-          stockCode: signal.stockCode,
-          stockName,
-          strategyName: effectiveStrategyName,
-          signal: signal as unknown as Prisma.InputJsonValue,
-          currentPrice: new Prisma.Decimal(currentPrice),
-          avgPrice: new Prisma.Decimal(avgPrice),
-          quantity: signal.quantity,
-          lossRate: new Prisma.Decimal(lossRate),
-          status: ApprovalStatus.PENDING,
-          timeoutMinutes: reminderMinutes,
+          const record = await tx.tradeRecord.create({
+            data: {
+              market: signal.market as Market,
+              exchangeCode: signal.exchangeCode,
+              stockCode: signal.stockCode,
+              stockName,
+              side: signal.side as Side,
+              orderType,
+              quantity: signal.quantity,
+              price: new Prisma.Decimal(this.asFiniteNumber(signal.price, 0)),
+              status: OrderStatus.AWAITING_APPROVAL,
+              strategyName: effectiveStrategyName,
+              reason: signal.reason,
+              brokerEnvironment: brokerContext.environment,
+              brokerAccountHash: brokerContext.accountHash,
+            },
+          });
+          const approval = await tx.stopLossApproval.create({
+            data: {
+              tradeRecordId: record.id,
+              market: signal.market as Market,
+              exchangeCode: signal.exchangeCode,
+              stockCode: signal.stockCode,
+              stockName,
+              strategyName: effectiveStrategyName,
+              signal: signal as unknown as Prisma.InputJsonValue,
+              currentPrice: new Prisma.Decimal(currentPrice),
+              avgPrice: new Prisma.Decimal(avgPrice),
+              quantity: signal.quantity,
+              lossRate: new Prisma.Decimal(lossRate),
+              status: ApprovalStatus.PENDING,
+              requestedAt,
+              expiresAt: new Date(
+                requestedAt.getTime()
+                  + TradingSellApprovalService.PROVISIONAL_APPROVAL_MINUTES * 60 * 1000,
+              ),
+              timeoutMinutes: TradingSellApprovalService.APPROVAL_VALIDITY_MINUTES,
+            },
+          });
+          return { approval, tradeRecordId: record.id, coolingDown: false };
         },
-      });
-      existingApproval = approval;
+      );
+    } catch (error) {
+      if (!this.isUniqueConstraintError(error)) throw error;
+      const pendingWinnerExists = await this.reloadPendingApproval(signal);
+      if (!pendingWinnerExists) throw error;
+      return false;
     }
 
-    const shouldSendSlackApproval =
-      this.slackService?.isEnabled()
-      && (!hasExistingPendingApproval || await this.shouldSendSellApprovalNotification(ctx, reminderMinutes));
+    if (!admitted) {
+      await this.reloadPendingApproval(signal);
+      return false;
+    }
+    if (admitted.coolingDown || !admitted.approval || !admitted.tradeRecordId) return false;
+
+    const existingApproval = admitted.approval;
+    const tradeRecordId = admitted.tradeRecordId;
     let slackApprovalSent = false;
 
-    if (shouldSendSlackApproval && tradeRecordId) {
-      const slackResult = await this.slackService!.sendStopLossApproval({
-        approvalId: existingApproval.id,
-        tradeRecordId,
-        stockCode: signal.stockCode,
-        stockName,
-        exchangeCode: signal.exchangeCode,
-        market: signal.market,
-        strategyName: effectiveStrategyName,
-        quantity: signal.quantity,
-        currentPrice,
-        avgPrice,
-        lossRate,
-        expectedPnl,
-        expectedPnlRate,
-        approvalReason: signal.reason,
-        approvalType: this.resolveSellApprovalType(signal, strategyName, ctx),
-        timeoutMinutes: reminderMinutes,
-      });
+    if (this.slackService?.isEnabled()) {
+      let slackResult: { ts: string; channel: string } | null = null;
+      let deliveryReceivedAt: Date | null = null;
+      try {
+        slackResult = await this.slackService.sendStopLossApproval({
+          approvalId: existingApproval.id,
+          tradeRecordId,
+          stockCode: signal.stockCode,
+          stockName,
+          exchangeCode: signal.exchangeCode,
+          market: signal.market,
+          strategyName: effectiveStrategyName,
+          quantity: signal.quantity,
+          currentPrice,
+          avgPrice,
+          lossRate,
+          expectedPnl,
+          expectedPnlRate,
+          approvalReason: signal.reason,
+          approvalType: this.resolveSellApprovalType(signal, strategyName, ctx),
+          validityMinutes: TradingSellApprovalService.APPROVAL_VALIDITY_MINUTES,
+          cooldownMinutes: TradingSellApprovalService.SUCCESSFUL_NOTIFICATION_COOLDOWN_MINUTES,
+        });
+        deliveryReceivedAt = new Date();
+      } catch (error) {
+        this.logger.warn(
+          `[${signal.stockCode}] Sell approval Slack delivery failed: ${this.errorMessage(error)}`,
+        );
+      }
 
-      if (slackResult) {
-        slackApprovalSent = true;
-        await this.prisma.stopLossApproval.update({
-          where: { id: existingApproval.id },
+      const delivery = deliveryReceivedAt
+        ? this.parseSlackDelivery(slackResult, requestedAt, deliveryReceivedAt)
+        : null;
+      if (delivery) {
+        const finalized = await this.prisma.stopLossApproval.updateMany({
+          where: {
+            id: existingApproval.id,
+            tradeRecordId,
+            status: ApprovalStatus.PENDING,
+            expiresAt: { gt: new Date() },
+          },
           data: {
-            slackMessageTs: slackResult.ts,
-            slackChannel: slackResult.channel,
+            notifiedAt: delivery.notifiedAt,
+            expiresAt: new Date(
+              delivery.notifiedAt.getTime()
+                + TradingSellApprovalService.APPROVAL_VALIDITY_MINUTES * 60 * 1000,
+            ),
+            slackMessageTs: delivery.ts,
+            slackChannel: delivery.channel,
+            timeoutMinutes: TradingSellApprovalService.APPROVAL_VALIDITY_MINUTES,
           },
         });
+        slackApprovalSent = finalized.count === 1;
       }
+    }
+
+    if (!slackApprovalSent) {
+      await this.expireApprovalPair(existingApproval.id, tradeRecordId);
     }
 
     await this.logWatchStockExecution(
       ctx,
       WatchStockExecutionEventType.SKIPPED,
-      slackApprovalSent ? '매도 승인 Slack 전송: 관리자 승인 대기' : '매도 승인 대기 유지: 주문 미제출',
+      slackApprovalSent
+        ? '매도 승인 Slack 전송: 관리자 승인 대기'
+        : '매도 승인 전달 실패: 승인 EXPIRED / 주문 CANCELLED',
       {
         side: signal.side,
         quantity: signal.quantity,
@@ -177,12 +255,21 @@ export class TradingSellApprovalService {
         expectedPnl,
         expectedPnlRate,
         slackApprovalSent,
-        reminderMinutes,
+        validityMinutes: TradingSellApprovalService.APPROVAL_VALIDITY_MINUTES,
+        cooldownMinutes: TradingSellApprovalService.SUCCESSFUL_NOTIFICATION_COOLDOWN_MINUTES,
       },
       tradeRecordId,
     );
 
-    this.logger.log(`Sell approval registered for ${signal.stockCode}; order not submitted`);
+    if (slackApprovalSent) {
+      this.logger.log(
+        `[${signal.stockCode}] Sell approval delivered; awaiting administrator decision`,
+      );
+    } else {
+      this.logger.warn(
+        `[${signal.stockCode}] Sell approval delivery failed: approval EXPIRED, trade CANCELLED`,
+      );
+    }
     return false;
   }
 
@@ -239,15 +326,9 @@ export class TradingSellApprovalService {
     }
 
     const reason = signal.reason || '';
-    const lowerReason = reason.toLowerCase();
-    if (lowerReason.includes('stop loss')) {
-      return true;
-    }
-    if (/손절|리스크\s*(전량)?청산|mdd\s*(전량)?청산|당일청산|이월청산|과열청산|트레일링/i.test(reason)) {
-      return true;
-    }
-
-    return !this.isTakeProfitReason(reason);
+    return TradingSellApprovalService.PROTECTIVE_SELL_REASON_PATTERNS.some((pattern) =>
+      pattern.test(reason),
+    );
   }
 
   private isStopLossSignal(signal: TradingSignal): boolean {
@@ -337,35 +418,124 @@ export class TradingSellApprovalService {
     return 0;
   }
 
-  private getSellApprovalReminderMinutes(ctx?: StockStrategyContext): number {
-    const params = ctx?.watchStock?.strategyParams || {};
-    const configured = Number(
-      params.sellApprovalReminderMinutes
-      ?? params.stopLossApprovalReminderMinutes
-      ?? params.stopLossApproval?.reminderMinutes,
-    );
-    return Number.isFinite(configured) && configured > 0
-      ? configured
-      : TradingSellApprovalService.DEFAULT_SELL_APPROVAL_REMINDER_MINUTES;
+  private parseSlackDelivery(
+    result: { ts: string; channel: string } | null,
+    requestedAt: Date,
+    deliveryReceivedAt: Date,
+  ): { ts: string; channel: string; notifiedAt: Date } | null {
+    if (typeof result?.ts !== 'string' || typeof result.channel !== 'string') return null;
+
+    const ts = result.ts.trim();
+    const channel = result.channel.trim();
+    if (!ts || !channel || !/^\d+(?:\.\d+)?$/.test(ts)) return null;
+
+    const epochSeconds = Number(ts);
+    if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) return null;
+
+    const notifiedAt = new Date(epochSeconds * 1000);
+    if (Number.isNaN(notifiedAt.getTime())) return null;
+    if (notifiedAt < requestedAt || notifiedAt > deliveryReceivedAt) return null;
+    return { ts, channel, notifiedAt };
   }
 
-  private async shouldSendSellApprovalNotification(
-    ctx: StockStrategyContext | undefined,
-    reminderMinutes: number,
-  ): Promise<boolean> {
-    if (!ctx?.watchStock?.id) return true;
+  private normalizeApprovalSignal(signal: TradingSignal): TradingSignal {
+    return {
+      ...signal,
+      exchangeCode: signal.market === 'DOMESTIC'
+        ? 'KRX'
+        : signal.exchangeCode.trim().toUpperCase(),
+      stockCode: signal.stockCode.trim().toUpperCase(),
+    };
+  }
 
-    const since = new Date(Date.now() - reminderMinutes * 60 * 1000);
-    const recentNotification = await this.prisma.watchStockExecutionLog.findFirst({
-      where: {
-        watchStockId: ctx.watchStock.id,
-        eventType: WatchStockExecutionEventType.SKIPPED,
-        message: { contains: '매도 승인 Slack 전송' },
-        createdAt: { gte: since },
-      },
+  private async expireApprovalPair(
+    approvalId: string,
+    tradeRecordId: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const expired = await tx.stopLossApproval.updateMany({
+        where: {
+          id: approvalId,
+          tradeRecordId,
+          status: ApprovalStatus.PENDING,
+        },
+        data: { status: ApprovalStatus.EXPIRED },
+      });
+      if (expired.count === 0) return;
+
+      const cancelled = await tx.tradeRecord.updateMany({
+        where: {
+          id: tradeRecordId,
+          status: OrderStatus.AWAITING_APPROVAL,
+        },
+        data: { status: OrderStatus.CANCELLED },
+      });
+      if (cancelled.count !== 1) {
+        throw new Error('Failed to cancel undelivered approval trade');
+      }
     });
+  }
 
-    return !recentNotification;
+  private async expireDueApprovalPairs(
+    signal: TradingSignal,
+    now: Date,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const dueApprovals = await tx.stopLossApproval.findMany({
+        where: {
+          market: signal.market as Market,
+          exchangeCode: signal.exchangeCode,
+          stockCode: signal.stockCode,
+          status: ApprovalStatus.PENDING,
+          expiresAt: { lte: now },
+        },
+        select: { id: true, tradeRecordId: true },
+      });
+
+      for (const approval of dueApprovals) {
+        const expired = await tx.stopLossApproval.updateMany({
+          where: {
+            id: approval.id,
+            status: ApprovalStatus.PENDING,
+            expiresAt: { lte: now },
+          },
+          data: { status: ApprovalStatus.EXPIRED },
+        });
+        if (expired.count === 0) continue;
+
+        const cancelled = await tx.tradeRecord.updateMany({
+          where: {
+            id: approval.tradeRecordId,
+            status: OrderStatus.AWAITING_APPROVAL,
+          },
+          data: { status: OrderStatus.CANCELLED },
+        });
+        if (cancelled.count !== 1) {
+          throw new Error('Failed to cancel expired approval trade');
+        }
+      }
+    });
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private isUniqueConstraintError(error: unknown): boolean {
+    return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002';
+  }
+
+  private async reloadPendingApproval(signal: TradingSignal): Promise<boolean> {
+    const pendingApproval = await this.prisma.stopLossApproval.findFirst({
+      where: {
+        market: signal.market as Market,
+        exchangeCode: signal.exchangeCode,
+        stockCode: signal.stockCode,
+        status: ApprovalStatus.PENDING,
+      },
+      orderBy: { requestedAt: 'desc' },
+    });
+    return pendingApproval !== null;
   }
 
   private async logWatchStockExecution(
@@ -377,19 +547,25 @@ export class TradingSellApprovalService {
   ): Promise<void> {
     if (!ctx?.watchStock?.id) return;
 
-    await this.prisma.watchStockExecutionLog.create({
-      data: {
-        watchStockId: ctx.watchStock.id,
-        tradeRecordId,
-        market: ctx.watchStock.market as Market,
-        exchangeCode: ctx.watchStock.exchangeCode,
-        stockCode: ctx.watchStock.stockCode,
-        stockName: ctx.watchStock.stockName,
-        strategyName: ctx.watchStock.strategyName,
-        eventType,
-        message,
-        details,
-      },
-    });
+    try {
+      await this.prisma.watchStockExecutionLog.create({
+        data: {
+          watchStockId: ctx.watchStock.id,
+          tradeRecordId,
+          market: ctx.watchStock.market as Market,
+          exchangeCode: ctx.watchStock.exchangeCode,
+          stockCode: ctx.watchStock.stockCode,
+          stockName: ctx.watchStock.stockName,
+          strategyName: ctx.watchStock.strategyName,
+          eventType,
+          message,
+          details,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${ctx.watchStock.stockCode}] Sell approval execution log failed: ${this.errorMessage(error)}`,
+      );
+    }
   }
 }

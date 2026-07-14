@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { App, LogLevel } from '@slack/bolt';
 import { KnownBlock } from '@slack/types';
 import { EXCHANGE_CURRENCY } from '../kis/types/kis-config.types';
+import { BrokerOrderPersistenceWarning } from './types/broker-order-persistence-warning.type';
+import { SellApprovalMessageStatus } from './types/sell-approval-message-status.type';
 import {
   PositionInfo,
   TradeAlertContext,
@@ -179,6 +181,16 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     return this.app;
   }
 
+  /**
+   * Socket Mode 연결 여부와 무관하게 설정된 Bolt Web API client를 반환한다.
+   * 시작 복구 알림처럼 소켓 연결 전에 보내야 하는 best-effort 메시지에만 사용한다.
+   */
+  getConfiguredApp(): App | null {
+    if (!this.isConfigured()) return null;
+    this.initializeApp();
+    return this.app;
+  }
+
   isEnabled(): boolean {
     return this.enabled && this.connected && this.app !== null;
   }
@@ -214,6 +226,38 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       this.logger.error(`Failed to send trade alert: ${e.message}`);
       this.handleSendError(e);
+    }
+  }
+
+  async sendBrokerOrderPersistenceWarning(
+    warning: BrokerOrderPersistenceWarning,
+  ): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const lines = [
+        `*시장:* ${warning.market}`,
+        `*종목:* ${warning.stockCode}`,
+        `*TradeRecord:* ${warning.tradeRecordId}`,
+        `*브로커 주문번호:* ${warning.orderNo}`,
+        '*조치:* KIS 주문 내역과 로컬 상태를 확인하세요. 주문을 다시 제출하지 마세요.',
+      ].join('\n');
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:warning: *브로커 주문 접수 후 로컬 저장 실패*\n${lines}`,
+            },
+          },
+        ],
+        text: `브로커 주문 접수 후 로컬 저장 실패 | ${warning.market}:${warning.stockCode}`,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to send broker order persistence warning: ${error.message}`);
+      this.handleSendError(error);
     }
   }
 
@@ -596,7 +640,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           elements: [
             {
               type: 'mrkdwn',
-              text: `:clock3: 미응답 시 주문은 실행되지 않으며 조건이 유지되면 약 ${req.timeoutMinutes}분마다 재알림됩니다.`,
+              text: `:clock3: 승인 버튼은 전송 시점부터 ${req.validityMinutes}분간 유효합니다. 미응답 시 주문은 실행되지 않으며, 성공한 알림 후 ${req.cooldownMinutes}분이 지나야 새 승인 요청을 보냅니다.`,
             },
           ],
         },
@@ -685,12 +729,19 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     channel: string,
     ts: string,
     stockCode: string,
-    status: 'APPROVED' | 'REJECTED' | 'EXPIRED',
+    status: SellApprovalMessageStatus,
   ): Promise<void> {
     if (!this.app || !this.connected) return;
 
-    const emoji = status === 'APPROVED' ? ':white_check_mark:' : status === 'REJECTED' ? ':no_entry_sign:' : ':hourglass:';
-    const label = status === 'APPROVED' ? '승인됨 - 매도 실행' : status === 'REJECTED' ? '거절됨 - 스킵' : '미응답 - 주문 미실행';
+    const presentation: Record<SellApprovalMessageStatus, { emoji: string; label: string }> = {
+      APPROVED_ACCEPTED: { emoji: ':white_check_mark:', label: '승인됨 - 주문 접수' },
+      APPROVED_NOT_SUBMITTED: { emoji: ':warning:', label: '승인됨 - 주문 미실행' },
+      APPROVED_REJECTED: { emoji: ':no_entry_sign:', label: '승인됨 - KIS 거절' },
+      APPROVED_UNKNOWN: { emoji: ':warning:', label: '승인됨 - 결과 확인 필요' },
+      REJECTED: { emoji: ':no_entry_sign:', label: '거절됨 - 스킵' },
+      EXPIRED: { emoji: ':hourglass:', label: '미응답 - 주문 미실행' },
+    };
+    const { emoji, label } = presentation[status];
 
     try {
       const blocks: KnownBlock[] = [

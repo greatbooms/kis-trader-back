@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KisBaseService } from './kis-base.service';
+import { KisOrderHistoryService } from './kis-order-history.service';
+import {
+  classifyKisMutationFailure,
+  classifyKisOrderResponse,
+} from './kis-mutation.error';
 import {
   DomesticPriceOutput,
   DomesticOrderOutput,
   DomesticBalanceItem,
   StockPriceResult,
-  OrderResult,
   BalanceItem,
   DailyPrice,
   InterestRateItem,
@@ -14,6 +18,7 @@ import {
   UnfilledOrder,
   BrokerOrderStatus,
 } from './types/kis-api.types';
+import { OrderResult } from './types/order-result.type';
 
 @Injectable()
 export class KisDomesticService {
@@ -25,6 +30,7 @@ export class KisDomesticService {
   constructor(
     private kisBase: KisBaseService,
     private configService: ConfigService,
+    private orderHistory: KisOrderHistoryService,
   ) {
     this.accountNo = this.configService.get<string>('kis.accountNo')!;
     this.prodCode = this.configService.get<string>('kis.prodCode')!;
@@ -140,19 +146,20 @@ export class KisDomesticService {
       ORD_UNPR: isMarket && !orderDivision ? '0' : String(price || 0),
     };
 
+    const callStartedAt = new Date();
     try {
       const res = await this.kisBase.post<DomesticOrderOutput>(
         '/uapi/domestic-stock/v1/trading/order-cash',
         trId,
         body,
       );
-      return {
-        success: true,
-        orderNo: res.output?.ODNO,
-        message: `${side} order placed: ${stockCode} x ${qty} (div:${ordDvsn})`,
-      };
+      return classifyKisOrderResponse(
+        res,
+        callStartedAt,
+        `${side} order placed: ${stockCode} x ${qty} (div:${ordDvsn})`,
+      );
     } catch (e) {
-      return { success: false, message: e.message };
+      return classifyKisMutationFailure(e);
     }
   }
 
@@ -337,87 +344,19 @@ export class KisDomesticService {
 
   /** 국내 미체결 주문 조회 */
   async getUnfilledOrders(): Promise<UnfilledOrder[]> {
-    const trId = this.isPaper ? 'VTTC0084R' : 'TTTC0084R';
-
-    const res = await this.kisBase.get(
-      '/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl',
-      trId,
-      {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        CTX_AREA_FK100: '',
-        CTX_AREA_NK100: '',
-        INQR_DVSN_1: '0',
-        INQR_DVSN_2: '0',
-      },
-    );
-
-    const output = res.output as any[];
-    if (!output) return [];
-
-    return output
-      .filter((item: any) => parseInt(item.psbl_qty, 10) > 0)
-      .map((item: any) => ({
-        orderNo: item.odno,
-        stockCode: item.pdno,
-        side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
-        quantity: parseInt(item.psbl_qty, 10) || 0,
-        price: parseFloat(item.ord_unpr) || 0,
-      }));
+    return this.orderHistory.getUnfilledOrders('DOMESTIC');
   }
 
   /** 국내 주문/체결 조회 */
   async getOrderExecutions(startDate: string, endDate: string): Promise<BrokerOrderStatus[]> {
-    const trId = this.isPaper ? 'VTTC0081R' : 'TTTC0081R';
-
-    const res = await this.kisBase.get(
-      '/uapi/domestic-stock/v1/trading/inquire-daily-ccld',
-      trId,
-      {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        INQR_STRT_DT: startDate,
-        INQR_END_DT: endDate,
-        SLL_BUY_DVSN_CD: '00',
-        INQR_DVSN: '00',
-        PDNO: '',
-        CCLD_DVSN: '00',
-        ORD_GNO_BRNO: '',
-        ODNO: '',
-        INQR_DVSN_3: '00',
-        INQR_DVSN_1: '',
-        CTX_AREA_FK100: '',
-        CTX_AREA_NK100: '',
-      },
-    );
-
-    const output = (res.output1 as any[]) || [];
-    return output
-      .filter((item: any) => !!item.odno)
-      .map((item: any) => {
-        const orderQuantity = parseInt(item.ord_qty, 10) || 0;
-        const filledQuantity = parseInt(item.tot_ccld_qty, 10) || 0;
-
-        return {
-          orderNo: item.odno,
-          stockCode: item.pdno,
-          side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
-          orderQuantity,
-          filledQuantity,
-          remainingQuantity: Math.max(0, orderQuantity - filledQuantity),
-          orderPrice: item.ord_unpr ? parseFloat(item.ord_unpr) || 0 : undefined,
-          filledPrice: item.avg_prvs ? parseFloat(item.avg_prvs) || 0 : undefined,
-          exchangeCode: 'KRX',
-          orderDate: item.ord_dt,
-          orderTime: item.ord_tmd,
-        };
-      });
+    return this.orderHistory.getOrderExecutions('DOMESTIC', startDate, endDate);
   }
 
   /** 국내 주문 취소 */
   async cancelOrder(orderNo: string, stockCode: string, qty: number): Promise<OrderResult> {
     const trId = this.isPaper ? 'VTTC0013U' : 'TTTC0013U';
 
+    const callStartedAt = new Date();
     try {
       const res = await this.kisBase.post<DomesticOrderOutput>(
         '/uapi/domestic-stock/v1/trading/order-rvsecncl',
@@ -434,13 +373,13 @@ export class KisDomesticService {
           QTY_ALL_ORD_YN: 'Y',
         },
       );
-      return {
-        success: true,
-        orderNo: res.output?.ODNO,
-        message: `Cancel order placed: ${stockCode} #${orderNo}`,
-      };
+      return classifyKisOrderResponse(
+        res,
+        callStartedAt,
+        `Cancel order placed: ${stockCode} #${orderNo}`,
+      );
     } catch (e) {
-      return { success: false, message: e.message };
+      return classifyKisMutationFailure(e);
     }
   }
 

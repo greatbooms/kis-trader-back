@@ -11,11 +11,11 @@ import {
   MomentumBreakoutStrategyParams,
   GridMeanReversionStrategyParams,
 } from './types';
-import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Market, OrderType, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { MarketAnalysisService } from './market-analysis.service';
-import { TradingPositionSyncService } from './trading-position-sync.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
+import { TradingOrderExecutionService } from './trading-order-execution.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
 
 @Injectable()
@@ -29,8 +29,8 @@ export class TradingService {
     private marketAnalysis: MarketAnalysisService,
     private prisma: PrismaService,
     private configService: ConfigService,
-    private positionSyncService: TradingPositionSyncService,
     private sellApprovalService: TradingSellApprovalService,
+    private orderExecutionService: TradingOrderExecutionService,
     @Optional() private slackService?: SlackService,
   ) {
     this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
@@ -519,115 +519,14 @@ export class TradingService {
     return Number.isFinite(configured) && configured >= 0 ? configured : 0;
   }
 
-  /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
+  /**
+   * @deprecated Actorless approval execution is blocked. Use
+   * TradingSellApprovalWorkflowService with an authenticated actor.
+   */
   async executeApprovedStopLoss(approvalId: string): Promise<void> {
-    if (!this.tradingEnabled) {
-      this.logger.warn(`Skipping approved sell execution because TRADING_ENABLED=false (${approvalId})`);
-      return;
-    }
-
-    const approval = await this.prisma.stopLossApproval.findUnique({
-      where: { id: approvalId },
-      include: { tradeRecord: true },
-    });
-
-    if (!approval || approval.status !== ApprovalStatus.APPROVED) {
-      this.logger.warn(`Sell approval ${approvalId} not found or not approved`);
-      return;
-    }
-
-    const record = approval.tradeRecord;
-    const signal = approval.signal as any as TradingSignal;
-
-    try {
-      const executableSignal = await this.prepareApprovedSellSignal(record, signal);
-      if (!executableSignal) return;
-
-      await this.sellApprovalService.logApprovedOrderSubmission(record, executableSignal);
-
-      let result;
-      if (executableSignal.market === 'DOMESTIC') {
-        result = await this.kisDomestic.orderSell(
-          executableSignal.stockCode,
-          executableSignal.quantity,
-          executableSignal.price,
-          executableSignal.orderDivision,
-        );
-      } else {
-        result = await this.kisOverseas.orderSell(
-          executableSignal.exchangeCode!,
-          executableSignal.stockCode,
-          executableSignal.quantity,
-          executableSignal.price!,
-          executableSignal.orderDivision,
-        );
-      }
-
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: {
-          status: result.success ? OrderStatus.PENDING : OrderStatus.FAILED,
-          orderNo: result.orderNo,
-          reason: result.message,
-        },
-      });
-
-      if (result.success) {
-        this.logger.log(`Approved sell order submitted: SELL ${executableSignal.stockCode} x ${executableSignal.quantity}`);
-      } else {
-        this.logger.error(`Approved sell order failed: ${result.message}`);
-      }
-    } catch (e) {
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: { status: OrderStatus.FAILED, reason: e.message },
-      });
-      this.logger.error(`Approved sell execution exception: ${e.message}`);
-    }
-  }
-
-  private async prepareApprovedSellSignal(
-    record: {
-      id: string;
-      market: Market;
-      exchangeCode: string;
-      stockCode: string;
-    },
-    signal: TradingSignal,
-  ): Promise<TradingSignal | null> {
-    await this.refreshMarketPositionsBeforeOrder(record.market as 'DOMESTIC' | 'OVERSEAS');
-
-    const latestPosition = await this.prisma.position.findFirst({
-      where: {
-        market: record.market,
-        exchangeCode: record.exchangeCode,
-        stockCode: record.stockCode,
-      },
-    });
-    const heldQuantity = latestPosition?.quantity || 0;
-    if (heldQuantity <= 0) {
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: {
-          status: OrderStatus.CANCELLED,
-          reason: '승인 매도 스킵: 보유 수량 없음',
-        },
-      });
-      this.logger.warn(`Skipping approved sell for ${record.stockCode}: no current holdings`);
-      return null;
-    }
-
-    const quantity = Math.min(signal.quantity, heldQuantity);
-    if (quantity < signal.quantity) {
-      this.logger.warn(
-        `Clamping approved sell quantity for ${record.stockCode}: requested=${signal.quantity}, held=${heldQuantity}`,
-      );
-    }
-
-    return {
-      ...signal,
-      quantity,
-    };
+    const message = `[APPROVAL ${approvalId}] Deprecated actorless approved-sell execution is blocked; use TradingSellApprovalWorkflowService`;
+    this.logger.warn(message);
+    throw new Error(message);
   }
 
   /** 주문 실행 */
@@ -637,8 +536,6 @@ export class TradingService {
     ctx?: StockStrategyContext,
     executionDetails?: Record<string, any>,
   ): Promise<boolean> {
-    await this.refreshMarketPositionsBeforeOrder(signal.market as 'DOMESTIC' | 'OVERSEAS');
-
     // OrderType 결정
     let orderType: OrderType;
     if (signal.orderDivision === '34') {
@@ -653,123 +550,12 @@ export class TradingService {
       return this.sellApprovalService.requestApproval(signal, strategyName, ctx, orderType);
     }
 
-    const record = await this.prisma.tradeRecord.create({
-      data: {
-        market: signal.market as Market,
-        exchangeCode: signal.exchangeCode,
-        stockCode: signal.stockCode,
-        stockName: signal.stockCode,
-        side: signal.side as Side,
-        orderType,
-        quantity: signal.quantity,
-        price: new Prisma.Decimal(signal.price || 0),
-        status: OrderStatus.PENDING,
-        strategyName: strategyName || 'unknown',
-        reason: signal.reason,
-      },
-    });
-
-    await this.logWatchStockExecution(
+    return this.orderExecutionService.execute(
+      signal,
+      strategyName || 'unknown',
       ctx,
-      WatchStockExecutionEventType.ORDER_SUBMITTED,
-      `주문 제출: ${signal.side} ${signal.quantity}주`,
-      {
-        side: signal.side,
-        quantity: signal.quantity,
-        price: signal.price,
-        orderDivision: signal.orderDivision,
-        reason: signal.reason,
-        orderType,
-        metadata: signal.metadata,
-        ...this.buildExecutionDiagnostics(ctx, executionDetails),
-      },
-      record.id,
+      executionDetails,
     );
-
-    if (strategyName === 'infinite-buy' && signal.metadata?.phase === 'take-profit-2' && ctx?.watchStock?.id) {
-      await this.markInfiniteBuySecondTargetAttempted(ctx.watchStock.id);
-    }
-
-    try {
-      let result;
-      if (signal.market === 'DOMESTIC') {
-        result =
-          signal.side === 'BUY'
-            ? await this.kisDomestic.orderBuy(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
-            : await this.kisDomestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
-      } else {
-        result =
-          signal.side === 'BUY'
-            ? await this.kisOverseas.orderBuy(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision)
-            : await this.kisOverseas.orderSell(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision);
-      }
-
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: {
-          status: result.success ? OrderStatus.PENDING : OrderStatus.FAILED,
-          orderNo: result.orderNo,
-          reason: result.message,
-        },
-      });
-
-      await this.logWatchStockExecution(
-        ctx,
-        result.success ? WatchStockExecutionEventType.ORDER_SUBMITTED : WatchStockExecutionEventType.ORDER_FAILED,
-        result.success
-          ? `주문 접수: ${signal.side} ${signal.quantity}주`
-          : `주문 실패: ${result.message ?? '실패'}`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          orderDivision: signal.orderDivision,
-          orderNo: result.orderNo,
-          reason: signal.reason,
-          brokerMessage: result.message,
-        },
-        record.id,
-      );
-
-      if (result.success) {
-        this.logger.log(`Order submitted: ${signal.side} ${signal.stockCode} x ${signal.quantity}`);
-      } else {
-        this.logger.error(`Order failed: ${result.message}`);
-      }
-      return result.success;
-    } catch (e) {
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: { status: OrderStatus.FAILED, reason: e.message },
-      });
-      await this.logWatchStockExecution(
-        ctx,
-        WatchStockExecutionEventType.ORDER_FAILED,
-        `주문 예외: ${e.message}`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          orderDivision: signal.orderDivision,
-          reason: signal.reason,
-          error: e.message,
-        },
-        record.id,
-      );
-      this.logger.error(`Order exception: ${e.message}`);
-      return false;
-    }
-  }
-
-  private async refreshMarketPositionsBeforeOrder(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    try {
-      const balance = market === 'DOMESTIC'
-        ? await this.kisDomestic.getBalance()
-        : await this.kisOverseas.getBalance();
-      await this.positionSyncService.syncPositions(market, balance);
-    } catch (e) {
-      this.logger.warn(`Failed to refresh ${market} positions before order: ${e.message}`);
-    }
   }
 
   // ── Quota 이월 (분할매수 전략) ──

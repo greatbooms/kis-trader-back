@@ -1,11 +1,22 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { Market, OrderStatus, Side, WatchStockExecutionEventType } from '@prisma/client';
+import {
+  ApprovalStatus,
+  BrokerOrderAction,
+  BrokerOrderActionChannel,
+  CancellationAttemptStatus,
+  Market,
+  OrderStatus,
+  Side,
+  TradeRecord,
+  WatchStockExecutionEventType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
 import type { TradeAlertContext } from '../notification/types/notification.types';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PositionQuantitySnapshot, TradingSignal } from './types';
 import { TradingService } from './trading.service';
+import { TradingBrokerContextService } from './trading-broker-context.service';
 
 @Injectable()
 export class TradingOrderReconciliationService {
@@ -14,6 +25,7 @@ export class TradingOrderReconciliationService {
   constructor(
     private prisma: PrismaService,
     private tradingService: TradingService,
+    private readonly brokerContext: TradingBrokerContextService,
     @Optional() private slackService?: SlackService,
   ) {}
 
@@ -23,11 +35,14 @@ export class TradingOrderReconciliationService {
     unfilledOrders: UnfilledOrder[],
     brokerOrders: BrokerOrderStatus[],
   ): Promise<void> {
+    const currentBrokerContext = this.brokerContext.getCurrentContext();
     const openRecords = await this.prisma.tradeRecord.findMany({
       where: {
         market: market as Market,
         status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
         orderNo: { not: null },
+        brokerEnvironment: currentBrokerContext.environment,
+        brokerAccountHash: currentBrokerContext.accountHash,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -42,8 +57,6 @@ export class TradingOrderReconciliationService {
       );
     }
 
-    const brokerOrderMap = this.groupBrokerOrdersByOrderNo(brokerOrders);
-    const unfilledOrderNos = new Set(unfilledOrders.map((order) => order.orderNo));
     const cancelGraceMs = 2 * 60 * 1000;
     const now = Date.now();
 
@@ -52,29 +65,59 @@ export class TradingOrderReconciliationService {
       const key = this.getPositionKey(record.market as 'DOMESTIC' | 'OVERSEAS', exchangeCode, record.stockCode);
       const currentPositionQty = currentPositionMap.get(key) || 0;
       const executedQty = record.executedQty || 0;
-      const brokerOrder = record.orderNo ? brokerOrderMap.get(record.orderNo) : undefined;
+      const brokerOrder = this.findMatchingBrokerOrder(record, brokerOrders, market);
+
+      if (
+        record.cancellationStatus === CancellationAttemptStatus.SUBMITTING
+        || record.cancellationStatus === CancellationAttemptStatus.UNKNOWN
+      ) {
+        continue;
+      }
+
+      if (record.cancellationStatus === CancellationAttemptStatus.ACCEPTED) {
+        const isStillOpen = unfilledOrders.some((order) =>
+          this.matchesOrderTuple(record, order, market),
+        );
+        await this.reconcileAcceptedCancellation(
+          record,
+          brokerOrder,
+          isStillOpen,
+          currentPositionQty,
+        );
+        continue;
+      }
 
       if (brokerOrder) {
         const totalExecutedQty = Math.min(record.quantity, brokerOrder.filledQuantity);
         const filledNowQty = Math.max(0, totalExecutedQty - executedQty);
         const nextStatus = this.getBrokerOrderStatus(record.quantity, totalExecutedQty, brokerOrder);
+        const isTerminalPartial = nextStatus === OrderStatus.PARTIAL
+          && brokerOrder.remainingQuantity <= 0;
         const nextExecutedPrice = brokerOrder.filledPrice ?? record.executedPrice ?? record.price;
         const nextReason = this.buildBrokerOrderReason(record.reason, brokerOrder, nextStatus);
 
         if (
           filledNowQty > 0
+          || isTerminalPartial
           || nextStatus !== record.status
           || Number(record.executedPrice ?? 0) !== Number(nextExecutedPrice ?? 0)
         ) {
-          await this.prisma.tradeRecord.update({
-            where: { id: record.id },
+          const changed = await this.prisma.tradeRecord.updateMany({
+            where: {
+              id: record.id,
+              status: record.status,
+              orderNo: record.orderNo,
+              cancellationStatus: record.cancellationStatus ?? null,
+            },
             data: {
               status: nextStatus,
+              ...(isTerminalPartial ? { orderNo: null } : {}),
               executedQty: totalExecutedQty,
               executedPrice: nextExecutedPrice,
               reason: nextReason,
             },
           });
+          if (changed.count === 0) continue;
 
           if (filledNowQty > 0) {
             const qtyBeforeFill = record.side === Side.BUY
@@ -92,7 +135,7 @@ export class TradingOrderReconciliationService {
         continue;
       }
 
-      if (record.orderNo && unfilledOrderNos.has(record.orderNo)) {
+      if (unfilledOrders.some((order) => this.matchesOrderTuple(record, order, market))) {
         continue;
       }
 
@@ -101,26 +144,38 @@ export class TradingOrderReconciliationService {
       }
 
       if (record.status === OrderStatus.PARTIAL) {
-        await this.prisma.tradeRecord.update({
-          where: { id: record.id },
+        const changed = await this.prisma.tradeRecord.updateMany({
+          where: {
+            id: record.id,
+            status: record.status,
+            orderNo: record.orderNo,
+            cancellationStatus: record.cancellationStatus ?? null,
+          },
           data: {
             orderNo: null,
             reason: record.reason ? `${record.reason} | 잔량 미체결 종료` : '잔량 미체결 종료',
           },
         });
+        if (changed.count === 0) continue;
         // PARTIAL의 잔량 취소는 이미 일부 체결됐으므로 전략 측 이월금 복구 불필요
         await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, executedQty);
         continue;
       }
 
       if (record.status === OrderStatus.PENDING) {
-        await this.prisma.tradeRecord.update({
-          where: { id: record.id },
+        const changed = await this.prisma.tradeRecord.updateMany({
+          where: {
+            id: record.id,
+            status: record.status,
+            orderNo: record.orderNo,
+            cancellationStatus: record.cancellationStatus ?? null,
+          },
           data: {
             status: OrderStatus.CANCELLED,
             reason: record.reason ? `${record.reason} | 미체결 종료` : '미체결 종료',
           },
         });
+        if (changed.count === 0) continue;
         // 체결 없이 취소 확정 — 전략에 실패 통지 (BUY 주문이었다면 이월금 복구)
         await this.applyReconciledStrategyFailure(record.id, OrderStatus.CANCELLED);
         await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, executedQty);
@@ -128,51 +183,97 @@ export class TradingOrderReconciliationService {
     }
   }
 
-  async markOpenOrderCancelled(
-    market: 'DOMESTIC' | 'OVERSEAS',
-    orderNo: string,
-    reason: string,
-  ): Promise<void> {
-    const records = await this.prisma.tradeRecord.findMany({
-      where: {
-        market: market as Market,
-        orderNo,
-        status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+  // ── Helpers ──
 
-    for (const record of records) {
-      const nextReason = record.reason ? `${record.reason} | ${reason}` : reason;
+  private async reconcileAcceptedCancellation(
+    record: TradeRecord,
+    brokerOrder: BrokerOrderStatus | undefined,
+    isStillOpen: boolean,
+    currentPositionQty: number,
+  ): Promise<boolean> {
+    if (!brokerOrder || isStillOpen || !record.orderNo) return false;
 
-      if (record.status === OrderStatus.PARTIAL) {
-        await this.prisma.tradeRecord.update({
-          where: { id: record.id },
-          data: {
-            orderNo: null,
-            reason: nextReason,
-          },
-        });
-        await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, record.executedQty || 0);
-        continue;
-      }
+    const previousExecutedQty = record.executedQty || 0;
+    const totalExecutedQty = Math.min(
+      record.quantity,
+      brokerOrder?.filledQuantity ?? previousExecutedQty,
+    );
+    const filledNowQty = Math.max(0, totalExecutedQty - previousExecutedQty);
+    const nextStatus = totalExecutedQty >= record.quantity
+      ? OrderStatus.FILLED
+      : totalExecutedQty > 0
+        ? OrderStatus.PARTIAL
+        : OrderStatus.CANCELLED;
+    const reasonSuffix = nextStatus === OrderStatus.FILLED
+      ? '취소 요청 중 전량 체결 확인'
+      : nextStatus === OrderStatus.PARTIAL
+        ? '잔량 미체결 종료'
+        : '미체결 종료';
+    const reason = record.reason ? `${record.reason} | ${reasonSuffix}` : reasonSuffix;
+    const cancellationMessage = nextStatus === OrderStatus.FILLED
+      ? '취소 접수 후 전량 체결 확인'
+      : nextStatus === OrderStatus.PARTIAL
+        ? '취소 접수 후 일부 체결 및 잔량 종료 확인'
+        : '취소 접수 후 미체결 종료 확인';
 
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
+    const resolved = await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.tradeRecord.updateMany({
+        where: {
+          id: record.id,
+          status: record.status,
+          cancellationStatus: CancellationAttemptStatus.ACCEPTED,
+          orderNo: record.orderNo,
+        },
         data: {
-          status: OrderStatus.CANCELLED,
-          reason: nextReason,
+          status: nextStatus,
+          ...(nextStatus === OrderStatus.PARTIAL ? { orderNo: null } : {}),
+          ...(brokerOrder
+            ? {
+              executedQty: totalExecutedQty,
+              executedPrice: brokerOrder.filledPrice ?? record.executedPrice ?? record.price,
+            }
+            : {}),
+          cancellationStatus: CancellationAttemptStatus.RESOLVED,
+          cancellationResolvedAt: new Date(),
+          cancellationResolvedBy: 'system:reconciliation',
+          cancellationMessage,
+          reason,
         },
       });
-      // 체결 이력 없이 취소 확정 — 전략에 실패 통지
-      if ((record.executedQty || 0) === 0) {
-        await this.applyReconciledStrategyFailure(record.id, OrderStatus.CANCELLED);
-      }
-      await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, record.executedQty || 0);
-    }
-  }
+      if (changed.count === 0) return false;
 
-  // ── Helpers ──
+      await tx.brokerOrderActionAuditLog.create({
+        data: {
+          tradeRecordId: record.id,
+          channel: BrokerOrderActionChannel.SYSTEM,
+          action: BrokerOrderAction.CANCELLATION_RECONCILED,
+          actor: 'system:reconciliation',
+          beforeStatus: record.status,
+          afterStatus: nextStatus,
+          exchangeCode: record.exchangeCode,
+          orderNo: record.orderNo,
+          details: {
+            executedQty: totalExecutedQty,
+            cancellationMessage,
+          },
+        },
+      });
+      return true;
+    });
+    if (!resolved) return true;
+
+    if (filledNowQty > 0) {
+      const qtyBeforeFill = record.side === Side.BUY
+        ? Math.max(0, currentPositionQty - filledNowQty)
+        : currentPositionQty + filledNowQty;
+      await this.applyReconciledStrategyFill(record.id, nextStatus, qtyBeforeFill, filledNowQty);
+    } else if (nextStatus === OrderStatus.CANCELLED) {
+      await this.applyReconciledStrategyFailure(record.id, nextStatus);
+    }
+    await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
+    await this.notifyTradeFill(record.id, nextStatus, filledNowQty);
+    return true;
+  }
 
   private getPositionKey(
     market: 'DOMESTIC' | 'OVERSEAS',
@@ -182,17 +283,19 @@ export class TradingOrderReconciliationService {
     return `${market}:${exchangeCode}:${stockCode}`;
   }
 
-  private groupBrokerOrdersByOrderNo(orders: BrokerOrderStatus[]): Map<string, BrokerOrderStatus> {
-    const grouped = new Map<string, BrokerOrderStatus>();
+  private findMatchingBrokerOrder(
+    record: TradeRecord,
+    orders: BrokerOrderStatus[],
+    market: 'DOMESTIC' | 'OVERSEAS',
+  ): BrokerOrderStatus | undefined {
+    const matches = orders.filter((order) => (
+      this.matchesOrderTuple(record, order, market)
+      && (!record.brokerOrderDate || order.orderDate === record.brokerOrderDate)
+    ));
 
-    for (const order of orders) {
-      const existing = grouped.get(order.orderNo);
-      if (!existing) {
-        grouped.set(order.orderNo, order);
-        continue;
-      }
-
-      grouped.set(order.orderNo, {
+    return matches.reduce<BrokerOrderStatus | undefined>((existing, order) => {
+      if (!existing) return order;
+      return {
         ...existing,
         filledQuantity: Math.max(existing.filledQuantity, order.filledQuantity),
         remainingQuantity: Math.min(existing.remainingQuantity, order.remainingQuantity),
@@ -200,10 +303,28 @@ export class TradingOrderReconciliationService {
         rejected: existing.rejected || order.rejected,
         rejectedReason: order.rejectedReason || existing.rejectedReason,
         orderTime: order.orderTime || existing.orderTime,
-      });
-    }
+      };
+    }, undefined);
+  }
 
-    return grouped;
+  private matchesOrderTuple(
+    record: TradeRecord,
+    order: Pick<BrokerOrderStatus | UnfilledOrder, 'orderNo' | 'exchangeCode' | 'stockCode' | 'side'>,
+    market: 'DOMESTIC' | 'OVERSEAS',
+  ): boolean {
+    return record.orderNo === order.orderNo
+      && this.normalizeExchangeCode(market, record.exchangeCode)
+        === this.normalizeExchangeCode(market, order.exchangeCode)
+      && record.stockCode.trim().toUpperCase() === order.stockCode.trim().toUpperCase()
+      && record.side === order.side;
+  }
+
+  private normalizeExchangeCode(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode?: string | null,
+  ): string {
+    const normalized = exchangeCode?.trim().toUpperCase() || '';
+    return market === 'DOMESTIC' ? normalized || 'KRX' : normalized;
   }
 
   private getBrokerOrderStatus(
@@ -213,7 +334,7 @@ export class TradingOrderReconciliationService {
   ): OrderStatus {
     if (brokerOrder.rejected) return OrderStatus.FAILED;
     if (executedQuantity <= 0) return OrderStatus.PENDING;
-    if (executedQuantity >= requestedQuantity || brokerOrder.remainingQuantity <= 0) {
+    if (executedQuantity >= requestedQuantity) {
       return OrderStatus.FILLED;
     }
     return OrderStatus.PARTIAL;
@@ -269,7 +390,17 @@ export class TradingOrderReconciliationService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (!executionLog) return undefined;
+    if (!executionLog) {
+      const approval = await this.prisma.stopLossApproval.findFirst({
+        where: {
+          tradeRecordId,
+          status: ApprovalStatus.APPROVED,
+        },
+        orderBy: { respondedAt: 'desc' },
+        select: { signal: true },
+      });
+      return this.normalizeStoredSignal(approval?.signal);
+    }
 
     const details = (executionLog.details as Record<string, any> | null) || {};
     if (!details.side || !details.quantity) return undefined;
@@ -284,6 +415,45 @@ export class TradingOrderReconciliationService {
       orderDivision: details.orderDivision as string | undefined,
       reason: details.reason || executionLog.message,
       metadata: details.metadata as Record<string, any> | undefined,
+    };
+  }
+
+  private normalizeStoredSignal(value: unknown): TradingSignal | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+    const signal = value as Record<string, unknown>;
+    if (
+      (signal.market !== 'DOMESTIC' && signal.market !== 'OVERSEAS')
+      || (signal.side !== 'BUY' && signal.side !== 'SELL')
+      || typeof signal.exchangeCode !== 'string'
+      || !signal.exchangeCode.trim()
+      || typeof signal.stockCode !== 'string'
+      || !signal.stockCode.trim()
+      || typeof signal.reason !== 'string'
+    ) {
+      return undefined;
+    }
+
+    const quantity = Number(signal.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return undefined;
+    const price = signal.price === undefined ? undefined : Number(signal.price);
+    if (price !== undefined && !Number.isFinite(price)) return undefined;
+
+    return {
+      market: signal.market,
+      exchangeCode: signal.exchangeCode,
+      stockCode: signal.stockCode,
+      side: signal.side,
+      quantity,
+      price,
+      orderDivision: typeof signal.orderDivision === 'string'
+        ? signal.orderDivision
+        : undefined,
+      reason: signal.reason,
+      metadata: signal.metadata && typeof signal.metadata === 'object'
+        && !Array.isArray(signal.metadata)
+        ? signal.metadata as Record<string, any>
+        : undefined,
     };
   }
 
@@ -516,6 +686,7 @@ export class TradingOrderReconciliationService {
         price: executedPrice,
       },
       result: {
+        outcome: 'ACCEPTED',
         success: true,
         orderNo: record.orderNo ?? undefined,
         message: status === OrderStatus.PARTIAL ? '부분 체결' : '체결 완료',

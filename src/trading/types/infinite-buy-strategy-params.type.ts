@@ -24,6 +24,8 @@ export interface InfiniteBuyStrategyParams {
   secondaryExitPlan?: InfiniteBuySecondaryExitPlan;
   buy2DipMode?: Buy2DipMode;
   targetTableOverride?: TargetTableRow[];
+  /** riskState 전량청산 시 종목별 손실률 필터. 기본 0.20(20%). */
+  mddLiquidateStockLossThreshold?: number;
   rsiPolicy?: RsiPolicy;
   /** 일일 투입 상한 (perCycleQuota의 배수). hard-stop 정책 후 누적 quota 일괄 투입 방지. 기본 3. */
   maxDailyQuotaMultiple?: number;

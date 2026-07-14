@@ -8,8 +8,8 @@ import { HolidayItem, UnfilledOrder } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP, MarketHours, getMarketHours } from '../kis/types/kis-config.types';
 import { PositionQuantitySnapshot } from './types';
 import { TradingPositionSyncService } from './trading-position-sync.service';
-import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { OrderSyncService } from './order-sync.service';
+import { TradingOrderCancellationService } from './trading-order-cancellation.service';
 
 /**
  * 장중 broker 상태 동기화 담당.
@@ -32,12 +32,12 @@ export class MarketStateSyncService {
 
   constructor(
     private positionSyncService: TradingPositionSyncService,
-    private orderReconciliationService: TradingOrderReconciliationService,
     private orderSyncService: OrderSyncService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private prisma: PrismaService,
     private configService: ConfigService,
+    private readonly orderCancellationService: TradingOrderCancellationService,
   ) {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
@@ -172,22 +172,12 @@ export class MarketStateSyncService {
         let cancelledCount = 0;
         for (const order of orders) {
           this.logger.log(`Cancelling overseas unfilled order: ${order.stockCode} #${order.orderNo}`);
-          const result = await this.kisOverseas.cancelOrder(
-            order.exchangeCode ?? '',
-            order.orderNo,
-            order.stockCode,
-            order.quantity,
-            order.price,
+          const accepted = await this.orderCancellationService.cancelUnfilledOrder(
+            'OVERSEAS',
+            order,
           );
-          if (result.success) {
+          if (accepted) {
             cancelledCount += 1;
-            await this.orderReconciliationService.markOpenOrderCancelled(
-              'OVERSEAS',
-              order.orderNo,
-              '장중 재실행 전 미체결 주문 취소',
-            );
-          } else {
-            this.logger.warn(`Failed to cancel overseas unfilled order ${order.stockCode} #${order.orderNo}: ${result.message}`);
           }
         }
         if (cancelledCount > 0) {
@@ -197,16 +187,12 @@ export class MarketStateSyncService {
         let cancelledCount = 0;
         for (const order of orders) {
           this.logger.log(`Cancelling domestic unfilled order: ${order.stockCode} #${order.orderNo}`);
-          const result = await this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity);
-          if (result.success) {
+          const accepted = await this.orderCancellationService.cancelUnfilledOrder(
+            'DOMESTIC',
+            order,
+          );
+          if (accepted) {
             cancelledCount += 1;
-            await this.orderReconciliationService.markOpenOrderCancelled(
-              'DOMESTIC',
-              order.orderNo,
-              '장중 재실행 전 미체결 주문 취소',
-            );
-          } else {
-            this.logger.warn(`Failed to cancel domestic unfilled order ${order.stockCode} #${order.orderNo}: ${result.message}`);
           }
         }
         if (cancelledCount > 0) {

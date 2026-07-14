@@ -5,10 +5,12 @@ describe('MarketStateSyncService holiday checks', () => {
 
   const mockKisDomestic = {
     getHolidays: jest.fn(),
+    cancelOrder: jest.fn(),
   };
 
   const mockKisOverseas = {
     getOverseasHolidays: jest.fn(),
+    cancelOrder: jest.fn(),
   };
 
   const mockConfigService = {
@@ -26,11 +28,11 @@ describe('MarketStateSyncService holiday checks', () => {
     service = new MarketStateSyncService(
       {} as any,
       {} as any,
-      {} as any,
       mockKisDomestic as any,
       mockKisOverseas as any,
       {} as any,
       mockConfigService as any,
+      {} as any,
     );
   });
 
@@ -76,5 +78,74 @@ describe('MarketStateSyncService holiday checks', () => {
     ]);
 
     await expect(service.isExchangeHoliday('NASD')).resolves.toBe(true);
+  });
+
+  it('uses the shared cancellation claim and skips POST when another caller wins', async () => {
+    const cancellation = {
+      cancelUnfilledOrder: jest.fn().mockResolvedValue(false),
+    };
+    (service as any).orderCancellationService = cancellation;
+
+    await service.cancelUnfilledOrders('DOMESTIC', [
+      {
+        orderNo: 'broker-order',
+        stockCode: '005930',
+        quantity: 2,
+        price: 70_000,
+        side: 'BUY',
+      },
+    ]);
+
+    expect(cancellation.cancelUnfilledOrder).toHaveBeenCalledWith(
+      'DOMESTIC',
+      expect.objectContaining({ orderNo: 'broker-order' }),
+    );
+    expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it('releases the automatic cancellation claim when live trading closes before POST', async () => {
+    const cancellation = {
+      cancelUnfilledOrder: jest.fn().mockResolvedValue(false),
+    };
+    (service as any).orderCancellationService = cancellation;
+
+    await service.cancelUnfilledOrders('DOMESTIC', [
+      {
+        orderNo: 'switch-order',
+        stockCode: '005930',
+        quantity: 2,
+        price: 70_000,
+        side: 'BUY',
+      },
+    ]);
+
+    expect(cancellation.cancelUnfilledOrder).toHaveBeenCalledWith(
+      'DOMESTIC',
+      expect.objectContaining({ orderNo: 'switch-order' }),
+    );
+    expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it('persists automatic cancellation acceptance without terminalizing the original order', async () => {
+    const cancellation = {
+      cancelUnfilledOrder: jest.fn().mockResolvedValue(true),
+    };
+    (service as any).orderCancellationService = cancellation;
+
+    await service.cancelUnfilledOrders('DOMESTIC', [
+      {
+        orderNo: 'accepted-order',
+        stockCode: '005930',
+        quantity: 2,
+        price: 70_000,
+        side: 'BUY',
+      },
+    ]);
+
+    expect(cancellation.cancelUnfilledOrder).toHaveBeenCalledWith(
+      'DOMESTIC',
+      expect.objectContaining({ orderNo: 'accepted-order' }),
+    );
+    expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
   });
 });
