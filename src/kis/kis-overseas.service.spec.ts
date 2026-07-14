@@ -1,10 +1,17 @@
 import { ConfigService } from '@nestjs/config';
 import { KisBaseService } from './kis-base.service';
+import { KisMutationError } from './kis-mutation.error';
+import { KisOrderHistoryPaginationService } from './kis-order-history-pagination.service';
+import { KisOrderHistoryService } from './kis-order-history.service';
+import { KisOverseasBalanceService } from './kis-overseas-balance.service';
+import { KisOverseasCashBalanceService } from './kis-overseas-cash-balance.service';
 import { KisOverseasService } from './kis-overseas.service';
 
 describe('KisOverseasService', () => {
+  const pagination = new KisOrderHistoryPaginationService();
   const mockKisBase = {
     get: jest.fn(),
+    getWithMetadata: jest.fn(),
     post: jest.fn(),
   };
 
@@ -24,15 +31,40 @@ describe('KisOverseasService', () => {
       }),
     }) as unknown as ConfigService;
 
+  const buildService = (env: 'paper' | 'prod') => {
+    const configService = buildConfigService(env);
+    const orderHistory = new KisOrderHistoryService(
+      mockKisBase as unknown as KisBaseService,
+      configService,
+      pagination,
+    );
+    const cashBalance = new KisOverseasCashBalanceService(
+      mockKisBase as unknown as KisBaseService,
+      configService,
+    );
+    const balance = new KisOverseasBalanceService(
+      mockKisBase as unknown as KisBaseService,
+      configService,
+      cashBalance,
+    );
+    return new KisOverseasService(
+      mockKisBase as unknown as KisBaseService,
+      configService,
+      orderHistory,
+      balance,
+    );
+  };
+
   beforeEach(() => {
     jest.resetAllMocks();
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('should fallback to standard balance when present balance returns INVALID_CHECK_ACNO', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get
       .mockRejectedValueOnce(new Error('KIS API error [CTRP6504R] /uapi/overseas-stock/v1/trading/inquire-present-balance: OPSQ2000 - ERROR : INPUT INVALID_CHECK_ACNO'))
@@ -97,10 +129,7 @@ describe('KisOverseasService', () => {
   });
 
   it('should use standard balance API directly in paper mode', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('paper'),
-    );
+    const service = buildService('paper');
 
     mockKisBase.get.mockResolvedValue({
       output1: [],
@@ -128,10 +157,7 @@ describe('KisOverseasService', () => {
   });
 
   it('should fetch overseas balance and cash balances in a single present-balance request', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get
       .mockResolvedValueOnce({
@@ -219,10 +245,7 @@ describe('KisOverseasService', () => {
   });
 
   it('should fallback to standard balance when present balance items exist but parsed holdings are empty', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get
       .mockResolvedValueOnce({
@@ -302,10 +325,7 @@ describe('KisOverseasService', () => {
   });
 
   it('should parse current production present-balance and standard-balance response shapes', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get
       .mockResolvedValueOnce({
@@ -385,10 +405,7 @@ describe('KisOverseasService', () => {
     // 회귀 테스트: present-balance 응답에 frcr_evlu_pfls_amt가 없고 evlu_pfls_amt2(KRW)만 있는 경우,
     // 이전엔 `parsedPrice <= 0` 가드 때문에 음수 값이 환율 변환 없이 KRW 그대로 흘러
     // 슬랙 알림에 "$-20,374" 같이 단위 오류로 표시됐다. 음수도 정상적으로 USD 환산되어야 한다.
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get
       .mockResolvedValueOnce({
@@ -445,14 +462,18 @@ describe('KisOverseasService', () => {
   });
 
   it('should use dedicated overseas cancel TR ID and zero unit price when cancelling', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-13T01:00:00.000Z'));
+    const service = buildService('prod');
 
     mockKisBase.post.mockResolvedValue({
+      rt_cd: '0',
+      msg_cd: '0000',
+      msg1: '정상처리 되었습니다',
       output: {
+        KRX_FWDG_ORD_ORGNO: '',
         ODNO: '0000000001',
+        ORD_TMD: '100100',
       },
     });
 
@@ -471,21 +492,28 @@ describe('KisOverseasService', () => {
       }),
     );
     expect(result).toEqual({
+      outcome: 'ACCEPTED',
       success: true,
       orderNo: '0000000001',
+      brokerOrderDate: '20260713',
+      orderTime: '100100',
       message: 'Cancel order placed: NASD:TQQQ #12345678',
     });
   });
 
   it('should use exchange-specific cancel TR ID for asia markets', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-13T01:00:00.000Z'));
+    const service = buildService('prod');
 
     mockKisBase.post.mockResolvedValue({
+      rt_cd: '0',
+      msg_cd: '0000',
+      msg1: '정상처리 되었습니다',
       output: {
+        KRX_FWDG_ORD_ORGNO: '',
         ODNO: '0000000002',
+        ORD_TMD: '100100',
       },
     });
 
@@ -505,11 +533,77 @@ describe('KisOverseasService', () => {
     );
   });
 
+  it('classifies a verified overseas order as ACCEPTED', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-13T01:00:00.000Z'));
+    const service = buildService('prod');
+    mockKisBase.post.mockResolvedValue({
+      rt_cd: '0',
+      msg_cd: '0000',
+      msg1: '정상처리 되었습니다',
+      output: {
+        KRX_FWDG_ORD_ORGNO: '',
+        ODNO: ' 0000000010 ',
+        ORD_TMD: '20260713100400',
+      },
+    });
+
+    const result = await service.orderSell('NASD', 'TQQQ', 1, 56.73, '00');
+
+    expect(result).toEqual(expect.objectContaining({
+      outcome: 'ACCEPTED',
+      success: true,
+      orderNo: '0000000010',
+      brokerOrderDate: '20260713',
+      orderTime: '100400',
+    }));
+  });
+
+  it.each([
+    ['order', (service: KisOverseasService) => service.orderBuy('UNKNOWN', 'TQQQ', 1, 56.73, '00')],
+    ['cancel', (service: KisOverseasService) => service.cancelOrder('UNKNOWN', '12345678', 'TQQQ', 1, 56.73)],
+  ])('rejects an unsupported exchange before POST for %s', async (_label, mutate) => {
+    const service = buildService('prod');
+
+    const result = await mutate(service);
+
+    expect(result).toEqual(expect.objectContaining({ outcome: 'REJECTED', success: false }));
+    expect(mockKisBase.post).not.toHaveBeenCalled();
+  });
+
+  it('keeps a timeout order outcome UNKNOWN', async () => {
+    const service = buildService('prod');
+    mockKisBase.post.mockRejectedValue(new KisMutationError('TRANSPORT_UNKNOWN', 'order timeout'));
+
+    const result = await service.orderBuy('NASD', 'TQQQ', 1, 56.73, '00');
+
+    expect(result).toEqual({ outcome: 'UNKNOWN', success: false, message: 'order timeout' });
+  });
+
+  it('keeps a bare HTTP cancellation outcome UNKNOWN', async () => {
+    const service = buildService('prod');
+    mockKisBase.post.mockRejectedValue(new KisMutationError('TRANSPORT_UNKNOWN', 'bare HTTP 500'));
+
+    const result = await service.cancelOrder('NASD', '12345678', 'TQQQ', 1, 56.73);
+
+    expect(result).toEqual({ outcome: 'UNKNOWN', success: false, message: 'bare HTTP 500' });
+  });
+
+  it('classifies an explicit overseas KIS rejection as REJECTED', async () => {
+    const service = buildService('prod');
+    mockKisBase.post.mockRejectedValue(new KisMutationError(
+      'BUSINESS_REJECTION',
+      'KIS rejected cancellation',
+      { rt_cd: '1', msg_cd: 'APBK0919', msg1: '취소할 수 없는 주문입니다' },
+    ));
+
+    const result = await service.cancelOrder('NASD', '12345678', 'TQQQ', 1, 56.73);
+
+    expect(result).toEqual({ outcome: 'REJECTED', success: false, message: 'KIS rejected cancellation' });
+  });
+
   it('should map overseas intraday bars for VWAP calculation', async () => {
-    const service = new KisOverseasService(
-      mockKisBase as unknown as KisBaseService,
-      buildConfigService('prod'),
-    );
+    const service = buildService('prod');
 
     mockKisBase.get.mockResolvedValue({
       output2: [
@@ -555,5 +649,246 @@ describe('KisOverseasService', () => {
         amount: 5620,
       },
     ]);
+  });
+
+  function executionRow(overrides: Record<string, string> = {}) {
+    return {
+      odno: '3001',
+      pdno: 'TQQQ',
+      sll_buy_dvsn_cd: '02',
+      ft_ord_qty: '3',
+      ft_ccld_qty: '1',
+      nccs_qty: '2',
+      ft_ord_unpr3: '75.10',
+      ft_ccld_unpr3: '75.00',
+      ovrs_excg_cd: 'NASD',
+      ord_dt: '20260713',
+      ord_tmd: '100000',
+      dmst_ord_dt: '20260714',
+      thco_ord_tmd: '000000',
+      ...overrides,
+    };
+  }
+
+  function unfilledRow(overrides: Record<string, string> = {}) {
+    return {
+      odno: '4001',
+      pdno: 'AAPL',
+      sll_buy_dvsn_cd: '01',
+      nccs_qty: '2',
+      ft_ord_unpr3: '210.50',
+      ovrs_excg_cd: 'NASD',
+      ...overrides,
+    };
+  }
+
+  it('follows overseas M/F FK/NK200 pages, sends continuation header, and de-duplicates executions', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata
+      .mockResolvedValueOnce({
+        data: {
+          output: [executionRow()],
+          ctx_area_fk200: ' fk-1 ',
+          ctx_area_nk200: ' nk-1 ',
+        },
+        trCont: 'M',
+      })
+      .mockResolvedValueOnce({
+        data: {
+          output: [
+            executionRow(),
+            executionRow({
+              odno: '3002',
+              ord_tmd: '100100',
+              thco_ord_tmd: '000100',
+              rjct_rson_name: '   ',
+            }),
+          ],
+          ctx_area_fk200: 'fk-2',
+          ctx_area_nk200: 'nk-2',
+        },
+        trCont: 'F',
+      })
+      .mockResolvedValueOnce({
+        data: {
+          output: [executionRow({
+            odno: '3003',
+            ord_tmd: '100200',
+            thco_ord_tmd: '000200',
+            rjct_rson_name: '가격 제한 초과',
+          })],
+          ctx_area_fk200: '',
+          ctx_area_nk200: '',
+        },
+        trCont: 'D',
+      });
+
+    const result = await service.getOrderExecutions('20260713', '20260713');
+
+    expect(result).toHaveLength(3);
+    expect(result.map((row) => row.orderNo)).toEqual(['3001', '3002', '3003']);
+    expect(result.map((row) => (row as any).rejectionState)).toEqual([
+      'UNKNOWN',
+      'NOT_REJECTED',
+      'REJECTED',
+    ]);
+    expect(result[0]?.rejected).toBeUndefined();
+    expect(result[1]?.rejected).toBe(false);
+    expect(result[2]).toMatchObject({
+      rejected: true,
+      rejectedReason: '가격 제한 초과',
+    });
+    expect(mockKisBase.get).not.toHaveBeenCalled();
+    expect(mockKisBase.getWithMetadata).toHaveBeenCalledTimes(3);
+    expect(mockKisBase.getWithMetadata.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ CTX_AREA_FK200: '', CTX_AREA_NK200: '' }),
+    );
+    expect(mockKisBase.getWithMetadata.mock.calls[0]?.[3]).toBeUndefined();
+    expect(mockKisBase.getWithMetadata.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({ CTX_AREA_FK200: 'fk-1', CTX_AREA_NK200: 'nk-1' }),
+    );
+    expect(mockKisBase.getWithMetadata.mock.calls[1]?.[3]).toEqual({ tr_cont: 'N' });
+    expect(mockKisBase.getWithMetadata.mock.calls[2]?.[2]).toEqual(
+      expect.objectContaining({ CTX_AREA_FK200: 'fk-2', CTX_AREA_NK200: 'nk-2' }),
+    );
+    expect(mockKisBase.getWithMetadata.mock.calls[2]?.[3]).toEqual({ tr_cont: 'N' });
+  });
+
+  it('paginates and de-duplicates overseas unfilled orders', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata
+      .mockResolvedValue({
+        data: {
+          output: [],
+          ctx_area_fk200: '',
+          ctx_area_nk200: '',
+        },
+        trCont: 'D',
+      })
+      .mockResolvedValueOnce({
+        data: {
+          output: [unfilledRow()],
+          ctx_area_fk200: 'unfilled-fk',
+          ctx_area_nk200: 'unfilled-nk',
+        },
+        trCont: 'M',
+      })
+      .mockResolvedValueOnce({
+        data: {
+          output: [unfilledRow(), unfilledRow({ odno: '4002', pdno: 'MSFT' })],
+          ctx_area_fk200: '',
+          ctx_area_nk200: '',
+        },
+        trCont: 'D',
+      });
+
+    const result = await service.getUnfilledOrders();
+
+    expect(result.map((row) => row.orderNo)).toEqual(['4001', '4002']);
+    expect(mockKisBase.getWithMetadata.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({
+        CTX_AREA_FK200: 'unfilled-fk',
+        CTX_AREA_NK200: 'unfilled-nk',
+      }),
+    );
+    expect(mockKisBase.getWithMetadata.mock.calls[1]?.[3]).toEqual({ tr_cont: 'N' });
+  });
+
+  it('throws instead of returning partial overseas rows when continuation context is missing', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata.mockResolvedValue({
+      data: {
+        output: [executionRow()],
+        ctx_area_fk200: '',
+        ctx_area_nk200: 'nk-only',
+      },
+      trCont: 'F',
+    });
+
+    await expect(service.getOrderExecutions('20260713', '20260713')).rejects.toThrow(
+      'Overseas order pagination missing continuation context at page 1',
+    );
+    expect(mockKisBase.getWithMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws instead of treating a missing overseas tr_cont header as a final page', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata.mockResolvedValue({
+      data: {
+        output: [executionRow()],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      },
+    });
+
+    await expect(service.getOrderExecutions('20260713', '20260713')).rejects.toThrow(
+      'Overseas order pagination missing tr_cont at page 1',
+    );
+  });
+
+  it('throws instead of returning partial overseas rows when a continuation tuple loops', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata
+      .mockResolvedValueOnce({
+        data: {
+          output: [executionRow()],
+          ctx_area_fk200: 'loop-fk',
+          ctx_area_nk200: 'loop-nk',
+        },
+        trCont: 'M',
+      })
+      .mockResolvedValueOnce({
+        data: {
+          output: [executionRow({ odno: '3002' })],
+          ctx_area_fk200: 'loop-fk',
+          ctx_area_nk200: 'loop-nk',
+        },
+        trCont: 'M',
+      });
+
+    await expect(service.getOrderExecutions('20260713', '20260713')).rejects.toThrow(
+      'Overseas order pagination repeated continuation tuple at page 2',
+    );
+    expect(mockKisBase.getWithMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws instead of returning partial overseas rows when a later page fails', async () => {
+    const service = buildService('prod');
+    mockKisBase.getWithMetadata
+      .mockResolvedValueOnce({
+        data: {
+          output: [executionRow()],
+          ctx_area_fk200: 'next-fk',
+          ctx_area_nk200: 'next-nk',
+        },
+        trCont: 'F',
+      })
+      .mockRejectedValueOnce(new Error('page two unavailable'));
+
+    await expect(service.getOrderExecutions('20260713', '20260713')).rejects.toThrow(
+      'Overseas order pagination failed at page 2: page two unavailable',
+    );
+    expect(mockKisBase.getWithMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws at the overseas 100-page cap without requesting page 101 or returning partial rows', async () => {
+    const service = buildService('prod');
+    let page = 0;
+    mockKisBase.getWithMetadata.mockImplementation(async () => {
+      page += 1;
+      return {
+        data: {
+          output: [unfilledRow({ odno: String(4000 + page) })],
+          ctx_area_fk200: `fk-${page}`,
+          ctx_area_nk200: `nk-${page}`,
+        },
+        trCont: 'M',
+      };
+    });
+
+    await expect(service.getUnfilledOrders()).rejects.toThrow(
+      'Overseas order pagination exceeded 100 pages',
+    );
+    expect(mockKisBase.getWithMetadata).toHaveBeenCalledTimes(100);
   });
 });

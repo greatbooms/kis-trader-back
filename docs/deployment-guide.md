@@ -52,7 +52,29 @@ Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20
 - `.env.dev` → `TRADING_ENABLED=false`
 - NAS `.env.prod` → `TRADING_ENABLED=true`
 - NAS `.env.prod`에는 `DATABASE_URL`, `ADMIN_PASSWORD`, `JWT_SECRET`, KIS/Slack 토큰 값이 있어야 함
+- Slack 승인·복구 운영 시 `SLACK_APPROVER_USER_IDS`에 허용할 Slack user ID를 명시해야 함. 누락·빈값은 승인/복구 액션이 fail-closed
 - 운영 DB는 분리된 PostgreSQL database를 사용해야 함
+
+## 실거래 프로세스 및 시작 인계
+
+`deploy/compose.yml`은 `container_name: kis-trader-back`인 `app` 서비스 하나만 실행하고, Dockerfile의 production command도 migration 후 `node dist/main` 하나만 시작합니다. 이 단일 활성 프로세스가 실전 주문의 전제입니다.
+
+- live trading에 Docker replica/scale, PM2 cluster, Node cluster 또는 별도 worker를 추가하지 않습니다.
+- 새 프로세스는 남아 있는 주문 `SUBMITTING`과 취소 `SUBMITTING` 상태를 먼저 인계합니다.
+- 실제 KIS 호출이 시작된 주문은 `SUBMISSION_UNKNOWN`, 시작 전 주문은 `CANCELLED`, 미완료 취소는 `UNKNOWN`으로 보수적으로 전환합니다.
+- 인계가 완료될 때까지 trading/order-sync/portfolio-sync/regime cron callback은 대기합니다. 인계 실패 시 callback은 계속 차단됩니다.
+- KIS 주문·취소 POST는 네트워크 오류나 5xx에도 자동 재시도하지 않습니다. 불명확한 결과는 Slack과 웹의 공용 복구 흐름에서 KIS GET으로만 확인합니다.
+
+시작 인계는 Slack에 확인 필요 총건수를 한 번만 best-effort로 알립니다. 포트폴리오의 `확인 필요 주문` 카드가 authoritative queue이며, Slack 메시지 실패가 DB 상태를 되돌리지는 않습니다.
+
+### 최초 안전 롤아웃
+
+1. NAS `.env.prod`의 `TRADING_ENABLED=false`로 배포합니다.
+2. migration과 서버 시작 인계가 끝났는지 로그에서 확인합니다.
+3. 포트폴리오 `확인 필요 주문` 또는 Slack `/확인필요주문`으로 모든 불명확한 주문·취소를 조회하고 처리합니다.
+4. 확인 필요 항목이 해소된 뒤에만 `TRADING_ENABLED=true`로 변경하고 컨테이너를 재시작합니다.
+
+`TRADING_ENABLED=false`인 동안에도 인증된 GraphQL/웹 복구와 허용된 Slack 복구는 동작합니다. 새 주문·취소 POST와 거래 cron만 차단됩니다.
 
 ## NAS 사전 준비
 
@@ -157,6 +179,8 @@ curl http://localhost:20000/health
 cd /volume1/docker/kis-trader-back
 sudo -n /usr/local/bin/docker compose --env-file .deploy.env -f compose.yml up -d
 ```
+
+재기동 후 단일 컨테이너인지 확인합니다. `kis-trader-back`이 둘 이상이거나 별도 Node trading worker가 있으면 `TRADING_ENABLED=true`로 운영하지 않습니다.
 
 ## 트러블슈팅
 

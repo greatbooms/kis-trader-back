@@ -129,7 +129,12 @@ export interface StopLossApprovalRequest {
   currentPrice: number;
   avgPrice: number;
   lossRate: number;
-  timeoutMinutes: number;
+  expectedPnl?: number;
+  expectedPnlRate?: number;
+  approvalReason?: string;
+  approvalType?: 'STOP_LOSS' | 'LIQUIDATION' | 'HIGH_T_TAKE_PROFIT';
+  validityMinutes: number;
+  cooldownMinutes: number;
 }
 
 export interface StopLossAlertContext {

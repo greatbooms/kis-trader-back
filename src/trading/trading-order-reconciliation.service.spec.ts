@@ -3,6 +3,7 @@ import { TradingOrderReconciliationService } from './trading-order-reconciliatio
 import { TradingService } from './trading.service';
 import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
+import { TradingBrokerContextService } from './trading-broker-context.service';
 
 describe('TradingOrderReconciliationService', () => {
   let service: TradingOrderReconciliationService;
@@ -12,6 +13,7 @@ describe('TradingOrderReconciliationService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     position: {
       findFirst: jest.fn(),
@@ -23,6 +25,13 @@ describe('TradingOrderReconciliationService', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
     },
+    stopLossApproval: {
+      findFirst: jest.fn(),
+    },
+    brokerOrderActionAuditLog: {
+      create: jest.fn(),
+    },
+    $transaction: jest.fn(),
   };
 
   const mockSlackService = {
@@ -34,13 +43,24 @@ describe('TradingOrderReconciliationService', () => {
     handleStrategySignalFill: jest.fn(),
   };
 
+  const mockBrokerContext = {
+    getCurrentContext: jest.fn().mockReturnValue({
+      environment: 'PROD',
+      accountHash: 'current-account-hash',
+      maskedAccount: '****5678-01',
+    }),
+  };
+
   beforeEach(async () => {
+    mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.$transaction.mockImplementation(async (work) => work(mockPrisma));
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TradingOrderReconciliationService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: TradingService, useValue: mockTradingService },
         { provide: SlackService, useValue: mockSlackService },
+        { provide: TradingBrokerContextService, useValue: mockBrokerContext },
       ],
     }).compile();
 
@@ -53,6 +73,402 @@ describe('TradingOrderReconciliationService', () => {
   });
 
   describe('reconcileOpenOrders', () => {
+    it('loads only open orders bound to the current broker context', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+
+      await service.reconcileOpenOrders('OVERSEAS', [], [], []);
+
+      expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith({
+        where: {
+          market: 'OVERSEAS',
+          status: { in: ['PENDING', 'PARTIAL'] },
+          orderNo: { not: null },
+          brokerEnvironment: 'PROD',
+          brokerAccountHash: 'current-account-hash',
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+    });
+
+    it('atomically resolves an accepted cancellation when broker closure is confirmed', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-cancel-accepted',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'cancelled-order',
+          brokerOrderDate: '20260713',
+          status: 'PENDING',
+          cancellationStatus: 'ACCEPTED',
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.brokerOrderActionAuditLog.create.mockResolvedValue({ id: 'audit-1' });
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-cancel-accepted',
+        status: 'CANCELLED',
+        side: 'BUY',
+        quantity: 2,
+        executedQty: 0,
+        strategyName: 'daily-dca',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue(null);
+
+      await service.reconcileOpenOrders('DOMESTIC', [], [], [
+        {
+          orderNo: 'cancelled-order',
+          orderDate: '20260713',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'BUY',
+          orderQuantity: 2,
+          filledQuantity: 0,
+          // 국내 체결내역 mapper는 전량 취소 행도 주문수량-체결수량으로 계산한다.
+          remainingQuantity: 2,
+        },
+      ]);
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-cancel-accepted',
+          status: 'PENDING',
+          cancellationStatus: 'ACCEPTED',
+          orderNo: 'cancelled-order',
+        },
+        data: {
+          status: 'CANCELLED',
+          executedQty: 0,
+          executedPrice: 70000,
+          cancellationStatus: 'RESOLVED',
+          cancellationResolvedAt: expect.any(Date),
+          cancellationResolvedBy: 'system:reconciliation',
+          cancellationMessage: '취소 접수 후 미체결 종료 확인',
+          reason: 'DCA buy | 미체결 종료',
+        },
+      });
+      expect(mockPrisma.brokerOrderActionAuditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tradeRecordId: 'trade-cancel-accepted',
+          channel: 'SYSTEM',
+          action: 'CANCELLATION_RECONCILED',
+          actor: 'system:reconciliation',
+          beforeStatus: 'PENDING',
+          afterStatus: 'CANCELLED',
+        }),
+      });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps an accepted cancellation unresolved while the exact order remains unfilled', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-cancel-still-open',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'still-open-order',
+          brokerOrderDate: '20260713',
+          status: 'PENDING',
+          cancellationStatus: 'ACCEPTED',
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+
+      await service.reconcileOpenOrders(
+        'DOMESTIC',
+        [],
+        [{
+          orderNo: 'still-open-order',
+          stockCode: '005930',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+        }],
+        [{
+          orderNo: 'still-open-order',
+          orderDate: '20260713',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'BUY',
+          orderQuantity: 2,
+          filledQuantity: 0,
+          remainingQuantity: 2,
+        }],
+      );
+
+      expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('keeps an accepted cancellation unresolved when broker reads merely omit the order', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-cancel-omitted',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'omitted-order',
+          brokerOrderDate: '20260713',
+          status: 'PENDING',
+          cancellationStatus: 'ACCEPTED',
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        },
+      ]);
+
+      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+
+      expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendTradeAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not resolve an accepted cancellation from a same-number broker order on another tuple', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-cancel-tuple',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'SELL',
+          quantity: 2,
+          price: 70,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'shared-order-no',
+          brokerOrderDate: '20260713',
+          status: 'PENDING',
+          cancellationStatus: 'ACCEPTED',
+          strategyName: 'manual',
+          reason: 'manual sell',
+          createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        },
+      ]);
+
+      await service.reconcileOpenOrders('OVERSEAS', [], [], [
+        {
+          orderNo: 'shared-order-no',
+          orderDate: '20260713',
+          exchangeCode: 'NYSE',
+          stockCode: 'AAPL',
+          side: 'BUY',
+          orderQuantity: 2,
+          filledQuantity: 0,
+          remainingQuantity: 0,
+        },
+      ]);
+
+      expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not treat a same-number unfilled order on another tuple as the current order', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-unfilled-tuple',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'SELL',
+          quantity: 2,
+          price: 70,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'shared-unfilled-no',
+          status: 'PENDING',
+          cancellationStatus: null,
+          strategyName: 'manual',
+          reason: 'manual sell',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+
+      await service.reconcileOpenOrders('OVERSEAS', [], [
+        {
+          orderNo: 'shared-unfilled-no',
+          exchangeCode: 'NYSE',
+          stockCode: 'AAPL',
+          side: 'BUY',
+          quantity: 2,
+          price: 190,
+        },
+      ], []);
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-unfilled-tuple',
+          status: 'PENDING',
+          orderNo: 'shared-unfilled-no',
+          cancellationStatus: null,
+        },
+        data: {
+          status: 'CANCELLED',
+          reason: 'manual sell | 미체결 종료',
+        },
+      });
+    });
+
+    it.each(['SUBMITTING', 'UNKNOWN'])(
+      'does not mutate the original order while cancellation is %s',
+      async (cancellationStatus) => {
+        mockPrisma.tradeRecord.findMany.mockResolvedValue([
+          {
+            id: `trade-cancel-${cancellationStatus.toLowerCase()}`,
+            market: 'DOMESTIC',
+            exchangeCode: 'KRX',
+            stockCode: '005930',
+            stockName: 'Samsung',
+            side: 'BUY',
+            quantity: 2,
+            price: 70_000,
+            executedQty: 0,
+            executedPrice: null,
+            orderNo: 'ambiguous-order',
+            status: 'PENDING',
+            cancellationStatus,
+            strategyName: 'daily-dca',
+            reason: 'DCA buy',
+            createdAt: new Date(Date.now() - 10 * 60 * 1000),
+          },
+        ]);
+
+        await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+
+        expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
+        expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not terminalize or emit side effects when a cancellation claim wins after the stale read', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-stale-cancellation-race',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'race-order',
+          status: 'PENDING',
+          cancellationStatus: null,
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-stale-cancellation-race',
+          status: 'PENDING',
+          orderNo: 'race-order',
+          cancellationStatus: null,
+        },
+        data: {
+          status: 'CANCELLED',
+          reason: 'DCA buy | 미체결 종료',
+        },
+      });
+      expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
+      expect(mockPrisma.tradeRecord.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendTradeAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not apply broker-order results or side effects after a concurrent cancellation claim', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-stale-broker-race',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 2,
+          price: 70_000,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'race-broker-order',
+          status: 'PENDING',
+          cancellationStatus: null,
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.reconcileOpenOrders(
+        'DOMESTIC',
+        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 2 }],
+        [],
+        [{
+          orderNo: 'race-broker-order',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'BUY',
+          orderQuantity: 2,
+          filledQuantity: 2,
+          remainingQuantity: 0,
+          filledPrice: 70_000,
+        }],
+      );
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-stale-broker-race',
+          status: 'PENDING',
+          orderNo: 'race-broker-order',
+          cancellationStatus: null,
+        },
+        data: {
+          status: 'FILLED',
+          executedQty: 2,
+          executedPrice: 70_000,
+          reason: 'DCA buy | 평균체결가 70000',
+        },
+      });
+      expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
+      expect(mockPrisma.tradeRecord.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendTradeAlert).not.toHaveBeenCalled();
+    });
+
     it('should mark a pending buy order as filled when quantity increases and order is no longer unfilled', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
@@ -118,8 +534,13 @@ describe('TradingOrderReconciliationService', () => {
         ],
       );
 
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-1' },
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-1',
+          status: 'PENDING',
+          orderNo: '1001',
+          cancellationStatus: null,
+        },
         data: {
           status: 'FILLED',
           executedQty: 10,
@@ -241,6 +662,84 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
 
+    it('restores an approved sell signal from the approval row when submission log is unavailable', async () => {
+      const approvedSignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 2,
+        price: 82,
+        orderDivision: '00',
+        reason: 'Take profit 1: T=20',
+        metadata: { phase: 'take-profit-1', tValue: 20 },
+      };
+      const filledRecord = {
+        id: 'trade-approved-sell',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'SELL',
+        quantity: 2,
+        price: 82,
+        executedQty: 2,
+        executedPrice: 82,
+        orderNo: 'approved-order',
+        status: 'FILLED',
+        strategyName: 'infinite-buy',
+        createdAt: new Date('2026-07-13T15:00:00.000Z'),
+      };
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        { ...filledRecord, status: 'PENDING', executedQty: 0 },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue(filledRecord);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'watch-approved-sell',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        quota: 10_000,
+        maxCycles: 40,
+      });
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue(null);
+      mockPrisma.stopLossApproval.findFirst.mockResolvedValue({ signal: approvedSignal });
+      mockPrisma.position.findFirst.mockResolvedValue(null);
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 8 }],
+        [],
+        [{
+          orderNo: 'approved-order',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          orderQuantity: 2,
+          filledQuantity: 2,
+          remainingQuantity: 0,
+          filledPrice: 82,
+        }],
+      );
+
+      expect(mockTradingService.handleStrategySignalFill).toHaveBeenCalledWith(
+        'infinite-buy',
+        'watch-approved-sell',
+        approvedSignal,
+        10,
+        filledRecord.createdAt,
+      );
+      expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          signal: expect.objectContaining({
+            stockCode: 'TQQQ',
+            side: 'SELL',
+            quantity: 2,
+          }),
+        }),
+      );
+    });
+
     it('should cancel a pending order when it disappears without any filled quantity', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
@@ -295,8 +794,13 @@ describe('TradingOrderReconciliationService', () => {
         [],
       );
 
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-2' },
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-2',
+          status: 'PENDING',
+          orderNo: '1002',
+          cancellationStatus: null,
+        },
         data: {
           status: 'CANCELLED',
           reason: 'DCA 매수 | 미체결 종료',
@@ -368,8 +872,13 @@ describe('TradingOrderReconciliationService', () => {
         ],
       );
 
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-3' },
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-3',
+          status: 'PENDING',
+          orderNo: '1003',
+          cancellationStatus: null,
+        },
         data: {
           status: 'PARTIAL',
           executedQty: 4,
@@ -377,6 +886,152 @@ describe('TradingOrderReconciliationService', () => {
           reason: '부분체결 4/10주, 잔량 6주, 평균체결가 70500',
         },
       });
+    });
+
+    it('keeps a terminal overseas partial fill as PARTIAL and does not apply full SELL fill handling', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-terminal-partial',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'SELL',
+          quantity: 5,
+          price: 80,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: 'terminal-partial-order',
+          status: 'PENDING',
+          cancellationStatus: null,
+          strategyName: 'infinite-buy',
+          reason: 'Take profit',
+          createdAt: new Date('2026-07-14T01:00:00.000Z'),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-terminal-partial',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'SELL',
+        quantity: 5,
+        price: 80,
+        executedQty: 2,
+        executedPrice: 80,
+        orderNo: null,
+        status: 'PARTIAL',
+        strategyName: 'infinite-buy',
+        createdAt: new Date('2026-07-14T01:00:00.000Z'),
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'watch-terminal-partial',
+      });
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        message: '주문 접수',
+        details: {
+          side: 'SELL',
+          quantity: 5,
+          price: 80,
+          reason: 'Take profit',
+        },
+      });
+      mockSlackService.isEnabled.mockReturnValue(false);
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          quantity: 8,
+        }],
+        [],
+        [{
+          orderNo: 'terminal-partial-order',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          orderQuantity: 5,
+          filledQuantity: 2,
+          remainingQuantity: 0,
+          filledPrice: 80,
+        }],
+      );
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-terminal-partial',
+          status: 'PENDING',
+          orderNo: 'terminal-partial-order',
+          cancellationStatus: null,
+        },
+        data: {
+          status: 'PARTIAL',
+          orderNo: null,
+          executedQty: 2,
+          executedPrice: 80,
+          reason: 'Take profit | 부분체결 2/5주, 평균체결가 80',
+        },
+      });
+      expect(mockTradingService.handleStrategySignalFill).not.toHaveBeenCalled();
+    });
+
+    it('clears the order number when an existing PARTIAL order closes with no new fill', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-existing-terminal-partial',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'SELL',
+          quantity: 5,
+          price: 80,
+          executedQty: 2,
+          executedPrice: 80,
+          orderNo: 'existing-terminal-partial-order',
+          status: 'PARTIAL',
+          cancellationStatus: null,
+          strategyName: 'infinite-buy',
+          reason: 'Take profit',
+          createdAt: new Date('2026-07-14T01:00:00.000Z'),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue(null);
+      mockSlackService.isEnabled.mockReturnValue(false);
+
+      await service.reconcileOpenOrders('OVERSEAS', [], [], [{
+        orderNo: 'existing-terminal-partial-order',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        orderQuantity: 5,
+        filledQuantity: 2,
+        remainingQuantity: 0,
+        filledPrice: 80,
+      }]);
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-existing-terminal-partial',
+          status: 'PARTIAL',
+          orderNo: 'existing-terminal-partial-order',
+          cancellationStatus: null,
+        },
+        data: {
+          status: 'PARTIAL',
+          orderNo: null,
+          executedQty: 2,
+          executedPrice: 80,
+          reason: 'Take profit | 부분체결 2/5주, 평균체결가 80',
+        },
+      });
+      expect(mockTradingService.handleStrategySignalFill).not.toHaveBeenCalled();
     });
 
     it('should preserve partial status and clear orderNo when remaining quantity is no longer open', async () => {
@@ -422,13 +1077,60 @@ describe('TradingOrderReconciliationService', () => {
         [],
       );
 
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-4' },
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-4',
+          status: 'PARTIAL',
+          orderNo: '1004',
+          cancellationStatus: null,
+        },
         data: {
           orderNo: null,
           reason: 'DCA 매수 | 잔량 미체결 종료',
         },
       });
+    });
+
+    it('does not clear a partial order number when cancellation is claimed after the stale read', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-partial-race',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 10,
+          price: 70_000,
+          executedQty: 4,
+          executedPrice: 70_500,
+          orderNo: 'partial-race-order',
+          status: 'PARTIAL',
+          cancellationStatus: null,
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-partial-race',
+          status: 'PARTIAL',
+          orderNo: 'partial-race-order',
+          cancellationStatus: null,
+        },
+        data: {
+          orderNo: null,
+          reason: 'DCA buy | 잔량 미체결 종료',
+        },
+      });
+      expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+      expect(mockSlackService.sendTradeAlert).not.toHaveBeenCalled();
     });
 
     it('should append broker rejection reason when broker reports failed order', async () => {
@@ -487,8 +1189,13 @@ describe('TradingOrderReconciliationService', () => {
         ],
       );
 
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-6' },
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'trade-6',
+          status: 'PENDING',
+          orderNo: '2006',
+          cancellationStatus: null,
+        },
         data: {
           status: 'FAILED',
           executedQty: 0,
@@ -496,123 +1203,6 @@ describe('TradingOrderReconciliationService', () => {
           reason: '수동 매수 | 브로커 거부: 가격제한초과',
         },
       });
-    });
-  });
-
-  describe('markOpenOrderCancelled', () => {
-    it('should append cancellation reason and log cancelled remainder for partial orders', async () => {
-      mockPrisma.tradeRecord.findMany.mockResolvedValue([
-        {
-          id: 'trade-5',
-          market: 'DOMESTIC',
-          exchangeCode: 'KRX',
-          stockCode: '005930',
-          stockName: 'Samsung',
-          side: 'BUY',
-          quantity: 10,
-          price: 70000,
-          executedQty: 4,
-          executedPrice: 70500,
-          orderNo: '1005',
-          status: 'PARTIAL',
-          strategyName: 'daily-dca',
-          reason: 'DCA 매수',
-          createdAt: new Date('2026-04-09T01:00:00Z'),
-        },
-      ]);
-      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
-        id: 'trade-5',
-        market: 'DOMESTIC',
-        exchangeCode: 'KRX',
-        stockCode: '005930',
-        stockName: 'Samsung',
-        side: 'BUY',
-        quantity: 10,
-        price: 70000,
-        executedPrice: 70500,
-        executedQty: 4,
-        orderNo: null,
-        status: 'PARTIAL',
-        strategyName: 'daily-dca',
-      });
-      mockPrisma.watchStock.findUnique.mockResolvedValue({ id: 'ws-1' });
-
-      await service.markOpenOrderCancelled('DOMESTIC', '1005', '장중 재실행 전 미체결 주문 취소');
-
-      expect(mockPrisma.tradeRecord.update).toHaveBeenCalledWith({
-        where: { id: 'trade-5' },
-        data: {
-          orderNo: null,
-          reason: 'DCA 매수 | 장중 재실행 전 미체결 주문 취소',
-        },
-      });
-      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            eventType: 'ORDER_CANCELLED',
-            message: '주문 잔량 취소 확인: BUY 4/10주 체결, 잔량 6주 종료',
-            details: expect.objectContaining({
-              cancelledRemainder: true,
-              remainingQty: 6,
-            }),
-          }),
-        }),
-      );
-    });
-
-    it('does NOT restore quota when cancelling remainder of a PARTIAL order (partial fill already counted)', async () => {
-      // PARTIAL → 잔량 취소는 이미 일부 체결됐으므로 이월금 복구 금지
-      mockPrisma.tradeRecord.findMany.mockResolvedValue([
-        {
-          id: 'trade-partial-cancel',
-          market: 'OVERSEAS',
-          exchangeCode: 'NAS',
-          stockCode: 'TQQQ',
-          stockName: 'TQQQ',
-          side: 'BUY',
-          quantity: 10,
-          price: 56.87,
-          executedQty: 4,
-          executedPrice: 56.87,
-          orderNo: 'PRT-1',
-          status: 'PARTIAL',
-          strategyName: 'infinite-buy',
-          createdAt: new Date('2026-04-09T01:00:00Z'),
-        },
-      ]);
-      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
-        id: 'trade-partial-cancel',
-        market: 'OVERSEAS',
-        exchangeCode: 'NAS',
-        stockCode: 'TQQQ',
-        stockName: 'TQQQ',
-        side: 'BUY',
-        quantity: 10,
-        price: 56.87,
-        executedQty: 4,
-        executedPrice: 56.87,
-        status: 'PARTIAL',
-        strategyName: 'infinite-buy',
-      });
-      mockPrisma.watchStock.findUnique.mockResolvedValue({
-        id: 'ws-tqqq',
-        market: 'OVERSEAS',
-        exchangeCode: 'NAS',
-        stockCode: 'TQQQ',
-        quota: 10000,
-        maxCycles: 40,
-        strategyParams: { accumulatedQuota: 0 },
-      });
-      mockPrisma.position.findFirst.mockResolvedValue({ totalInvested: 332 });
-      (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
-
-      await service.markOpenOrderCancelled('OVERSEAS', 'PRT-1', '잔량 종료');
-
-      // watchStock 가 strategyParams(accumulatedQuota)로 수정되면 안 됨
-      const quotaUpdateCall = ((mockPrisma.watchStock as any).update.mock.calls as any[]).find(
-        (args) => args[0]?.data?.strategyParams?.accumulatedQuota !== undefined,
-      );
-      expect(quotaUpdateCall).toBeUndefined();
     });
   });
 

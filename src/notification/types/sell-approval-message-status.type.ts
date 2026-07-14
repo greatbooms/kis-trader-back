@@ -1,0 +1,7 @@
+export type SellApprovalMessageStatus =
+  | 'APPROVED_ACCEPTED'
+  | 'APPROVED_NOT_SUBMITTED'
+  | 'APPROVED_REJECTED'
+  | 'APPROVED_UNKNOWN'
+  | 'REJECTED'
+  | 'EXPIRED';

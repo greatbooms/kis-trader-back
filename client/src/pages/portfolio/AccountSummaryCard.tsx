@@ -67,8 +67,8 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
       const result = await refreshAccountState()
       await refetch()
       alert(result.data?.refreshAccountState.message || '계좌 상태를 새로고침했습니다.')
-    } catch (e: any) {
-      alert(`계좌 상태 새로고침 실패: ${e.message}`)
+    } catch (e: unknown) {
+      alert(`계좌 상태 새로고침 실패: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 

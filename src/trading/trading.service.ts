@@ -11,10 +11,11 @@ import {
   MomentumBreakoutStrategyParams,
   GridMeanReversionStrategyParams,
 } from './types';
-import { Market, Side, OrderType, OrderStatus, ApprovalStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Market, OrderType, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { MarketAnalysisService } from './market-analysis.service';
-import { TradingPositionSyncService } from './trading-position-sync.service';
+import { TradingSellApprovalService } from './trading-sell-approval.service';
+import { TradingOrderExecutionService } from './trading-order-execution.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
 
 @Injectable()
@@ -28,7 +29,8 @@ export class TradingService {
     private marketAnalysis: MarketAnalysisService,
     private prisma: PrismaService,
     private configService: ConfigService,
-    private positionSyncService: TradingPositionSyncService,
+    private sellApprovalService: TradingSellApprovalService,
+    private orderExecutionService: TradingOrderExecutionService,
     @Optional() private slackService?: SlackService,
   ) {
     this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
@@ -460,7 +462,8 @@ export class TradingService {
 
   /** 손절 시그널 여부 판별 */
   private isStopLossSignal(signal: TradingSignal): boolean {
-    return signal.side === 'SELL' && (signal.reason?.toLowerCase().includes('stop loss') ?? false);
+    const reason = signal.reason || '';
+    return signal.side === 'SELL' && (reason.toLowerCase().includes('stop loss') || reason.includes('손절'));
   }
 
   /**
@@ -516,55 +519,14 @@ export class TradingService {
     return Number.isFinite(configured) && configured >= 0 ? configured : 0;
   }
 
-  /** 승인된 손절 주문 실행 (SlackCommandsService에서 호출) */
+  /**
+   * @deprecated Actorless approval execution is blocked. Use
+   * TradingSellApprovalWorkflowService with an authenticated actor.
+   */
   async executeApprovedStopLoss(approvalId: string): Promise<void> {
-    if (!this.tradingEnabled) {
-      this.logger.warn(`Skipping approved stop-loss execution because TRADING_ENABLED=false (${approvalId})`);
-      return;
-    }
-
-    const approval = await this.prisma.stopLossApproval.findUnique({
-      where: { id: approvalId },
-      include: { tradeRecord: true },
-    });
-
-    if (!approval || approval.status !== ApprovalStatus.APPROVED) {
-      this.logger.warn(`Stop-loss approval ${approvalId} not found or not approved`);
-      return;
-    }
-
-    const record = approval.tradeRecord;
-    const signal = approval.signal as any as TradingSignal;
-
-    try {
-      let result;
-      if (signal.market === 'DOMESTIC') {
-        result = await this.kisDomestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
-      } else {
-        result = await this.kisOverseas.orderSell(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision);
-      }
-
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: {
-          status: result.success ? OrderStatus.PENDING : OrderStatus.FAILED,
-          orderNo: result.orderNo,
-          reason: result.message,
-        },
-      });
-
-      if (result.success) {
-        this.logger.log(`Stop-loss order submitted (approved): SELL ${signal.stockCode} x ${signal.quantity}`);
-      } else {
-        this.logger.error(`Stop-loss order failed: ${result.message}`);
-      }
-    } catch (e) {
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: { status: OrderStatus.FAILED, reason: e.message },
-      });
-      this.logger.error(`Stop-loss execution exception: ${e.message}`);
-    }
+    const message = `[APPROVAL ${approvalId}] Deprecated actorless approved-sell execution is blocked; use TradingSellApprovalWorkflowService`;
+    this.logger.warn(message);
+    throw new Error(message);
   }
 
   /** 주문 실행 */
@@ -574,8 +536,6 @@ export class TradingService {
     ctx?: StockStrategyContext,
     executionDetails?: Record<string, any>,
   ): Promise<boolean> {
-    await this.refreshMarketPositionsBeforeOrder(signal.market as 'DOMESTIC' | 'OVERSEAS');
-
     // OrderType 결정
     let orderType: OrderType;
     if (signal.orderDivision === '34') {
@@ -586,179 +546,16 @@ export class TradingService {
       orderType = OrderType.MARKET;
     }
 
-    // 손절 시그널 → Slack 알림만 전송하고, 실제 청산은 관리자가 수동 매도
-    if (this.isStopLossSignal(signal)) {
-      const avgPrice = ctx?.position?.avgPrice || Number(signal.price);
-      const currentPrice = ctx?.price?.currentPrice || Number(signal.price);
-      const lossRate = avgPrice > 0 ? (avgPrice - currentPrice) / avgPrice : 0;
-      const watchStockId = ctx?.watchStock?.id;
-      let alreadyAlerted = false;
-      if (watchStockId) {
-        const todayStart = new Date(this.getTodayDate() + 'T00:00:00+09:00');
-        const todayEnd = new Date(this.getTodayDate() + 'T23:59:59+09:00');
-        alreadyAlerted = !!(await this.prisma.watchStockExecutionLog.findFirst({
-          where: {
-            watchStockId,
-            eventType: WatchStockExecutionEventType.SKIPPED,
-            message: { contains: '손절 알림 전송' },
-            createdAt: { gte: todayStart, lte: todayEnd },
-          },
-        }));
-      }
-
-      const slackService = this.slackService;
-      const shouldSendSlackAlert = !alreadyAlerted && slackService?.isEnabled();
-      if (shouldSendSlackAlert) {
-        await slackService!.sendStopLossAlert({
-          stockCode: signal.stockCode,
-          stockName: ctx?.watchStock?.stockName || signal.stockCode,
-          exchangeCode: signal.exchangeCode,
-          market: signal.market,
-          strategyName,
-          quantity: signal.quantity,
-          currentPrice,
-          avgPrice,
-          lossRate,
-        });
-      }
-
-      await this.logWatchStockExecution(
-        ctx,
-        WatchStockExecutionEventType.SKIPPED,
-        `손절 알림 전송: 포트폴리오에서 수동 매도 필요`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          reason: signal.reason,
-          lossRate,
-          currentPrice,
-          avgPrice,
-          slackAlertSent: shouldSendSlackAlert,
-        },
-      );
-
-      this.logger.log(`Stop-loss alert registered for ${signal.stockCode}; awaiting manual sell`);
-      return false;
+    if (this.sellApprovalService.shouldRequireApproval(signal, strategyName, ctx)) {
+      return this.sellApprovalService.requestApproval(signal, strategyName, ctx, orderType);
     }
 
-    const record = await this.prisma.tradeRecord.create({
-      data: {
-        market: signal.market as Market,
-        exchangeCode: signal.exchangeCode,
-        stockCode: signal.stockCode,
-        stockName: signal.stockCode,
-        side: signal.side as Side,
-        orderType,
-        quantity: signal.quantity,
-        price: new Prisma.Decimal(signal.price || 0),
-        status: OrderStatus.PENDING,
-        strategyName: strategyName || 'unknown',
-        reason: signal.reason,
-      },
-    });
-
-    await this.logWatchStockExecution(
+    return this.orderExecutionService.execute(
+      signal,
+      strategyName || 'unknown',
       ctx,
-      WatchStockExecutionEventType.ORDER_SUBMITTED,
-      `주문 제출: ${signal.side} ${signal.quantity}주`,
-      {
-        side: signal.side,
-        quantity: signal.quantity,
-        price: signal.price,
-        orderDivision: signal.orderDivision,
-        reason: signal.reason,
-        orderType,
-        metadata: signal.metadata,
-        ...this.buildExecutionDiagnostics(ctx, executionDetails),
-      },
-      record.id,
+      executionDetails,
     );
-
-    if (strategyName === 'infinite-buy' && signal.metadata?.phase === 'take-profit-2' && ctx?.watchStock?.id) {
-      await this.markInfiniteBuySecondTargetAttempted(ctx.watchStock.id);
-    }
-
-    try {
-      let result;
-      if (signal.market === 'DOMESTIC') {
-        result =
-          signal.side === 'BUY'
-            ? await this.kisDomestic.orderBuy(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
-            : await this.kisDomestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
-      } else {
-        result =
-          signal.side === 'BUY'
-            ? await this.kisOverseas.orderBuy(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision)
-            : await this.kisOverseas.orderSell(signal.exchangeCode!, signal.stockCode, signal.quantity, signal.price!, signal.orderDivision);
-      }
-
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: {
-          status: result.success ? OrderStatus.PENDING : OrderStatus.FAILED,
-          orderNo: result.orderNo,
-          reason: result.message,
-        },
-      });
-
-      await this.logWatchStockExecution(
-        ctx,
-        result.success ? WatchStockExecutionEventType.ORDER_SUBMITTED : WatchStockExecutionEventType.ORDER_FAILED,
-        result.success
-          ? `주문 접수: ${signal.side} ${signal.quantity}주`
-          : `주문 실패: ${result.message ?? '실패'}`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          orderDivision: signal.orderDivision,
-          orderNo: result.orderNo,
-          reason: signal.reason,
-          brokerMessage: result.message,
-        },
-        record.id,
-      );
-
-      if (result.success) {
-        this.logger.log(`Order submitted: ${signal.side} ${signal.stockCode} x ${signal.quantity}`);
-      } else {
-        this.logger.error(`Order failed: ${result.message}`);
-      }
-      return result.success;
-    } catch (e) {
-      await this.prisma.tradeRecord.update({
-        where: { id: record.id },
-        data: { status: OrderStatus.FAILED, reason: e.message },
-      });
-      await this.logWatchStockExecution(
-        ctx,
-        WatchStockExecutionEventType.ORDER_FAILED,
-        `주문 예외: ${e.message}`,
-        {
-          side: signal.side,
-          quantity: signal.quantity,
-          price: signal.price,
-          orderDivision: signal.orderDivision,
-          reason: signal.reason,
-          error: e.message,
-        },
-        record.id,
-      );
-      this.logger.error(`Order exception: ${e.message}`);
-      return false;
-    }
-  }
-
-  private async refreshMarketPositionsBeforeOrder(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    try {
-      const balance = market === 'DOMESTIC'
-        ? await this.kisDomestic.getBalance()
-        : await this.kisOverseas.getBalance();
-      await this.positionSyncService.syncPositions(market, balance);
-    } catch (e) {
-      this.logger.warn(`Failed to refresh ${market} positions before order: ${e.message}`);
-    }
   }
 
   // ── Quota 이월 (분할매수 전략) ──
@@ -1061,6 +858,8 @@ export class TradingService {
     ) {
       return false;
     }
+    const tValue = this.readMetadataNumber(signal.metadata, 'tValue', 'T', 't', 'postFillTValue');
+    const tMetadata = tValue !== undefined ? { tValue } : {};
 
     const followUpSignal: TradingSignal = {
       market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
@@ -1070,12 +869,14 @@ export class TradingService {
       quantity: secondTargetQuantity,
       price: secondTargetPrice,
       reason:
-        `Take profit 2: same-day trend, +${(secondTargetRate * 100).toFixed(1)}%, ` +
+        `Take profit 2: ${tValue !== undefined ? `T=${tValue.toFixed(1)}, ` : ''}` +
+        `same-day trend, +${(secondTargetRate * 100).toFixed(1)}%, ` +
         `${secondTargetQuantity}주 @ ${secondTargetPrice}`,
       orderDivision: '00',
       metadata: {
         phase: 'take-profit-2',
         sameDayTriggered: true,
+        ...tMetadata,
       },
     };
 
@@ -1112,6 +913,14 @@ export class TradingService {
     };
 
     return this.executeSignal(followUpSignal, 'infinite-buy', ctx);
+  }
+
+  private readMetadataNumber(metadata: Record<string, any> | undefined, ...keys: string[]): number | undefined {
+    for (const key of keys) {
+      const parsed = Number(metadata?.[key]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
   }
 
   private async buildInfiniteBuyFollowUpContext(

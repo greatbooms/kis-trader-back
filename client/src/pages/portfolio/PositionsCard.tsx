@@ -75,8 +75,8 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
       } else {
         alert(result?.manualSell.message || '매도 실패')
       }
-    } catch (e: any) {
-      alert(`매도 실패: ${e.message}`)
+    } catch (e: unknown) {
+      alert(`매도 실패: ${e instanceof Error ? e.message : String(e)}`)
     }
     closeSellPanel()
   }

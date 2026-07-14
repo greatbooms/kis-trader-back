@@ -101,7 +101,8 @@ cp .env.example .env.prod
   - `TRADING_ENABLED=false`
 - `.env.prod`
   - `PORT=20000`
-  - `TRADING_ENABLED=true`
+  - 최초 배포/복구 확인 중에는 `TRADING_ENABLED=false`
+  - 현재 계좌와 확인 필요 주문을 검증한 뒤에만 `TRADING_ENABLED=true`
 
 주요 변수:
 
@@ -111,7 +112,7 @@ cp .env.example .env.prod
 | `KIS_APP_SECRET` | KIS 앱 시크릿 | (필수) |
 | `KIS_ACCOUNT_NO` | 계좌번호 (10자리) | (필수) |
 | `KIS_PROD_CODE` | 상품코드 | `01` |
-| `KIS_ENV` | 환경 (`prod` / `paper`) | `prod` |
+| `KIS_ENV` | 환경 (`prod` / `paper`) | `paper` |
 | `OPENDART_API_KEY` | OpenDART API 키 (국내 공시 보강) | |
 | `SEC_USER_AGENT` | SEC 요청용 User-Agent (미국 재무 보강) | |
 | `FRED_API_KEY` | FRED API 키 (미국 금리 보강) | |
@@ -119,13 +120,14 @@ cp .env.example .env.prod
 | `ADMIN_USERNAME` | 관리자 아이디 | `admin` |
 | `ADMIN_PASSWORD` | 관리자 비밀번호 | (필수) |
 | `JWT_SECRET` | JWT 시크릿 키 (32자 이상) | (필수) |
-| `TRADING_ENABLED` | 실거래 활성화 여부 | `true` |
+| `TRADING_ENABLED` | 실거래 활성화 여부 (`true`만 활성) | `false` |
 | `PORT` | 서버 포트 | `3000` |
 | `CLIENT_PORT` | Vite 개발 서버 포트 | `5173` |
 | `SLACK_ENABLED` | Slack 활성화 | `false` |
 | `SLACK_BOT_TOKEN` | Slack Bot OAuth 토큰 | |
 | `SLACK_APP_TOKEN` | Slack App-Level 토큰 | |
 | `SLACK_CHANNEL` | 알림 채널 | `#trading-alerts` |
+| `SLACK_APPROVER_USER_IDS` | 승인 가능한 Slack user ID 목록(쉼표 구분) | 비어 있음(fail-closed) |
 
 ### 3. 데이터베이스 설정
 
@@ -195,11 +197,20 @@ yarn start:prod          # http://localhost:20000
 
 - `yarn start:prod`는 `.env.prod`를 읽습니다.
 - 운영 서버는 Synology NAS Container Manager의 Docker Compose 프로젝트로 관리합니다.
+- `deploy/compose.yml`의 단일 `app` 컨테이너가 `node dist/main` 프로세스 하나만 실행합니다. 실전 거래에서는 replica 확장, PM2 cluster, 다중 worker 실행을 지원하지 않습니다.
 - 기본 운영 포트는 `20000`입니다. Synology 배포 컨테이너는 host network를 사용하므로 `PORT=20000`이 NAS 호스트 포트에 직접 바인딩됩니다.
 - NAS의 `.env.prod`에서 `DATABASE_URL` host는 같은 NAS의 PostgreSQL에 붙도록 `127.0.0.1:15432`를 사용합니다.
 - 배포 성공 후에는 현재 실행 중인 이미지를 제외한 이 프로젝트의 예전 GHCR 이미지를 정리합니다.
 - 운영 환경에서는 `ADMIN_PASSWORD`, `JWT_SECRET`가 없으면 서버가 부팅되지 않습니다.
 - 운영 환경에서는 GraphQL Playground와 introspection이 비활성화됩니다.
+
+### 실거래 안전 배포
+
+- KIS 주문·취소 POST는 자동 재시도하지 않습니다. 전송 결과가 불명확하면 DB의 확인 필요 상태로 남고 Slack 또는 포트폴리오 화면에서 조회·확정합니다.
+- 서버 시작 시 이전 프로세스가 남긴 `SUBMITTING` 주문·취소를 먼저 인계합니다. 이 인계가 끝날 때까지 모든 거래 cron callback은 실행되지 않습니다.
+- 시작 시 Slack에는 개별 주문마다가 아니라 현재 확인 필요 주문의 총건수만 한 번 알립니다. 포트폴리오의 `확인 필요 주문` 카드가 기준 작업 목록입니다.
+- `TRADING_ENABLED=false`에서도 확인 필요 주문 조회·복구는 사용할 수 있지만 새 주문·취소 제출과 거래 cron은 차단됩니다.
+- 이 변경을 처음 배포할 때는 `TRADING_ENABLED=false`로 migration과 인계를 수행하고, 확인 필요 주문을 모두 검토한 뒤에만 `true`로 재시작합니다.
 
 ## 컨테이너 로그 확인
 

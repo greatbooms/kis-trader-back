@@ -44,6 +44,172 @@ type MarketRegimeType {
   exchangeCode: String!
 }
 
+type BrokerContextPreviewType {
+  contextToken: String!
+  environment: BrokerEnvironment!
+  maskedAccount: String!
+}
+
+enum BrokerEnvironment {
+  PAPER
+  PROD
+}
+
+type BrokerOrderCandidateType {
+  orderNo: String!
+  stockCode: String!
+  side: Side!
+  orderQuantity: Int!
+  filledQuantity: Int!
+  remainingQuantity: Int!
+  orderPrice: Float
+  filledPrice: Float
+  exchangeCode: String!
+  orderDate: String!
+  orderTime: String!
+  rejectionState: String!
+  rejected: Boolean
+  rejectedReason: String
+  existingTradeRecordId: ID
+  collisionType: String
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+type BrokerOrderRecoveryItemType {
+  tradeRecordId: ID!
+  lifecycle: String!
+  market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  side: Side!
+  orderType: OrderType!
+  quantity: Int!
+  price: Float!
+  orderNo: String
+  status: OrderStatus!
+  submissionStartedAt: DateTime
+  brokerOrderDate: String
+  brokerOrderTime: String
+  submissionResolvedAt: DateTime
+  submissionResolvedBy: String
+  submissionResolution: SubmissionResolution
+  cancellationStatus: CancellationAttemptStatus
+  cancellationStartedAt: DateTime
+  cancellationResolvedAt: DateTime
+  cancellationResolvedBy: String
+  cancellationMessage: String
+  brokerContextAssigned: Boolean!
+  currentBrokerEnvironment: BrokerEnvironment
+  maskedCurrentAccount: String
+  brokerContextMatchesCurrent: Boolean
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  LOC
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  PARTIAL
+  CANCELLED
+  FAILED
+  AWAITING_APPROVAL
+  SUBMITTING
+  SUBMISSION_UNKNOWN
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+enum SubmissionResolution {
+  LINKED_BROKER_ORDER
+  CONFIRMED_NOT_SUBMITTED
+  MATCHED_EXISTING_TRADE_RECORD
+}
+
+enum CancellationAttemptStatus {
+  SUBMITTING
+  ACCEPTED
+  REJECTED
+  UNKNOWN
+  RESOLVED
+}
+
+type BrokerOrderCandidateInspectionType {
+  recoveryItem: BrokerOrderRecoveryItemType!
+  candidates: [BrokerOrderCandidateType!]!
+  inspectedAt: DateTime!
+}
+
+type WatchStockType {
+  id: ID!
+  market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  isActive: Boolean!
+  strategyName: String
+  quota: Float
+  cycle: Float!
+  maxCycles: Int!
+  stopLossRate: Float!
+  maxPortfolioRate: Float!
+  strategyParams: String
+
+  """마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단")"""
+  lastExecutionStatus: String
+
+  """마지막 전략 실행 날짜"""
+  lastExecutionDate: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type WatchStockExecutionLogType {
+  id: ID!
+  watchStockId: String!
+  tradeRecordId: String
+  market: Market!
+  exchangeCode: String!
+  stockCode: String!
+  stockName: String!
+  strategyName: String
+  eventType: WatchStockExecutionEventType!
+  message: String!
+  details: String
+  createdAt: DateTime!
+}
+
+enum WatchStockExecutionEventType {
+  SKIPPED
+  SIGNAL_CREATED
+  ORDER_SUBMITTED
+  ORDER_FILLED
+  ORDER_FAILED
+  ORDER_AWAITING_APPROVAL
+  ORDER_CANCELLED
+  ORDER_SUBMISSION_UNKNOWN
+  ORDER_RECONCILIATION
+  ERROR
+}
+
+type ManualTriggerResult {
+  success: Boolean!
+  message: String!
+}
+
 type TradeRecordType {
   id: ID!
   market: Market!
@@ -60,33 +226,11 @@ type TradeRecordType {
   status: OrderStatus!
   strategyName: String
   reason: String
+  cancellationStatus: CancellationAttemptStatus
+  cancellationMessage: String
+  brokerMessage: String
   createdAt: DateTime!
 }
-
-enum Side {
-  BUY
-  SELL
-}
-
-enum OrderType {
-  MARKET
-  LIMIT
-  LOC
-}
-
-enum OrderStatus {
-  PENDING
-  FILLED
-  PARTIAL
-  CANCELLED
-  FAILED
-  AWAITING_APPROVAL
-}
-
-"""
-A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
-"""
-scalar DateTime
 
 type PositionType {
   id: ID!
@@ -215,61 +359,6 @@ type RefreshAccountStateResult {
   success: Boolean!
   message: String!
   accountSummary: AccountSummaryType!
-}
-
-type WatchStockType {
-  id: ID!
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  isActive: Boolean!
-  strategyName: String
-  quota: Float
-  cycle: Float!
-  maxCycles: Int!
-  stopLossRate: Float!
-  maxPortfolioRate: Float!
-  strategyParams: String
-
-  """마지막 전략 실행 상태 (예: "3 시그널 생성", "지수 MA200 아래 — 매수 중단")"""
-  lastExecutionStatus: String
-
-  """마지막 전략 실행 날짜"""
-  lastExecutionDate: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type WatchStockExecutionLogType {
-  id: ID!
-  watchStockId: String!
-  tradeRecordId: String
-  market: Market!
-  exchangeCode: String!
-  stockCode: String!
-  stockName: String!
-  strategyName: String
-  eventType: WatchStockExecutionEventType!
-  message: String!
-  details: String
-  createdAt: DateTime!
-}
-
-enum WatchStockExecutionEventType {
-  SKIPPED
-  SIGNAL_CREATED
-  ORDER_SUBMITTED
-  ORDER_FILLED
-  ORDER_FAILED
-  ORDER_AWAITING_APPROVAL
-  ORDER_CANCELLED
-  ERROR
-}
-
-type ManualTriggerResult {
-  success: Boolean!
-  message: String!
 }
 
 type AuthPayload {
@@ -494,6 +583,11 @@ type Query {
   availableStrategies: [StrategyInfo!]!
   strategyAllocations(input: StrategyAllocationsFilterInput!): [StrategyAllocationType!]!
   marketRegime(input: MarketRegimeFilterInput!): MarketRegimeType!
+  brokerOrderRecoveryItems: [BrokerOrderRecoveryItemType!]!
+  currentBrokerContextPreview: BrokerContextPreviewType!
+  watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
+  watchStock(id: ID!): WatchStockType
+  watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
   trades(input: TradeFilterInput): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
   positions(input: PositionsFilterInput): [PositionType!]!
@@ -503,9 +597,6 @@ type Query {
   overseasQuoteHistory(input: OverseasQuoteInput!, months: Int): [QuoteHistoryPointType!]!
   accountSummary: AccountSummaryType!
   dashboardSummary: DashboardSummaryType!
-  watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
-  watchStock(id: ID!): WatchStockType
-  watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
   simulationSessions(input: SimulationSessionsFilterInput): [SimulationSessionType!]!
   simulationSession(id: String!): SimulationSessionType
   simulationPositions(sessionId: String!): [SimulationPositionType!]!
@@ -529,6 +620,10 @@ input MarketRegimeFilterInput {
   exchangeCode: String!
 }
 
+input WatchStocksFilterInput {
+  market: Market
+}
+
 input TradeFilterInput {
   market: Market
   side: Side
@@ -547,10 +642,6 @@ input PositionsFilterInput {
 input OverseasQuoteInput {
   exchangeCode: String!
   symbol: String!
-}
-
-input WatchStocksFilterInput {
-  market: Market
 }
 
 input SimulationSessionsFilterInput {
@@ -584,14 +675,21 @@ input ScreeningListFilterInput {
 
 type Mutation {
   setStrategyAllocation(input: SetStrategyAllocationInput!): StrategyAllocationType!
-  refreshAccountState: RefreshAccountStateResult!
-  manualSell(input: ManualSellInput!): ManualSellResult!
-  cancelTradeOrder(input: CancelTradeOrderInput!): CancelTradeOrderResult!
+  inspectBrokerOrderCandidates(input: BrokerOrderRecoveryTradeInput!): BrokerOrderCandidateInspectionType!
+  assignCurrentBrokerContext(input: AssignBrokerContextInput!): BrokerOrderRecoveryItemType!
+  linkBrokerOrderCandidate(input: BrokerOrderCandidateIdentityInput!): BrokerOrderRecoveryItemType!
+  confirmBrokerOrderNotSubmitted(input: BrokerOrderRecoveryTradeInput!): BrokerOrderRecoveryItemType!
+  confirmBrokerOrderMatchesExisting(input: MatchExistingBrokerOrderInput!): BrokerOrderRecoveryItemType!
+  inspectUnknownCancellation(input: BrokerOrderRecoveryTradeInput!): BrokerOrderRecoveryItemType!
+  confirmCancellationNotAccepted(input: BrokerOrderRecoveryTradeInput!): BrokerOrderRecoveryItemType!
   createWatchStock(input: CreateWatchStockInput!): WatchStockType!
   updateWatchStock(id: ID!, input: UpdateWatchStockInput!): WatchStockType!
   deleteWatchStock(id: ID!): Boolean!
   triggerWatchStockNow(id: ID!): ManualTriggerResult!
   resetWatchStockCarry(id: ID!): ManualTriggerResult!
+  refreshAccountState: RefreshAccountStateResult!
+  manualSell(input: ManualSellInput!): ManualSellResult!
+  cancelTradeOrder(input: CancelTradeOrderInput!): CancelTradeOrderResult!
   login(input: LoginInput!): AuthPayload!
   logout: AuthPayload!
   createSimulation(input: CreateSimulationInput!): SimulationSessionType!
@@ -612,17 +710,28 @@ input SetStrategyAllocationInput {
   isActive: Boolean
 }
 
-input ManualSellInput {
-  stockCode: String!
-  market: String!
-  exchangeCode: String!
-
-  """매도 수량 (미지정 시 전량)"""
-  quantity: Float
+input BrokerOrderRecoveryTradeInput {
+  tradeRecordId: ID!
 }
 
-input CancelTradeOrderInput {
+input AssignBrokerContextInput {
   tradeRecordId: ID!
+  contextToken: String!
+}
+
+input BrokerOrderCandidateIdentityInput {
+  tradeRecordId: ID!
+  brokerOrderDate: String!
+  exchangeCode: String!
+  orderNo: String!
+}
+
+input MatchExistingBrokerOrderInput {
+  tradeRecordId: ID!
+  brokerOrderDate: String!
+  exchangeCode: String!
+  orderNo: String!
+  existingTradeRecordId: ID!
 }
 
 input CreateWatchStockInput {
@@ -649,6 +758,19 @@ input UpdateWatchStockInput {
   stopLossRate: Float
   maxPortfolioRate: Float
   strategyParams: String
+}
+
+input ManualSellInput {
+  stockCode: String!
+  market: String!
+  exchangeCode: String!
+
+  """매도 수량 (미지정 시 전량)"""
+  quantity: Float
+}
+
+input CancelTradeOrderInput {
+  tradeRecordId: ID!
 }
 
 input LoginInput {

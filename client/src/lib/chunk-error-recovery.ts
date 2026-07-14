@@ -45,7 +45,6 @@ export function tryAutoReloadForChunkError(reason: string): boolean {
     const last = Number(sessionStorage.getItem(STORAGE_KEY) || 0);
     if (last && Date.now() - last < REPEAT_GUARD_MS) {
       // 직전 자동 reload 직후에 또 실패 = chunk 문제가 아닐 가능성 → 자동 복구 포기
-      // eslint-disable-next-line no-console
       console.warn(`[chunk-recovery] suppressing repeated auto-reload (${reason})`);
       return false;
     }
@@ -53,7 +52,6 @@ export function tryAutoReloadForChunkError(reason: string): boolean {
   } catch {
     // sessionStorage 접근 불가(시크릿 모드 등) — 그냥 reload 시도
   }
-  // eslint-disable-next-line no-console
   console.warn(`[chunk-recovery] auto-reloading due to ${reason}`);
   // 즉시 새로고침. 사용자에게는 ErrorBoundary가 잠시 보이거나 곧바로 새 페이지로 전환됨.
   window.location.reload();

@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { App, LogLevel } from '@slack/bolt';
 import { KnownBlock } from '@slack/types';
 import { EXCHANGE_CURRENCY } from '../kis/types/kis-config.types';
+import { BrokerOrderPersistenceWarning } from './types/broker-order-persistence-warning.type';
+import { SellApprovalMessageStatus } from './types/sell-approval-message-status.type';
 import {
   PositionInfo,
   TradeAlertContext,
@@ -179,6 +181,16 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     return this.app;
   }
 
+  /**
+   * Socket Mode 연결 여부와 무관하게 설정된 Bolt Web API client를 반환한다.
+   * 시작 복구 알림처럼 소켓 연결 전에 보내야 하는 best-effort 메시지에만 사용한다.
+   */
+  getConfiguredApp(): App | null {
+    if (!this.isConfigured()) return null;
+    this.initializeApp();
+    return this.app;
+  }
+
   isEnabled(): boolean {
     return this.enabled && this.connected && this.app !== null;
   }
@@ -214,6 +226,38 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       this.logger.error(`Failed to send trade alert: ${e.message}`);
       this.handleSendError(e);
+    }
+  }
+
+  async sendBrokerOrderPersistenceWarning(
+    warning: BrokerOrderPersistenceWarning,
+  ): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const lines = [
+        `*시장:* ${warning.market}`,
+        `*종목:* ${warning.stockCode}`,
+        `*TradeRecord:* ${warning.tradeRecordId}`,
+        `*브로커 주문번호:* ${warning.orderNo}`,
+        '*조치:* KIS 주문 내역과 로컬 상태를 확인하세요. 주문을 다시 제출하지 마세요.',
+      ].join('\n');
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:warning: *브로커 주문 접수 후 로컬 저장 실패*\n${lines}`,
+            },
+          },
+        ],
+        text: `브로커 주문 접수 후 로컬 저장 실패 | ${warning.market}:${warning.stockCode}`,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to send broker order persistence warning: ${error.message}`);
+      this.handleSendError(error);
     }
   }
 
@@ -552,19 +596,27 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 손절 승인 요청 메시지 전송 (버튼 포함) — 메시지 ts 반환 */
+  /** 매도 승인 요청 메시지 전송 (버튼 포함) — 메시지 ts 반환 */
   async sendStopLossApproval(req: StopLossApprovalRequest): Promise<{ ts: string; channel: string } | null> {
     if (!await this.ensureConnected()) return null;
 
     try {
       const exchange = req.exchangeCode;
-      const lossPercent = (req.lossRate * 100).toFixed(1);
+      const expectedPnl = req.expectedPnl ?? (req.currentPrice - req.avgPrice) * req.quantity;
+      const expectedPnlRate = req.expectedPnlRate ?? (req.avgPrice > 0 ? (req.currentPrice - req.avgPrice) / req.avgPrice : 0);
+      const expectedPnlLabel = `${expectedPnl >= 0 ? '+' : ''}${this.fmtMoney(expectedPnl, req.market, req.exchangeCode)}`;
+      const expectedPnlRateLabel = `${expectedPnlRate >= 0 ? '+' : ''}${(expectedPnlRate * 100).toFixed(2)}%`;
+      const currentRateLabel = `${expectedPnlRate >= 0 ? '+' : ''}${(expectedPnlRate * 100).toFixed(1)}%`;
+      const title =
+        req.approvalType === 'HIGH_T_TAKE_PROFIT'
+          ? '고 T 익절 승인 요청'
+          : '매도 승인 요청';
       const blocks: KnownBlock[] = [
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:rotating_light: *손절 승인 요청 | ${exchange}:${req.stockCode}* (${req.stockName})`,
+            text: `:rotating_light: *${title} | ${exchange}:${req.stockCode}* (${req.stockName})`,
           },
         },
         { type: 'divider' },
@@ -575,23 +627,30 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
             text: [
               `*현재가:* ${this.fmtPrice(req.currentPrice, req.market)}`,
               `*평균단가:* ${this.fmtPrice(req.avgPrice, req.market)}`,
-              `*손실률:* -${lossPercent}%`,
+              `*현재 손익률:* ${currentRateLabel}`,
+              `*지금 매도 시 예상 손익:* ${expectedPnlLabel} (${expectedPnlRateLabel})`,
               `*매도 수량:* ${req.quantity}주`,
               `*전략:* ${req.strategyName || 'N/A'}`,
-            ].join('\n'),
+              req.approvalReason ? `*승인 사유:* ${req.approvalReason}` : null,
+            ].filter(Boolean).join('\n'),
           },
         },
         {
           type: 'context',
-          elements: [{ type: 'mrkdwn', text: `:clock3: ${req.timeoutMinutes}분 내 미응답 시 자동 스킵됩니다.` }],
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `:clock3: 승인 버튼은 전송 시점부터 ${req.validityMinutes}분간 유효합니다. 미응답 시 주문은 실행되지 않으며, 성공한 알림 후 ${req.cooldownMinutes}분이 지나야 새 승인 요청을 보냅니다.`,
+            },
+          ],
         },
         {
           type: 'actions',
           elements: [
             {
               type: 'button',
-              text: { type: 'plain_text', text: '승인 (손절 실행)' },
-              style: 'danger',
+              text: { type: 'plain_text', text: '승인 (매도 실행)' },
+              style: expectedPnl < 0 ? 'danger' : 'primary',
               action_id: 'stop_loss_approve',
               value: req.approvalId,
             },
@@ -608,12 +667,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       const result = await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `손절 승인 요청 | ${exchange}:${req.stockCode} | -${lossPercent}%`,
+        text: `${title} | ${exchange}:${req.stockCode} | ${expectedPnlRateLabel}`,
       });
 
       return result.ts ? { ts: result.ts, channel: result.channel as string } : null;
     } catch (e) {
-      this.logger.error(`Failed to send stop-loss approval: ${e.message}`);
+      this.logger.error(`Failed to send sell approval: ${e.message}`);
       this.handleSendError(e);
       return null;
     }
@@ -665,30 +724,37 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 손절 승인 메시지 업데이트 (버튼 제거 + 결과 표시) */
+  /** 매도 승인 메시지 업데이트 (버튼 제거 + 결과 표시) */
   async updateStopLossApprovalMessage(
     channel: string,
     ts: string,
     stockCode: string,
-    status: 'APPROVED' | 'REJECTED' | 'EXPIRED',
+    status: SellApprovalMessageStatus,
   ): Promise<void> {
     if (!this.app || !this.connected) return;
 
-    const emoji = status === 'APPROVED' ? ':white_check_mark:' : status === 'REJECTED' ? ':no_entry_sign:' : ':hourglass:';
-    const label = status === 'APPROVED' ? '승인됨 — 손절 실행' : status === 'REJECTED' ? '거절됨 — 스킵' : '시간 초과 — 자동 스킵';
+    const presentation: Record<SellApprovalMessageStatus, { emoji: string; label: string }> = {
+      APPROVED_ACCEPTED: { emoji: ':white_check_mark:', label: '승인됨 - 주문 접수' },
+      APPROVED_NOT_SUBMITTED: { emoji: ':warning:', label: '승인됨 - 주문 미실행' },
+      APPROVED_REJECTED: { emoji: ':no_entry_sign:', label: '승인됨 - KIS 거절' },
+      APPROVED_UNKNOWN: { emoji: ':warning:', label: '승인됨 - 결과 확인 필요' },
+      REJECTED: { emoji: ':no_entry_sign:', label: '거절됨 - 스킵' },
+      EXPIRED: { emoji: ':hourglass:', label: '미응답 - 주문 미실행' },
+    };
+    const { emoji, label } = presentation[status];
 
     try {
       const blocks: KnownBlock[] = [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: `${emoji} *손절 ${label} | ${stockCode}*` },
+          text: { type: 'mrkdwn', text: `${emoji} *매도 승인 ${label} | ${stockCode}*` },
         },
       ];
 
       if (status === 'EXPIRED') {
         blocks.push({
           type: 'context',
-          elements: [{ type: 'mrkdwn', text: '사이트 포트폴리오 페이지에서 현재 상태를 확인하고 수동 매도할 수 있습니다.' }],
+          elements: [{ type: 'mrkdwn', text: '조건이 유지되면 새 승인 알림이 다시 발송됩니다.' }],
         });
       }
 
@@ -696,7 +762,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         channel,
         ts,
         blocks,
-        text: `손절 ${label} | ${stockCode}`,
+        text: `매도 승인 ${label} | ${stockCode}`,
       });
     } catch (e) {
       this.logger.error(`Failed to update stop-loss message: ${e.message}`);

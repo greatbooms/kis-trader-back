@@ -56,11 +56,15 @@ describe('TradingPositionSyncService', () => {
       });
     });
 
-    it('should handle empty positions list', async () => {
+    it('deletes all market positions after a successful empty broker snapshot', async () => {
+      mockPrisma.position.deleteMany.mockResolvedValue({ count: 1 });
+
       await service.syncPositions('DOMESTIC', []);
 
       expect(mockPrisma.position.upsert).not.toHaveBeenCalled();
-      expect(mockPrisma.position.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.position.deleteMany).toHaveBeenCalledWith({
+        where: { market: 'DOMESTIC' },
+      });
     });
   });
 });

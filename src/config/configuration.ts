@@ -18,7 +18,7 @@ export default () => ({
     apiKey: process.env.FRED_API_KEY || '',
   },
   trading: {
-    enabled: process.env.TRADING_ENABLED !== 'false',
+    enabled: process.env.TRADING_ENABLED?.trim().toLowerCase() === 'true',
   },
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
@@ -34,5 +34,11 @@ export default () => ({
     appToken: process.env.SLACK_APP_TOKEN || '',
     channel: process.env.SLACK_CHANNEL || '#trading-alerts',
     enabled: process.env.SLACK_ENABLED === 'true',
+    approverUserIds: Array.from(new Set(
+      (process.env.SLACK_APPROVER_USER_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    )),
   },
 });

@@ -97,14 +97,13 @@ describe('InfiniteBuyStrategy', () => {
   });
 
   describe('market condition filters', () => {
-    it('should liquidate held position when risk triggers and stock loss exceeds threshold', async () => {
-      // P6: MDD 발동 + 종목 손실률 20% 이상 → 청산
+    it('liquidates the full held position at the 20% stock-loss boundary when risk requests full exit', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
           quantity: 10,
           avgPrice: 70000,
-          currentPrice: 50000, // loss = 28.6% >= 20%
+          currentPrice: 56000,
           totalInvested: 700000,
         },
         riskState: {
@@ -117,19 +116,57 @@ describe('InfiniteBuyStrategy', () => {
           reasons: ['MDD -36%'],
         },
       });
-      ctx.price.currentPrice = 50000;
+      ctx.price.currentPrice = 56000;
 
       const { signals } = await strategy.evaluateStock(ctx);
 
       expect(signals).toHaveLength(1);
-      expect(signals[0].side).toBe('SELL');
-      expect(signals[0].quantity).toBe(10);
+      expect(signals[0]).toEqual(
+        expect.objectContaining({
+          side: 'SELL',
+          quantity: 10,
+          price: 56000,
+          metadata: { phase: 'risk-liquidation' },
+        }),
+      );
       expect(signals[0].reason).toContain('리스크 청산');
-      expect(signals[0].reason).toContain('종목 손실');
+      expect(signals[0].reason).toContain('종목 손실 20.0%');
     });
 
-    it('should NOT liquidate profitable position even when risk requests full exit (P6)', async () => {
-      // P6: MDD 발동해도 수익 종목은 유지
+    it('logs a searchable full-liquidation decision with risk context', async () => {
+      const logSpy = jest.spyOn((strategy as any).logger, 'log').mockImplementation();
+      const ctx = createContext({
+        position: {
+          stockCode: '005930',
+          quantity: 10,
+          avgPrice: 70000,
+          currentPrice: 56000,
+          totalInvested: 700000,
+        },
+        riskState: {
+          buyBlocked: true,
+          liquidateAll: true,
+          positionCount: 1,
+          investedRate: 0.2,
+          dailyPnlRate: -0.03,
+          drawdown: -0.36,
+          reasons: ['MDD -36%'],
+        },
+      });
+      ctx.price.currentPrice = 56000;
+
+      await strategy.evaluateStock(ctx);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[005930\] RISK LIQUIDATION/),
+      );
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('MDD -36%'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('stockLoss=20.0%'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('threshold=20%'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('quantity=10'));
+    });
+
+    it('keeps profitable positions while recording the risk liquidation check', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -155,11 +192,16 @@ describe('InfiniteBuyStrategy', () => {
       // 청산 시그널 없음 (buyBlocked로 매수도 차단됨, 매도 목표가 신호만 있을 수 있음)
       const liquidations = signals.filter((s) => s.reason?.includes('리스크 청산'));
       expect(liquidations).toHaveLength(0);
-      expect(details?.mddTriggered).toBe(true);
+      expect(details).toEqual(
+        expect.objectContaining({
+          mddTriggered: true,
+          mddStockLossRate: expect.closeTo(-0.028571, 6),
+          mddStockLossThreshold: 0.2,
+        }),
+      );
     });
 
-    it('should NOT liquidate small-loss position under MDD (P6)', async () => {
-      // P6: MDD 발동해도 손실이 임계값 미만이면 유지
+    it('keeps positions whose stock loss is below the 20% liquidation threshold', async () => {
       const ctx = createContext({
         position: {
           stockCode: '005930',
@@ -185,17 +227,17 @@ describe('InfiniteBuyStrategy', () => {
       expect(liquidations).toHaveLength(0);
     });
 
-    it('should respect per-watch override for mddLiquidateStockLossThreshold (P6)', async () => {
+    it('uses a configured per-stock loss threshold for risk liquidation', async () => {
       const ctx = createContext({
         watchStock: {
           ...createContext().watchStock,
-          strategyParams: { mddLiquidateStockLossThreshold: 0.05 }, // 5%로 낮춤
+          strategyParams: { mddLiquidateStockLossThreshold: 0.05 },
         },
         position: {
           stockCode: '005930',
           quantity: 10,
           avgPrice: 70000,
-          currentPrice: 65000, // loss = 7.14% >= 5%
+          currentPrice: 65000,
           totalInvested: 700000,
         },
         riskState: {
@@ -211,8 +253,15 @@ describe('InfiniteBuyStrategy', () => {
       ctx.price.currentPrice = 65000;
 
       const { signals } = await strategy.evaluateStock(ctx);
-      const liquidations = signals.filter((s) => s.reason?.includes('리스크 청산'));
-      expect(liquidations).toHaveLength(1);
+
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toEqual(
+        expect.objectContaining({
+          side: 'SELL',
+          quantity: 10,
+          metadata: { phase: 'risk-liquidation' },
+        }),
+      );
     });
 
     it('should block new entry when common risk blocks buys', async () => {

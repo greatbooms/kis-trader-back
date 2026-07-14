@@ -1,4 +1,4 @@
-import type { OrderStatus } from '@/graphql/generated'
+import type { CancellationAttemptStatus, OrderStatus } from '@/graphql/generated'
 
 type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'outline' | 'default'
 
@@ -15,10 +15,15 @@ export interface TradeRecordLike {
   executedQty?: number | null
   orderNo?: string | null
   reason?: string | null
+  cancellationStatus?: CancellationAttemptStatus | null
 }
 
 export function canCancelTrade(trade: TradeRecordLike): boolean {
-  return trade.status === 'PENDING' && !!trade.orderNo
+  return trade.status === 'PENDING'
+    && !!trade.orderNo
+    && !['SUBMITTING', 'ACCEPTED', 'UNKNOWN'].includes(
+      trade.cancellationStatus ?? '',
+    )
 }
 
 export function getTradeRecordDisplayInfo(trade: TradeRecordLike): TradeRecordDisplayInfo {
@@ -66,6 +71,18 @@ export function getTradeRecordDisplayInfo(trade: TradeRecordLike): TradeRecordDi
       return {
         label: '승인대기',
         variant: 'warning',
+      }
+    case 'SUBMITTING':
+      return {
+        label: '제출중',
+        detail: '브로커 응답을 기다리는 중입니다.',
+        variant: 'warning',
+      }
+    case 'SUBMISSION_UNKNOWN':
+      return {
+        label: '확인필요',
+        detail: '브로커 주문 이력과 대조가 필요합니다.',
+        variant: 'danger',
       }
     default:
       return {

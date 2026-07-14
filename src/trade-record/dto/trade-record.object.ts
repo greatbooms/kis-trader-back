@@ -1,5 +1,11 @@
 import { ObjectType, Field, Float, Int, ID, registerEnumType } from '@nestjs/graphql';
-import { Market, Side, OrderType, OrderStatus } from '@prisma/client';
+import {
+  CancellationAttemptStatus,
+  Market,
+  Side,
+  OrderType,
+  OrderStatus,
+} from '@prisma/client';
 
 registerEnumType(Side, { name: 'Side' });
 registerEnumType(OrderType, { name: 'OrderType' });
@@ -51,6 +57,15 @@ export class TradeRecordType {
 
   @Field({ nullable: true })
   reason?: string;
+
+  @Field(() => CancellationAttemptStatus, { nullable: true })
+  cancellationStatus?: CancellationAttemptStatus;
+
+  @Field({ nullable: true })
+  cancellationMessage?: string;
+
+  @Field({ nullable: true })
+  brokerMessage?: string;
 
   @Field()
   createdAt: Date;

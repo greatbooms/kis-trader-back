@@ -10,7 +10,6 @@ import {
   InfiniteBuySecondaryExitPlan,
   Buy2DipMode,
   RsiPolicy,
-  evaluateStrategyMdd,
 } from '../types';
 import { lookupTargetProfitRate, lookupSecondaryBonusRate } from './infinite-buy-target-table';
 import { applyAccumulatedQuota } from './infinite-buy-quota.util';
@@ -297,9 +296,6 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     const T = totalInvested > 0 ? totalInvested / perCycleQuota : 0; // T = 완료 사이클 수
     const avgPrice = position?.avgPrice || curPrice;
     const holdQty = position?.quantity || 0;
-    const mddCheck = riskState
-      ? evaluateStrategyMdd(riskState.drawdown, this.meta.mddBuyBlock, this.meta.mddLiquidate)
-      : undefined;
     const riskReason = riskState?.reasons?.join(', ')
       || `MDD ${((riskState?.drawdown ?? 0) * 100).toFixed(1)}%`;
 
@@ -352,17 +348,25 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
       return ` (목표가 ${targetPrice} ≤ 현재가 → ${orderPrice} 즉시 청산, 자전거래 회피)`;
     };
 
-    // P6: MDD 발동 시에도 종목 손실률이 임계값 이상인 경우만 청산.
-    // 수익 종목 / 소폭 손실 종목은 유지하여 건강한 종목이 함께 휩쓸리지 않도록 한다.
-    if ((riskState?.liquidateAll || mddCheck?.liquidateAll) && hasPosition) {
-      const stockLossThreshold = Number.isFinite(strategyParams.mddLiquidateStockLossThreshold as number)
-        ? Number(strategyParams.mddLiquidateStockLossThreshold)
+    // 기존 riskState가 전량청산을 요청해도 손실이 큰 종목만 정리한다.
+    // 수익/소폭 손실 종목은 유지해 포트폴리오 MDD가 건강한 종목까지 휩쓸지 않게 한다.
+    if (riskState?.liquidateAll && hasPosition) {
+      const configuredThreshold = strategyParams.mddLiquidateStockLossThreshold;
+      const stockLossThreshold = typeof configuredThreshold === 'number'
+        && Number.isFinite(configuredThreshold)
+        ? configuredThreshold
         : MDD_LIQUIDATE_STOCK_LOSS_THRESHOLD_DEFAULT;
       const stockLossRate = avgPrice > 0 ? (avgPrice - curPrice) / avgPrice : 0;
       details.mddTriggered = true;
       details.mddStockLossRate = stockLossRate;
       details.mddStockLossThreshold = stockLossThreshold;
+
       if (stockLossRate >= stockLossThreshold) {
+        this.logger.log(
+          `[${watchStock.stockCode}] RISK LIQUIDATION: ${riskReason}, ` +
+          `stockLoss=${(stockLossRate * 100).toFixed(1)}%, ` +
+          `threshold=${(stockLossThreshold * 100).toFixed(0)}%, quantity=${holdQty}`,
+        );
         signals.push({
           market,
           exchangeCode,
@@ -374,10 +378,10 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
             `리스크 청산: ${riskReason}, 종목 손실 ${(stockLossRate * 100).toFixed(1)}% ` +
             `≥ ${(stockLossThreshold * 100).toFixed(0)}%`,
           orderDivision: '00',
+          metadata: { phase: 'risk-liquidation' },
         });
         return { signals, skipReasons };
       }
-      // 수익 또는 소폭 손실 종목 → 청산하지 않고 통상 로직 진행. 아래 buyBlocked로 매수는 자동 차단됨.
     }
 
     // --- 손절: 포지션 보유 중이면 항상 체크 (alreadyExecutedToday, maxCycles 무관) ---
@@ -437,7 +441,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
     details.stockIndicators = stockIndicators;
 
     if (!hasPosition) {
-      if (riskState?.buyBlocked || mddCheck?.buyBlocked) {
+      if (riskState?.buyBlocked) {
         skipReasons.push(`리스크 매수 차단: ${riskReason}`);
         return { signals, skipReasons };
       }
@@ -515,7 +519,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
 
     details.adjustedQuota = adjustedQuota;
 
-    const riskBuyBlocked = Boolean(riskState?.buyBlocked || mddCheck?.buyBlocked);
+    const riskBuyBlocked = Boolean(riskState?.buyBlocked);
     const buyAllowed = adjustedQuota > 0 && !riskBuyBlocked;
 
     if (!buyAllowed && !maxCyclesReached && !riskBuyBlocked && ctx.buyableAmount <= 0) {
@@ -694,6 +698,7 @@ export class InfiniteBuyStrategy implements PerStockTradingStrategy {
           metadata: secondSellQty > 0
             ? {
                 phase: 'take-profit-1',
+                tValue: T,
                 targetPrice,
                 secondaryTargetPrice,
                 secondaryTargetRate,

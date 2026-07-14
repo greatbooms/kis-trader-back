@@ -1,6 +1,13 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Market, OrderStatus, Prisma, Side, WatchStockExecutionEventType } from '@prisma/client';
+import {
+  CancellationAttemptStatus,
+  Market,
+  OrderStatus,
+  Prisma,
+  Side,
+  WatchStockExecutionEventType,
+} from '@prisma/client';
 import { TradingService } from './trading.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { MarketRegimeService } from './market-regime.service';
@@ -23,7 +30,7 @@ import {
   DailySummaryScope,
 } from './types';
 import { SlackService } from '../notification/slack.service';
-import { SlackCommandsService } from '../notification/slack-commands.service';
+import { TradingSlackCommandsService } from './trading-slack-commands.service';
 import { summarizeEstimatePerform, summarizeInvestOpinion } from '../common/utils/consensus.util';
 import { summarizeDividendSchedule } from '../common/utils/dividend.util';
 import { pickNumeric } from '../common/utils/api-data.util';
@@ -73,9 +80,9 @@ export class TradingOrchestrator {
     private configService: ConfigService,
     private marketDataCache: MarketDataCacheService,
     @Optional() private slackService?: SlackService,
-    @Optional() private slackCommandsService?: SlackCommandsService,
+    @Optional() private tradingSlackCommandsService?: TradingSlackCommandsService,
   ) {
-    this.tradingEnabled = this.configService.get<boolean>('trading.enabled') ?? true;
+    this.tradingEnabled = this.configService.get<boolean>('trading.enabled') === true;
   }
 
   // ========== 공개 엔트리 포인트 ==========
@@ -198,8 +205,22 @@ export class TradingOrchestrator {
         market: watchStock.market,
         exchangeCode: watchStock.exchangeCode,
         stockCode: watchStock.stockCode,
-        strategyName: watchStock.strategyName,
-        status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
+        OR: [
+          {
+            status: {
+              in: [
+                OrderStatus.AWAITING_APPROVAL,
+                OrderStatus.SUBMITTING,
+                OrderStatus.SUBMISSION_UNKNOWN,
+                OrderStatus.PENDING,
+              ],
+            },
+          },
+          {
+            status: OrderStatus.PARTIAL,
+            orderNo: { not: null },
+          },
+        ],
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -504,7 +525,7 @@ export class TradingOrchestrator {
   }
 
   private async sendCloseDailySummary(scope: DailySummaryScope): Promise<void> {
-    if (!this.slackService || !this.slackCommandsService) return;
+    if (!this.slackService || !this.tradingSlackCommandsService) return;
     if (!this.slackService.isConfigured()) return;
 
     const claimed = await this.claimDailySummary(scope.summaryDate, scope.market, scope.claimScope);
@@ -521,7 +542,7 @@ export class TradingOrchestrator {
         return;
       }
 
-      const summary = await this.slackCommandsService.buildDailySummary({
+      const summary = await this.tradingSlackCommandsService.buildDailySummary({
         summaryTitle: scope.summaryTitle,
         market: scope.market,
         exchangeCodes: scope.exchangeCodes,
@@ -644,27 +665,55 @@ export class TradingOrchestrator {
       }
     }
 
-    // 오늘 해당 종목+전략의 매매 기록 — 체결(FILLED/PARTIAL)은 1일 1진입 판정에,
-    // PENDING(제출됨, reconciliation 전)은 미체결 가드에 반영한다.
-    // 시장가 주문은 제출~체결확정 사이에 broker 미체결 목록에서 이미 빠져 있을 수 있어
-    // broker 목록만 믿으면 그 공백(수 초~수십 초)에 중복 주문이 나갈 수 있다.
+    // 당일 체결 판정과 미해결 주문 가드는 범위가 다르다. 체결 판정은 당일/전략별,
+    // 미해결 가드는 모든 날짜/전략의 같은 instrument+side를 차단한다.
     const todayStart = new Date(today + 'T00:00:00');
     const todayEnd = new Date(today + 'T23:59:59');
-    const todayTrades = await this.prisma.tradeRecord.findMany({
-      where: {
-        stockCode: ws.stockCode,
-        strategyName,
-        status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL, OrderStatus.PENDING] },
-        createdAt: { gte: todayStart, lte: todayEnd },
-      },
-      select: { status: true, side: true },
-    });
-    const executedToday = todayTrades.some((t) => t.status !== OrderStatus.PENDING);
-    const hasPendingBuyRecord = todayTrades.some(
-      (t) => t.status === OrderStatus.PENDING && t.side === Side.BUY,
+    const [todayTrades, unresolvedIntents] = await Promise.all([
+      this.prisma.tradeRecord.findMany({
+        where: {
+          market: market as Market,
+          exchangeCode: ws.exchangeCode,
+          stockCode: ws.stockCode,
+          strategyName,
+          status: { in: [OrderStatus.FILLED, OrderStatus.PARTIAL] },
+          createdAt: { gte: todayStart, lte: todayEnd },
+        },
+        select: { status: true, side: true },
+      }),
+      this.prisma.tradeRecord.findMany({
+        where: {
+          market: market as Market,
+          exchangeCode: ws.exchangeCode,
+          stockCode: ws.stockCode,
+          OR: [
+            {
+              status: {
+                in: [
+                  OrderStatus.AWAITING_APPROVAL,
+                  OrderStatus.SUBMITTING,
+                  OrderStatus.SUBMISSION_UNKNOWN,
+                  OrderStatus.PENDING,
+                ],
+              },
+            },
+            {
+              status: OrderStatus.PARTIAL,
+              orderNo: { not: null },
+            },
+          ],
+        },
+        select: { status: true, side: true },
+      }),
+    ]);
+    const executedToday = todayTrades.some(
+      (trade) => trade.status === OrderStatus.FILLED || trade.status === OrderStatus.PARTIAL,
     );
-    const hasPendingSellRecord = todayTrades.some(
-      (t) => t.status === OrderStatus.PENDING && t.side === Side.SELL,
+    const hasPendingBuyRecord = unresolvedIntents.some(
+      (trade) => trade.side === Side.BUY,
+    );
+    const hasPendingSellRecord = unresolvedIntents.some(
+      (trade) => trade.side === Side.SELL,
     );
 
     const watchStockConfig: WatchStockConfig = {
@@ -1036,18 +1085,35 @@ export class TradingOrchestrator {
         market: market as Market,
         status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
         orderNo: { in: orderNos },
-        OR: watchStocks
-          .filter(
-            (
-              watchStock,
-            ): watchStock is { exchangeCode: string; stockCode: string; strategyName: string } =>
-              Boolean(watchStock.strategyName),
-          )
-          .map((watchStock) => ({
-            exchangeCode: watchStock.exchangeCode,
-            stockCode: watchStock.stockCode,
-            strategyName: watchStock.strategyName,
-          })),
+        AND: [
+          {
+            OR: [
+              { cancellationStatus: null },
+              {
+                cancellationStatus: {
+                  in: [
+                    CancellationAttemptStatus.REJECTED,
+                    CancellationAttemptStatus.RESOLVED,
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            OR: watchStocks
+              .filter(
+                (
+                  watchStock,
+                ): watchStock is { exchangeCode: string; stockCode: string; strategyName: string } =>
+                  Boolean(watchStock.strategyName),
+              )
+              .map((watchStock) => ({
+                exchangeCode: watchStock.exchangeCode,
+                stockCode: watchStock.stockCode,
+                strategyName: watchStock.strategyName,
+              })),
+          },
+        ],
       },
       select: {
         orderNo: true,

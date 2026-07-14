@@ -1,6 +1,6 @@
 # Slack Bot 설정 가이드
 
-KIS Trader의 Slack 알림봇을 설정하는 방법입니다. 매매 체결 알림, 포트폴리오 요약, 슬래시 명령어(`/잔고`, `/요약`, `/종목`)를 사용할 수 있습니다.
+KIS Trader의 Slack 알림봇을 설정하는 방법입니다. 매매 체결 알림, 포트폴리오 요약, 슬래시 명령어(`/잔고`, `/요약`, `/종목`, `/확인필요주문`)를 사용할 수 있습니다.
 
 ---
 
@@ -42,6 +42,11 @@ KIS Trader의 Slack 알림봇을 설정하는 방법입니다. 매매 체결 알
         "command": "/종목",
         "description": "특정 종목 상세 조회 (보유량, 평단, T값, 수익률)",
         "usage_hint": "[종목코드] 예: /종목 SOXL",
+        "should_escape": false
+      },
+      {
+        "command": "/확인필요주문",
+        "description": "제출 또는 취소 결과가 불명확한 주문 조회",
         "should_escape": false
       }
     ]
@@ -113,16 +118,20 @@ KIS Trader의 Slack 알림봇을 설정하는 방법입니다. 매매 체결 알
 # Slack Bot
 SLACK_BOT_TOKEN=xoxb-여기에-봇-토큰-붙여넣기
 SLACK_APP_TOKEN=xapp-여기에-앱-토큰-붙여넣기
-SLACK_CHANNEL=#trading-alerts
+SLACK_CHANNEL="#trading-alerts"
 SLACK_ENABLED=true
+SLACK_APPROVER_USER_IDS=U012ABCDEF,U034GHIJKL
 ```
 
 | 변수 | 설명 |
 |------|------|
 | `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | App-Level Token (`xapp-...`), Socket Mode 연결용 |
-| `SLACK_CHANNEL` | 알림을 보낼 채널 이름 (봇이 초대된 채널) |
+| `SLACK_CHANNEL` | 알림을 보낼 채널 이름 (봇이 초대된 채널). `#`으로 시작하면 dotenv 주석으로 해석되지 않도록 따옴표로 감쌈 |
 | `SLACK_ENABLED` | `true`로 설정해야 Slack 연동 활성화 (`false`면 알림 비활성) |
+| `SLACK_APPROVER_USER_IDS` | 매도 승인과 불명 주문 복구를 수행할 Slack 사용자 ID의 쉼표 구분 allowlist. 누락/빈값이면 모든 관련 액션이 차단됨 |
+
+Slack 사용자 ID는 멤버 프로필의 **더 보기 → 멤버 ID 복사**에서 확인할 수 있습니다. 표시 이름이나 이메일이 아니라 `U...` 형식의 ID를 입력하세요.
 
 ---
 
@@ -146,6 +155,7 @@ yarn start:dev
 | `/잔고` | 국내+해외 전체 보유 포지션 조회 | `/잔고` |
 | `/요약` | 오늘 매매 요약 + 포트폴리오 현황 | `/요약` |
 | `/종목 [코드]` | 특정 종목 상세 (보유량, 평단, T값, 수익률) | `/종목 SOXL` |
+| `/확인필요주문` | 제출/취소 결과 불명 주문 조회 및 복구 시작 (승인 사용자 전용) | `/확인필요주문` |
 | `@KIS Trader [질문]` | 앱 멘션으로 자유 질문 | `@KIS Trader 현재잔고` |
 
 ---
@@ -158,5 +168,17 @@ yarn start:dev
 |------|------|------|
 | 체결 알림 | 매수/매도 주문 체결 시 | 종목, 수량, 가격, 전략 상세, 보유 현황 |
 | 손절 알림 | 손절 매도 트리거 시 | 손절 사유, 실현 손실, 포지션 상태 |
+| 불명 주문/취소 알림 | KIS 주문 제출 또는 취소 결과를 확정할 수 없을 때 | 주문 의도, 수량, 가격, 시작 시각, TradeRecord ID, 안전한 조회 액션 |
 | 필터 스킵 | 전략에서 매수 스킵 시 | 스킵 사유 (MA200, 지수, RSI 등) |
 | 일일 요약 | Cron 실행 완료 후 | 전체 포트폴리오, 오늘 체결 건수, 시장 상황 |
+
+---
+
+## 불명 주문 복구 안전 절차
+
+1. `SLACK_APPROVER_USER_IDS`에 등록된 운영자만 `/확인필요주문`과 알림의 조회 버튼을 사용할 수 있습니다. 권한 검사는 DB 또는 KIS 조회 전에 수행됩니다.
+2. `KIS 주문 조회`는 완전한 KIS 주문 이력을 읽어 후보만 표시합니다. 후보가 있어도 자동으로 선택하거나 연결하지 않습니다.
+3. `이 주문 연결`, `미주문 확정`, `기존 기록과 동일`, 계좌 컨텍스트 지정, 취소 상태 확인/미접수 확정은 모두 상세 내용을 보여주는 확인 modal과 필수 동의를 거칩니다.
+4. 확정 결과는 공용 복구 서비스가 감사 actor를 `slack:<사용자 ID>`, channel을 `SLACK`으로 기록합니다. 원본 Slack 메시지 갱신은 best effort이며, 갱신 실패가 DB의 확정 결과를 되돌리지는 않습니다.
+
+> **자금 안전:** Slack 복구 액션은 주문이나 취소를 제출·재시도하지 않습니다. KIS 앱/관리 화면에서 실제 상태를 확인한 뒤 복구 결정을 확정하세요.

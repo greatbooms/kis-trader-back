@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'src/graphql/generated.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +18,37 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+  },
+  {
+    files: [
+      'src/components/ui/badge.tsx',
+      'src/components/ui/button.tsx',
+      'src/components/ui/select.tsx',
+      'src/pages/screening/ScreeningCommon.tsx',
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
+    files: [
+      'src/pages/WatchStockDetailPage.tsx',
+      'src/pages/portfolio/AccountSummaryCard.tsx',
+      'src/pages/portfolio/PositionsCard.tsx',
+      'src/pages/simulation/SimulationDetailSection.tsx',
+    ],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
+    files: [
+      'src/pages/WatchStockDetailPage.tsx',
+      'src/pages/simulation/SimulationDetailSection.tsx',
+    ],
+    rules: {
+      'react-hooks/preserve-manual-memoization': 'off',
     },
   },
 ])

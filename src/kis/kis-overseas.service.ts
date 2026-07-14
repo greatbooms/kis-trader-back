@@ -1,16 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KisBaseService } from './kis-base.service';
+import { KisOrderHistoryService } from './kis-order-history.service';
+import { KisOverseasBalanceService } from './kis-overseas-balance.service';
+import {
+  classifyKisMutationFailure,
+  classifyKisOrderResponse,
+} from './kis-mutation.error';
 import {
   OverseasPriceOutput,
   OverseasOrderOutput,
-  OverseasBalanceItem,
   OverseasCashBalance,
-  OverseasForeignMarginItem,
-  OverseasPresentBalanceCurrencyItem,
-  OverseasStandardBalanceItem,
   StockPriceResult,
-  OrderResult,
   BalanceItem,
   DailyPrice,
   IntradayPrice,
@@ -18,9 +19,10 @@ import {
   HolidayItem,
   BrokerOrderStatus,
 } from './types/kis-api.types';
+import { OverseasAccountSnapshot } from './types/overseas-account-snapshot.type';
+import { OrderResult } from './types/order-result.type';
 import {
   EXCHANGE_CODE_MAP,
-  EXCHANGE_CURRENCY,
   OVERSEAS_ORDER_TR_IDS,
 } from './types/kis-config.types';
 
@@ -30,171 +32,16 @@ export class KisOverseasService {
   private readonly accountNo: string;
   private readonly prodCode: string;
   private readonly isPaper: boolean;
-  private readonly debugRawBalance: boolean;
-  private useStandardBalanceOnly = false;
 
   constructor(
     private kisBase: KisBaseService,
     private configService: ConfigService,
+    private orderHistory: KisOrderHistoryService,
+    private balanceService: KisOverseasBalanceService,
   ) {
     this.accountNo = this.configService.get<string>('kis.accountNo')!;
     this.prodCode = this.configService.get<string>('kis.prodCode')!;
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
-    this.debugRawBalance = this.configService.get<boolean>('kis.debugRawBalance') ?? false;
-  }
-
-  private hasContinuationToken(token?: string): boolean {
-    return (token?.trim().length ?? 0) > 0;
-  }
-
-  private hasRepeatedContinuationToken(
-    previousFk: string,
-    previousNk: string,
-    nextFk: string,
-    nextNk: string,
-  ): boolean {
-    return (
-      this.hasContinuationToken(nextFk) &&
-      previousFk === nextFk &&
-      previousNk === nextNk
-    );
-  }
-
-  private pickQuantityFields(row: Record<string, any> | undefined): Record<string, any> {
-    if (!row) return {};
-    return Object.fromEntries(
-      Object.entries(row).filter(([key]) => /qty|qnt|cblc|hldg|ccld/i.test(key)),
-    );
-  }
-
-  private logRawBalancePage(
-    label: string,
-    output1: unknown,
-    output2: unknown,
-    extra?: Record<string, any>,
-    force = false,
-  ): void {
-    if (!this.debugRawBalance && !force) return;
-
-    const rows1 = Array.isArray(output1) ? output1 : [];
-    const rows2 = Array.isArray(output2) ? output2 : [];
-    const first1 = rows1[0] as Record<string, any> | undefined;
-    const first2 = rows2[0] as Record<string, any> | undefined;
-
-    this.logger.warn(
-      `[KIS DEBUG] ${label} summary ${JSON.stringify({
-        output1Count: rows1.length,
-        output2Count: rows2.length,
-        output1Keys: first1 ? Object.keys(first1) : [],
-        output2Keys: first2 ? Object.keys(first2) : [],
-        output1QuantityFields: this.pickQuantityFields(first1),
-        ...extra,
-      })}`,
-    );
-
-    if (first1) {
-      this.logger.warn(`[KIS DEBUG] ${label} output1[0] ${JSON.stringify(first1)}`);
-    }
-    if (first2) {
-      this.logger.warn(`[KIS DEBUG] ${label} output2[0] ${JSON.stringify(first2)}`);
-    }
-  }
-
-  private readNumber(
-    row: Record<string, any>,
-    ...keys: string[]
-  ): number | undefined {
-    for (const key of keys) {
-      const value = row[key];
-      if (value === undefined || value === null || value === '') continue;
-      const parsed = parseFloat(String(value));
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-  }
-
-  private readString(
-    row: Record<string, any>,
-    ...keys: string[]
-  ): string | undefined {
-    for (const key of keys) {
-      const value = row[key];
-      if (value === undefined || value === null) continue;
-      const trimmed = String(value).trim();
-      if (trimmed.length > 0) return trimmed;
-    }
-    return undefined;
-  }
-
-  private parseOverseasPresentBalanceRow(row: Record<string, any>): BalanceItem | undefined {
-    const quantity = Math.trunc(
-      this.readNumber(row, 'ovrs_cblc_qty', 'ccld_qty_smtl1', 'ord_psbl_qty1', 'cblc_qty13') || 0,
-    );
-    if (quantity <= 0) return undefined;
-
-    const exchangeRate = this.readNumber(row, 'bass_exrt') || 0;
-    const unitAmount = this.readNumber(row, 'unit_amt') || 1;
-    const useConvertedPricing = row.ovrs_now_pric1 !== undefined;
-    const avgPrice = useConvertedPricing
-      ? this.toLocalCurrencyPrice(
-          String(this.readNumber(row, 'avg_unpr3', 'pchs_avg_pric') || 0),
-          exchangeRate,
-          unitAmount,
-        )
-      : (this.readNumber(row, 'pchs_avg_pric') || 0);
-    const currentPrice = useConvertedPricing
-      ? this.toLocalCurrencyPrice(String(this.readNumber(row, 'ovrs_now_pric1') || 0), exchangeRate, unitAmount)
-      : (this.readNumber(row, 'now_pric2') || 0);
-    const profitLoss = row.frcr_evlu_pfls_amt !== undefined
-      ? (this.readNumber(row, 'frcr_evlu_pfls_amt') || 0)
-      : useConvertedPricing
-        ? this.toLocalCurrencyPrice(String(this.readNumber(row, 'evlu_pfls_amt2') || 0), exchangeRate, unitAmount)
-        : (this.readNumber(row, 'ovrs_stck_evlu_pfls_amt', 'evlu_pfls_amt2') || 0);
-
-    return {
-      stockCode: this.readString(row, 'ovrs_pdno', 'pdno') || '',
-      stockName: this.readString(row, 'ovrs_item_name', 'prdt_name') || '',
-      quantity,
-      avgPrice,
-      currentPrice,
-      profitLoss,
-      profitRate: this.readNumber(row, 'evlu_pfls_rt', 'evlu_pfls_rt1') || 0,
-      exchangeCode: this.readString(row, 'ovrs_excg_cd'),
-    };
-  }
-
-  private parseOverseasStandardBalanceRow(
-    row: Record<string, any>,
-    fallbackExchangeCode: string,
-  ): BalanceItem | undefined {
-    const quantity = Math.trunc(
-      this.readNumber(row, 'ccld_qty_smtl1', 'ovrs_cblc_qty', 'ord_psbl_qty') || 0,
-    );
-    if (quantity <= 0) return undefined;
-
-    const exchangeRate = this.readNumber(row, 'bass_exrt') || 0;
-    const unitAmount = this.readNumber(row, 'unit_amt') || 1;
-    const hasDirectPricing = row.now_pric2 !== undefined || row.pchs_avg_pric !== undefined;
-    const avgPrice = hasDirectPricing
-      ? (this.readNumber(row, 'pchs_avg_pric') || 0)
-      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'avg_unpr3') || 0), exchangeRate, unitAmount);
-    const currentPrice = hasDirectPricing
-      ? (this.readNumber(row, 'now_pric2') || 0)
-      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'ovrs_now_pric1') || 0), exchangeRate, unitAmount);
-    const profitLoss = row.frcr_evlu_pfls_amt !== undefined
-      ? (this.readNumber(row, 'frcr_evlu_pfls_amt') || 0)
-      : this.toLocalCurrencyPrice(String(this.readNumber(row, 'evlu_pfls_amt2') || 0), exchangeRate, unitAmount);
-
-    return {
-      stockCode: this.readString(row, 'pdno', 'ovrs_pdno') || '',
-      stockName: this.readString(row, 'prdt_name', 'ovrs_item_name') || '',
-      quantity,
-      avgPrice,
-      currentPrice,
-      profitLoss,
-      profitRate: this.readNumber(row, 'evlu_pfls_rt1', 'evlu_pfls_rt') || 0,
-      exchangeCode: this.readString(row, 'ovrs_excg_cd') || fallbackExchangeCode,
-    };
   }
 
   /** 해외 현재가상세 조회 (PER/PBR/EPS/BPS 포함) */
@@ -272,7 +119,11 @@ export class KisOverseasService {
   ): Promise<OrderResult> {
     const trIds = OVERSEAS_ORDER_TR_IDS[exchangeCode];
     if (!trIds) {
-      return { success: false, message: `Unsupported exchange: ${exchangeCode}` };
+      return {
+        outcome: 'REJECTED',
+        success: false,
+        message: `Unsupported exchange: ${exchangeCode}`,
+      };
     }
 
     const trId = this.isPaper
@@ -292,19 +143,20 @@ export class KisOverseasService {
       ORD_DVSN: orderDivision,
     };
 
+    const callStartedAt = new Date();
     try {
       const res = await this.kisBase.post<OverseasOrderOutput>(
         '/uapi/overseas-stock/v1/trading/order',
         trId,
         body,
       );
-      return {
-        success: true,
-        orderNo: res.output?.ODNO,
-        message: `${side} order placed: ${exchangeCode}:${symbol} x ${qty} @ ${price} (div:${orderDivision})`,
-      };
+      return classifyKisOrderResponse(
+        res,
+        callStartedAt,
+        `${side} order placed: ${exchangeCode}:${symbol} x ${qty} @ ${price} (div:${orderDivision})`,
+      );
     } catch (e) {
-      return { success: false, message: e.message };
+      return classifyKisMutationFailure(e);
     }
   }
 
@@ -465,245 +317,39 @@ export class KisOverseasService {
   }
 
   async getCashBalances(): Promise<OverseasCashBalance[]> {
-    const snapshot = await this.getAccountSnapshot();
-    return snapshot.cashBalances;
+    return this.balanceService.getCashBalances();
   }
 
-  async getAccountSnapshot(nationCode = '000'): Promise<{
-    balance: BalanceItem[];
-    cashBalances: OverseasCashBalance[];
-  }> {
-    if (this.isPaper || this.useStandardBalanceOnly) {
-      return {
-        balance: await this.getStandardBalance(),
-        cashBalances: [],
-      };
-    }
-
-    try {
-      const snapshot = await this.getPresentBalanceSnapshot(nationCode);
-      try {
-        return {
-          balance: snapshot.balance,
-          cashBalances: this.mergeOverseasCashBalances(
-            snapshot.cashBalances,
-            await this.getForeignMarginCashBalances(),
-          ),
-        };
-      } catch (error) {
-        this.logger.warn(
-          `Failed to enrich overseas cash balances with foreign margin API: ${error.message}`,
-        );
-        return snapshot;
-      }
-    } catch (error) {
-      if (!this.shouldFallbackToStandardBalance(error)) {
-        throw error;
-      }
-
-      this.useStandardBalanceOnly = true;
-      this.logger.warn(
-        `Falling back to overseas standard balance API after present balance failure: ${error.message}`,
-      );
-      return {
-        balance: await this.getStandardBalance(),
-        cashBalances: [],
-      };
-    }
-  }
-
-  private mergeOverseasCashBalances(
-    baseBalances: OverseasCashBalance[],
-    marginBalances: OverseasCashBalance[],
-  ): OverseasCashBalance[] {
-    const balances = new Map<string, OverseasCashBalance>();
-
-    for (const item of baseBalances) {
-      balances.set(item.currencyCode, { ...item });
-    }
-
-    for (const item of marginBalances) {
-      const existing = balances.get(item.currencyCode);
-      if (!existing) continue;
-      balances.set(item.currencyCode, {
-        ...existing,
-        ...item,
-        currencyName: existing?.currencyName ?? item.currencyName,
-        withdrawableAmount: existing?.withdrawableAmount ?? item.withdrawableAmount,
-      });
-    }
-
-    return Array.from(balances.values());
-  }
-
-  private async getForeignMarginCashBalances(): Promise<OverseasCashBalance[]> {
-    const res = await this.kisBase.get(
-      '/uapi/overseas-stock/v1/trading/foreign-margin',
-      'TTTC2101R',
-      {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-      },
-    );
-
-    const output = (res.output as OverseasForeignMarginItem[]) || [];
-    const balances = new Map<string, { balance: OverseasCashBalance; priority: number }>();
-
-    for (const item of output) {
-      if (!item.crcy_cd) continue;
-      const row = item as unknown as Record<string, any>;
-      const amount = this.readNumber(row, 'frcr_dncl_amt1') ?? 0;
-      const pendingBuyAmount = this.readNumber(row, 'ustl_buy_amt');
-      const pendingSellAmount = this.readNumber(row, 'ustl_sll_amt');
-      const generalOrderableAmount = this.readNumber(row, 'frcr_gnrl_ord_psbl_amt');
-      const directOrderableAmount = this.readNumber(row, 'frcr_ord_psbl_amt1');
-      const integratedOrderableAmount = this.readNumber(row, 'itgr_ord_psbl_amt');
-      const orderableAmount =
-        directOrderableAmount && directOrderableAmount > 0
-          ? directOrderableAmount
-          : generalOrderableAmount ?? integratedOrderableAmount;
-      const balance: OverseasCashBalance = {
-        currencyCode: item.crcy_cd,
-        amount,
-      };
-      const optionalFields: Array<[string, number | undefined]> = [
-        ['pendingBuyAmount', pendingBuyAmount],
-        ['pendingSellAmount', pendingSellAmount],
-        ['receivableAmount', this.readNumber(row, 'frcr_rcvb_amt')],
-        ['marginAmount', this.readNumber(row, 'frcr_mgn_amt')],
-        ['generalOrderableAmount', generalOrderableAmount],
-        ['orderableAmount', orderableAmount],
-        ['integratedOrderableAmount', integratedOrderableAmount],
-      ];
-      for (const [key, value] of optionalFields) {
-        if (value !== undefined) {
-          (balance as unknown as Record<string, number>)[key] = value;
-        }
-      }
-
-      const priority = this.getForeignMarginCashPriority(item, balance);
-      const existing = balances.get(item.crcy_cd);
-      if (!existing || priority > existing.priority) {
-        balances.set(item.crcy_cd, { balance, priority });
-      }
-    }
-
-    return Array.from(balances.values()).map((item) => item.balance);
-  }
-
-  private getForeignMarginCashPriority(
-    item: OverseasForeignMarginItem,
-    balance: OverseasCashBalance,
-  ): number {
-    const isPrimaryUsRow = item.natn_name?.trim() === '미국' && item.crcy_cd === 'USD';
-    const pendingActivity = Math.abs(balance.pendingBuyAmount ?? 0) + Math.abs(balance.pendingSellAmount ?? 0);
-    const orderableActivity = Math.abs(balance.generalOrderableAmount ?? 0);
-    const cashActivity = Math.abs(balance.amount);
-
-    return (
-      (isPrimaryUsRow ? 1_000_000_000 : 0) +
-      (pendingActivity > 0 ? 10_000_000 : 0) +
-      (orderableActivity > 0 ? 1_000_000 : 0) +
-      cashActivity +
-      pendingActivity
-    );
+  async getAccountSnapshot(
+    nationCode = '000',
+  ): Promise<OverseasAccountSnapshot> {
+    return this.balanceService.getAccountSnapshot(nationCode);
   }
 
   /** 해외 미체결 주문 조회 */
   async getUnfilledOrders(): Promise<UnfilledOrder[]> {
-    const trId = this.isPaper ? 'VTTS3018R' : 'TTTS3018R';
-
-    const res = await this.kisBase.get(
-      '/uapi/overseas-stock/v1/trading/inquire-nccs',
-      trId,
-      {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        OVRS_EXCG_CD: '',
-        SORT_SQN: 'DS',
-        CTX_AREA_FK200: '',
-        CTX_AREA_NK200: '',
-      },
-    );
-
-    const output = res.output as any[];
-    if (!output) return [];
-
-    return output
-      .filter((item: any) => parseInt(item.nccs_qty, 10) > 0)
-      .map((item: any) => ({
-        orderNo: item.odno,
-        stockCode: item.pdno,
-        side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
-        quantity: parseInt(item.nccs_qty, 10) || 0,
-        price: parseFloat(item.ft_ord_unpr3) || 0,
-        exchangeCode: item.ovrs_excg_cd,
-      }));
+    return this.orderHistory.getUnfilledOrders('OVERSEAS');
   }
 
   /** 해외 주문/체결 조회 */
   async getOrderExecutions(startDate: string, endDate: string): Promise<BrokerOrderStatus[]> {
-    const trId = this.isPaper ? 'VTTS3035R' : 'TTTS3035R';
-
-    const res = await this.kisBase.get(
-      '/uapi/overseas-stock/v1/trading/inquire-ccnl',
-      trId,
-      {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        PDNO: '',
-        ORD_STRT_DT: startDate,
-        ORD_END_DT: endDate,
-        SLL_BUY_DVSN: '00',
-        CCLD_NCCS_DVSN: '00',
-        OVRS_EXCG_CD: '',
-        SORT_SQN: 'DS',
-        ORD_DT: '',
-        ORD_GNO_BRNO: '',
-        ODNO: '',
-        CTX_AREA_NK200: '',
-        CTX_AREA_FK200: '',
-      },
-    );
-
-    const output = (res.output as any[]) || [];
-    return output
-      .filter((item: any) => !!item.odno)
-      .map((item: any) => {
-        const orderQuantity = parseInt(item.ft_ord_qty, 10) || 0;
-        const filledQuantity = parseInt(item.ft_ccld_qty, 10) || 0;
-        const remainingQuantity = item.nccs_qty
-          ? parseInt(item.nccs_qty, 10) || 0
-          : Math.max(0, orderQuantity - filledQuantity);
-        const rejectedReason = item.rjct_rson_name || item.rjct_rson || undefined;
-
-        return {
-          orderNo: item.odno,
-          stockCode: item.pdno,
-          side: (item.sll_buy_dvsn_cd === '01' ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
-          orderQuantity,
-          filledQuantity,
-          remainingQuantity,
-          orderPrice: item.ft_ord_unpr3 ? parseFloat(item.ft_ord_unpr3) || 0 : undefined,
-          filledPrice: item.ft_ccld_unpr3 ? parseFloat(item.ft_ccld_unpr3) || 0 : undefined,
-          exchangeCode: item.ovrs_excg_cd,
-          orderDate: item.ord_dt,
-          orderTime: item.ord_tmd,
-          rejected: !!rejectedReason,
-          rejectedReason,
-        };
-      });
+    return this.orderHistory.getOrderExecutions('OVERSEAS', startDate, endDate);
   }
 
   /** 해외 주문 취소 */
   async cancelOrder(exchangeCode: string, orderNo: string, stockCode: string, qty: number, _price: number): Promise<OrderResult> {
     const trIds = OVERSEAS_ORDER_TR_IDS[exchangeCode];
     if (!trIds) {
-      return { success: false, message: `Unsupported exchange for cancel: ${exchangeCode}` };
+      return {
+        outcome: 'REJECTED',
+        success: false,
+        message: `Unsupported exchange for cancel: ${exchangeCode}`,
+      };
     }
 
     const trId = this.isPaper ? trIds.cancelPaper : trIds.cancel;
 
+    const callStartedAt = new Date();
     try {
       const res = await this.kisBase.post<OverseasOrderOutput>(
         '/uapi/overseas-stock/v1/trading/order-rvsecncl',
@@ -721,13 +367,13 @@ export class KisOverseasService {
           ORD_SVR_DVSN_CD: '0',
         },
       );
-      return {
-        success: true,
-        orderNo: res.output?.ODNO,
-        message: `Cancel order placed: ${exchangeCode}:${stockCode} #${orderNo}`,
-      };
+      return classifyKisOrderResponse(
+        res,
+        callStartedAt,
+        `Cancel order placed: ${exchangeCode}:${stockCode} #${orderNo}`,
+      );
     } catch (e) {
-      return { success: false, message: e.message };
+      return classifyKisMutationFailure(e);
     }
   }
 
@@ -907,300 +553,6 @@ export class KisOverseasService {
 
   /** 해외 잔고 조회 */
   async getBalance(nationCode = '000'): Promise<BalanceItem[]> {
-    if (this.isPaper || this.useStandardBalanceOnly) {
-      return this.getStandardBalance();
-    }
-
-    try {
-      return (await this.getPresentBalanceSnapshot(nationCode)).balance;
-    } catch (error) {
-      if (!this.shouldFallbackToStandardBalance(error)) {
-        throw error;
-      }
-
-      this.useStandardBalanceOnly = true;
-      this.logger.warn(
-        `Falling back to overseas standard balance API after present balance failure: ${error.message}`,
-      );
-      return this.getStandardBalance();
-    }
-  }
-
-  private async getPresentBalanceSnapshot(nationCode = '000'): Promise<{
-    balance: BalanceItem[];
-    cashBalances: OverseasCashBalance[];
-  }> {
-    const trId = this.isPaper ? 'VTRP6504R' : 'CTRP6504R';
-    const items: BalanceItem[] = [];
-    let rawItemCount = 0;
-    const cashBalances = new Map<string, OverseasCashBalance>();
-    let ctxAreaFk200 = '';
-    let ctxAreaNk200 = '';
-    let hasMore = true;
-    let depth = 0;
-
-    while (hasMore && depth < 10) {
-      const params: Record<string, string> = {
-        CANO: this.accountNo.substring(0, 8),
-        ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-        WCRC_FRCR_DVSN_CD: '01',
-        NATN_CD: nationCode,
-        TR_MKET_CD: '00',
-        INQR_DVSN_CD: '00',
-      };
-
-      if (this.hasContinuationToken(ctxAreaFk200)) {
-        params['CTX_AREA_FK200'] = ctxAreaFk200;
-        params['CTX_AREA_NK200'] = ctxAreaNk200;
-      }
-
-      const res = await this.kisBase.get(
-        '/uapi/overseas-stock/v1/trading/inquire-present-balance',
-        trId,
-        params,
-      );
-
-      const output1 = res.output1 as OverseasBalanceItem[];
-      const parsedCountBefore = items.length;
-      this.logRawBalancePage(
-        'present-balance',
-        output1,
-        res.output2,
-        { page: depth + 1 },
-      );
-      if (output1) {
-        rawItemCount += output1.length;
-        for (const item of output1) {
-          const parsed = this.parseOverseasPresentBalanceRow(item as unknown as Record<string, any>);
-          if (!parsed) {
-            if (this.debugRawBalance) {
-              this.logger.warn(
-                `[KIS DEBUG] present-balance skipped row due to qty<=0 ${JSON.stringify({
-                  stockCode: this.readString(item as unknown as Record<string, any>, 'ovrs_pdno', 'pdno'),
-                  exchangeCode: this.readString(item as unknown as Record<string, any>, 'ovrs_excg_cd'),
-                  parsedQty: this.readNumber(item as unknown as Record<string, any>, 'ovrs_cblc_qty', 'ccld_qty_smtl1', 'ord_psbl_qty1', 'cblc_qty13') || 0,
-                  quantityFields: this.pickQuantityFields(item as unknown as Record<string, any>),
-                  row: item,
-                })}`,
-              );
-            }
-            continue;
-          }
-          items.push(parsed);
-        }
-      }
-
-      if ((output1?.length ?? 0) > 0 && items.length === parsedCountBefore) {
-        this.logRawBalancePage(
-          'present-balance:unparsed-page',
-          output1,
-          res.output2,
-          { page: depth + 1, parsedCountBefore, parsedCountAfter: items.length },
-          true,
-        );
-      }
-
-      const output2 = (res.output2 as OverseasPresentBalanceCurrencyItem[]) || [];
-      for (const item of output2) {
-        if (!item.crcy_cd) continue;
-        const row = item as unknown as Record<string, any>;
-        const balance: OverseasCashBalance = {
-          currencyCode: item.crcy_cd,
-          currencyName: item.crcy_cd_name || undefined,
-          amount: this.readNumber(row, 'frcr_dncl_amt_2', 'frcr_dncl_amt1') ?? 0,
-        };
-        const optionalFields: Array<[string, number | undefined]> = [
-          ['withdrawableAmount', this.readNumber(row, 'frcr_drwg_psbl_amt_1')],
-          ['orderableAmount', this.readNumber(row, 'frcr_use_psbl_amt', 'frcr_ord_psbl_amt1')],
-          ['pendingSellAmount', this.readNumber(row, 'ustl_sll_amt_smtl', 'ustl_sll_amt')],
-          ['pendingBuyAmount', this.readNumber(row, 'ustl_buy_amt_smtl', 'ustl_buy_amt')],
-        ];
-        for (const [key, value] of optionalFields) {
-          if (value !== undefined) {
-            (balance as unknown as Record<string, number>)[key] = value;
-          }
-        }
-        cashBalances.set(item.crcy_cd, balance);
-      }
-
-      const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();
-      const nextCtxAreaNk200 = ((res as any).ctx_area_nk200 || '').trim();
-
-      this.logger.debug(
-        `Overseas present balance page ${depth + 1}: received=${output1?.length ?? 0}, accumulated=${items.length}, currencies=${cashBalances.size}, nextFk200Length=${nextCtxAreaFk200.length}, nextNk200Length=${nextCtxAreaNk200.length}`,
-      );
-
-      if (
-        this.hasRepeatedContinuationToken(
-          ctxAreaFk200,
-          ctxAreaNk200,
-          nextCtxAreaFk200,
-          nextCtxAreaNk200,
-        )
-      ) {
-        this.logger.warn(
-          `Overseas present balance pagination stalled at page ${depth + 1}; stopping repeated continuation token loop`,
-        );
-        break;
-      }
-
-      ctxAreaFk200 = nextCtxAreaFk200;
-      ctxAreaNk200 = nextCtxAreaNk200;
-      hasMore = this.hasContinuationToken(ctxAreaFk200);
-      depth++;
-    }
-
-    if (rawItemCount > 0 && items.length === 0) {
-      this.logRawBalancePage(
-        'present-balance:unparsed-fallback',
-        [],
-        Array.from(cashBalances.values()),
-        { rawItemCount, parsedCount: items.length },
-        true,
-      );
-      this.logger.warn(
-        'Overseas present balance returned raw items but no usable holdings; falling back to standard balance parser',
-      );
-      return {
-        balance: await this.getStandardBalance(),
-        cashBalances: Array.from(cashBalances.values()),
-      };
-    }
-
-    return {
-      balance: items,
-      cashBalances: Array.from(cashBalances.values()),
-    };
-  }
-
-  private async getStandardBalance(): Promise<BalanceItem[]> {
-    const items: BalanceItem[] = [];
-    const exchanges = this.getStandardBalanceExchanges();
-
-    for (const exchangeCode of exchanges) {
-      const currencyCode = EXCHANGE_CURRENCY[exchangeCode];
-      if (!currencyCode) continue;
-
-      let ctxAreaFk200 = '';
-      let ctxAreaNk200 = '';
-      let hasMore = true;
-      let depth = 0;
-
-      while (hasMore && depth < 10) {
-        const params: Record<string, string> = {
-          CANO: this.accountNo.substring(0, 8),
-          ACNT_PRDT_CD: this.accountNo.substring(8, 10) || this.prodCode,
-          OVRS_EXCG_CD: exchangeCode,
-          TR_CRCY_CD: currencyCode,
-          CTX_AREA_FK200: ctxAreaFk200,
-          CTX_AREA_NK200: ctxAreaNk200,
-        };
-
-        const additionalHeaders: Record<string, string> = {};
-        if (this.hasContinuationToken(ctxAreaFk200)) {
-          additionalHeaders['tr_cont'] = 'N';
-        }
-
-        const res = await this.kisBase.get(
-          '/uapi/overseas-stock/v1/trading/inquire-balance',
-          this.isPaper ? 'VTTS3012R' : 'TTTS3012R',
-          params,
-          additionalHeaders,
-        );
-
-        const output1 = res.output1 as OverseasStandardBalanceItem[];
-        const parsedCountBefore = items.length;
-        this.logRawBalancePage(
-          `standard-balance:${exchangeCode}`,
-          output1,
-          undefined,
-          { page: depth + 1, currencyCode },
-        );
-        if (output1) {
-          for (const item of output1) {
-            const parsed = this.parseOverseasStandardBalanceRow(
-              item as unknown as Record<string, any>,
-              exchangeCode,
-            );
-            if (!parsed) {
-              if (this.debugRawBalance) {
-                this.logger.warn(
-                  `[KIS DEBUG] standard-balance skipped row due to qty<=0 ${JSON.stringify({
-                    stockCode: this.readString(item as unknown as Record<string, any>, 'pdno', 'ovrs_pdno'),
-                    exchangeCode: this.readString(item as unknown as Record<string, any>, 'ovrs_excg_cd') || exchangeCode,
-                    parsedQty: this.readNumber(item as unknown as Record<string, any>, 'ccld_qty_smtl1', 'ovrs_cblc_qty', 'ord_psbl_qty') || 0,
-                    quantityFields: this.pickQuantityFields(item as unknown as Record<string, any>),
-                    row: item,
-                  })}`,
-                );
-              }
-              continue;
-            }
-            items.push(parsed);
-          }
-        }
-
-        if ((output1?.length ?? 0) > 0 && items.length === parsedCountBefore) {
-          this.logRawBalancePage(
-            `standard-balance:${exchangeCode}:unparsed-page`,
-            output1,
-            undefined,
-            { page: depth + 1, currencyCode, parsedCountBefore, parsedCountAfter: items.length },
-            true,
-          );
-        }
-
-        const nextCtxAreaFk200 = ((res as any).ctx_area_fk200 || '').trim();
-        const nextCtxAreaNk200 = ((res as any).ctx_area_nk200 || '').trim();
-
-        this.logger.debug(
-          `Overseas standard balance ${exchangeCode} page ${depth + 1}: received=${output1?.length ?? 0}, accumulated=${items.length}, nextFk200Length=${nextCtxAreaFk200.length}, nextNk200Length=${nextCtxAreaNk200.length}`,
-        );
-
-        if (
-          this.hasRepeatedContinuationToken(
-            ctxAreaFk200,
-            ctxAreaNk200,
-            nextCtxAreaFk200,
-            nextCtxAreaNk200,
-          )
-        ) {
-          this.logger.warn(
-            `Overseas standard balance pagination stalled for ${exchangeCode} at page ${depth + 1}; stopping repeated continuation token loop`,
-          );
-          break;
-        }
-
-        ctxAreaFk200 = nextCtxAreaFk200;
-        ctxAreaNk200 = nextCtxAreaNk200;
-        hasMore = this.hasContinuationToken(ctxAreaFk200);
-        depth++;
-      }
-    }
-
-    return items;
-  }
-
-  private getStandardBalanceExchanges(): string[] {
-    if (this.isPaper) {
-      return ['NASD', 'NYSE', 'AMEX', 'SEHK', 'SHAA', 'SZAA', 'TKSE', 'HASE', 'VNSE'];
-    }
-
-    return ['NASD', 'SEHK', 'SHAA', 'SZAA', 'TKSE', 'HASE', 'VNSE'];
-  }
-
-  private toLocalCurrencyPrice(rawPrice: string, exchangeRate: number, unitAmount: number): number {
-    const parsedPrice = parseFloat(rawPrice) || 0;
-    // 0 또는 환율 미지정이면 변환 불가 — 그대로 반환.
-    // 음수(평가손익 등)도 환율 변환되어야 한다. 이전 `<= 0` 가드는 음수 손익을
-    // KRW 값 그대로 흘려보내 슬랙 알림이 "$-20,374" 같은 단위 오류를 일으켰음.
-    if (parsedPrice === 0 || exchangeRate <= 0) return parsedPrice;
-    const currencyUnit = unitAmount > 0 ? unitAmount : 1;
-    return (parsedPrice / exchangeRate) * currencyUnit;
-  }
-
-  private shouldFallbackToStandardBalance(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    return message.includes('INVALID_CHECK_ACNO');
+    return this.balanceService.getBalance(nationCode);
   }
 }

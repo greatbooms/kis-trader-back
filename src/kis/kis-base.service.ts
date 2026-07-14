@@ -4,7 +4,12 @@ import axios, { AxiosRequestConfig } from 'axios';
 import * as http from 'http';
 import * as https from 'https';
 import { KisAuthService } from './kis-auth.service';
+import {
+  isKisBusinessRejectionCode,
+  KisMutationError,
+} from './kis-mutation.error';
 import { KisApiResponse } from './types/kis-api.types';
+import { KisResponseWithMetadata } from './types/kis-response-metadata.type';
 
 const RETRYABLE_ERRORS = new Set([
   'ECONNRESET',
@@ -80,6 +85,16 @@ export class KisBaseService {
     params: Record<string, string>,
     additionalHeaders?: Record<string, string>,
   ): Promise<KisApiResponse<T>> {
+    const response = await this.getWithMetadata<T>(path, trId, params, additionalHeaders);
+    return response.data;
+  }
+
+  async getWithMetadata<T = any>(
+    path: string,
+    trId: string,
+    params: Record<string, string>,
+    additionalHeaders?: Record<string, string>,
+  ): Promise<KisResponseWithMetadata<KisApiResponse<T>>> {
     await this.rateLimit();
     const url = `${this.kisAuthService.getBaseUrl()}${path}`;
     const headers = await this.buildHeaders(trId, additionalHeaders);
@@ -97,7 +112,11 @@ export class KisBaseService {
       try {
         const response = await axios.get(url, config);
         this.checkError(response.data, path, trId);
-        return response.data;
+        const trCont = this.readTrCont(response.headers);
+        return {
+          data: response.data,
+          ...(trCont ? { trCont } : {}),
+        };
       } catch (e) {
         if (attempt < this.maxRetries && this.isRetryable(e)) {
           const delay = (attempt + 1) * 500;
@@ -120,37 +139,86 @@ export class KisBaseService {
     body: Record<string, any>,
     additionalHeaders?: Record<string, string>,
   ): Promise<KisApiResponse<T>> {
-    await this.rateLimit();
-    const url = `${this.kisAuthService.getBaseUrl()}${path}`;
-    const headers = await this.buildHeaders(trId, additionalHeaders);
+    let url: string;
+    let config: AxiosRequestConfig;
+    try {
+      await this.rateLimit();
+      url = `${this.kisAuthService.getBaseUrl()}${path}`;
+      const headers = await this.buildHeaders(trId, additionalHeaders);
 
-    this.logger.debug(`POST ${path} [${trId}]`);
-    const config: AxiosRequestConfig = {
-      headers,
-      timeout: 10_000,
-      httpAgent: this.httpAgent,
-      httpsAgent: this.httpsAgent,
-    };
-
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        const response = await axios.post(url, body, config);
-        this.checkError(response.data, path, trId);
-        return response.data;
-      } catch (e) {
-        if (attempt < this.maxRetries && this.isRetryable(e)) {
-          const delay = (attempt + 1) * 500;
-          this.logger.warn(
-            `Retrying POST ${path} [${trId}] after ${delay}ms (attempt ${attempt + 1}): ${this.formatHttpError(e)}`,
-          );
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-        throw new Error(this.formatHttpError(e));
-      }
+      this.logger.debug(`POST ${path} [${trId}]`);
+      config = {
+        headers,
+        timeout: 10_000,
+        httpAgent: this.httpAgent,
+        httpsAgent: this.httpsAgent,
+      };
+    } catch {
+      const message = `KIS mutation not submitted [${trId}] ${path}: request setup failed`;
+      this.logger.warn(message);
+      throw new KisMutationError('BUSINESS_REJECTION', message);
     }
 
-    throw new Error('Unreachable');
+    let response;
+    try {
+      response = await axios.post(url, body, config);
+    } catch (e) {
+      const rejection = e?.response?.data;
+      if (this.isBusinessRejection(rejection)) {
+        throw this.businessRejectionError(rejection, path, trId);
+      }
+      throw new KisMutationError(
+        'TRANSPORT_UNKNOWN',
+        `KIS mutation outcome unknown [${trId}] ${path}: ${this.formatHttpError(e)}`,
+      );
+    }
+
+    const data: unknown = response.data;
+    if (!this.isKisEnvelope(data)) {
+      throw new KisMutationError(
+        'TRANSPORT_UNKNOWN',
+        `KIS mutation outcome unknown [${trId}] ${path}: malformed response`,
+      );
+    }
+    if (data.rt_cd !== '0') {
+      if (this.isBusinessRejection(data)) {
+        throw this.businessRejectionError(data, path, trId);
+      }
+      throw new KisMutationError(
+        'TRANSPORT_UNKNOWN',
+        `KIS mutation outcome unknown [${trId}] ${path}: incomplete rejection response`,
+      );
+    }
+
+    return data as KisApiResponse<T>;
+  }
+
+  private readTrCont(headers: any): string | undefined {
+    const value = typeof headers?.get === 'function'
+      ? headers.get('tr_cont') ?? headers.get('tr-cont')
+      : headers?.tr_cont ?? headers?.['tr-cont'];
+    const firstValue = Array.isArray(value) ? value[0] : value;
+    if (typeof firstValue !== 'string') return undefined;
+    const trimmed = firstValue.trim();
+    return trimmed || undefined;
+  }
+
+  private isKisEnvelope(data: unknown): data is KisApiResponse {
+    return !!data
+      && typeof data === 'object'
+      && typeof (data as Partial<KisApiResponse>).rt_cd === 'string';
+  }
+
+  private isBusinessRejection(data: unknown): data is KisApiResponse {
+    if (!this.isKisEnvelope(data) || !isKisBusinessRejectionCode(data.rt_cd)) return false;
+    if (typeof data.msg_cd !== 'string' || typeof data.msg1 !== 'string') return false;
+    return data.msg_cd.trim().length > 0 || data.msg1.trim().length > 0;
+  }
+
+  private businessRejectionError(data: KisApiResponse, path: string, trId: string): KisMutationError {
+    const message = `KIS API rejection [${trId}] ${path}: ${data.msg_cd} - ${data.msg1}`;
+    this.logger.warn(message);
+    return new KisMutationError('BUSINESS_REJECTION', message, data);
   }
 
   private checkError(data: KisApiResponse, path: string, trId: string): void {
