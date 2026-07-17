@@ -383,39 +383,47 @@ export class TradingOrderReconciliationService {
   }
 
   private async getSubmittedSignal(tradeRecordId: string): Promise<TradingSignal | undefined> {
-    const executionLog = await this.prisma.watchStockExecutionLog.findFirst({
+    const executionLogs = await this.prisma.watchStockExecutionLog.findMany({
       where: {
         tradeRecordId,
         eventType: WatchStockExecutionEventType.ORDER_SUBMITTED,
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (!executionLog) {
-      const approval = await this.prisma.stopLossApproval.findFirst({
-        where: {
-          tradeRecordId,
-          status: ApprovalStatus.APPROVED,
-        },
-        orderBy: { respondedAt: 'desc' },
-        select: { signal: true },
-      });
-      return this.normalizeStoredSignal(approval?.signal);
+
+    for (const executionLog of executionLogs) {
+      const details = (executionLog.details as Record<string, any> | null) || {};
+      const quantity = Number(details.quantity);
+      if (
+        (details.side !== 'BUY' && details.side !== 'SELL')
+        || !Number.isFinite(quantity)
+        || quantity <= 0
+      ) {
+        continue;
+      }
+
+      return {
+        market: executionLog.market as 'DOMESTIC' | 'OVERSEAS',
+        exchangeCode: executionLog.exchangeCode,
+        stockCode: executionLog.stockCode,
+        side: details.side,
+        quantity,
+        price: details.price !== undefined ? Number(details.price) : undefined,
+        orderDivision: details.orderDivision as string | undefined,
+        reason: details.reason || executionLog.message,
+        metadata: details.metadata as Record<string, any> | undefined,
+      };
     }
 
-    const details = (executionLog.details as Record<string, any> | null) || {};
-    if (!details.side || !details.quantity) return undefined;
-
-    return {
-      market: executionLog.market as 'DOMESTIC' | 'OVERSEAS',
-      exchangeCode: executionLog.exchangeCode,
-      stockCode: executionLog.stockCode,
-      side: details.side as 'BUY' | 'SELL',
-      quantity: Number(details.quantity),
-      price: details.price !== undefined ? Number(details.price) : undefined,
-      orderDivision: details.orderDivision as string | undefined,
-      reason: details.reason || executionLog.message,
-      metadata: details.metadata as Record<string, any> | undefined,
-    };
+    const approval = await this.prisma.stopLossApproval.findFirst({
+      where: {
+        tradeRecordId,
+        status: ApprovalStatus.APPROVED,
+      },
+      orderBy: { respondedAt: 'desc' },
+      select: { signal: true },
+    });
+    return this.normalizeStoredSignal(approval?.signal);
   }
 
   private normalizeStoredSignal(value: unknown): TradingSignal | undefined {
@@ -664,7 +672,12 @@ export class TradingOrderReconciliationService {
     if (!record) return;
 
     const signal = await this.getSubmittedSignal(tradeRecordId);
-    if (!signal) return;
+    if (!signal) {
+      this.logger.warn(
+        `[${record.stockCode}] Slack fill alert skipped: submitted signal unavailable for trade ${tradeRecordId}`,
+      );
+      return;
+    }
 
     const position = await this.prisma.position.findFirst({
       where: {
