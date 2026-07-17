@@ -24,6 +24,7 @@ describe('TradingOrderReconciliationService', () => {
     watchStockExecutionLog: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     stopLossApproval: {
       findFirst: jest.fn(),
@@ -54,6 +55,10 @@ describe('TradingOrderReconciliationService', () => {
   beforeEach(async () => {
     mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.$transaction.mockImplementation(async (work) => work(mockPrisma));
+    mockPrisma.watchStockExecutionLog.findMany.mockImplementation(async () => {
+      const log = await mockPrisma.watchStockExecutionLog.findFirst();
+      return log ? [log] : [];
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TradingOrderReconciliationService,
@@ -560,6 +565,117 @@ describe('TradingOrderReconciliationService', () => {
           execution: expect.objectContaining({
             quantity: 10,
             price: 70000,
+            status: 'FILLED',
+          }),
+        }),
+      );
+    });
+
+    it('uses the newest valid submitted signal when the latest submission log lacks signal details', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-buy-slack-1',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 72.11,
+          executedQty: 0,
+          executedPrice: null,
+          orderNo: '0031180488',
+          status: 'PENDING',
+          strategyName: 'infinite-buy',
+          createdAt: new Date('2026-07-16T15:30:07.670Z'),
+        },
+      ]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-buy-slack-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 72.11,
+        executedQty: 2,
+        executedPrice: 72.0798,
+        orderNo: '0031180488',
+        strategyName: 'infinite-buy',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-tqqq',
+        quota: 10_000,
+        maxCycles: 40,
+      });
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        message: '주문 접수: BUY 2주',
+        details: {
+          orderNo: '0031180488',
+          outcome: 'ACCEPTED',
+          orderTime: '003008',
+        },
+      });
+      mockPrisma.watchStockExecutionLog.findMany.mockResolvedValue([
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          message: '주문 접수: BUY 2주',
+          details: {
+            orderNo: '0031180488',
+            outcome: 'ACCEPTED',
+            orderTime: '003008',
+          },
+        },
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          message: '주문 제출: BUY 2주',
+          details: {
+            side: 'BUY',
+            quantity: 2,
+            price: 72.11,
+            orderDivision: '00',
+            reason: 'Buy1: T=20.6, 70%, 2주 @ 72.11',
+          },
+        },
+      ]);
+
+      await service.reconcileOpenOrders(
+        'OVERSEAS',
+        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 69 }],
+        [],
+        [
+          {
+            orderNo: '0031180488',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            orderQuantity: 2,
+            filledQuantity: 2,
+            remainingQuantity: 0,
+            filledPrice: 72.0798,
+            exchangeCode: 'NASD',
+          },
+        ],
+      );
+
+      expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          signal: expect.objectContaining({
+            side: 'BUY',
+            quantity: 2,
+            price: 72.0798,
+            reason: 'Buy1: T=20.6, 70%, 2주 @ 72.11',
+          }),
+          execution: expect.objectContaining({
+            quantity: 2,
+            price: 72.0798,
             status: 'FILLED',
           }),
         }),
