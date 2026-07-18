@@ -5,12 +5,17 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { OrderSyncService } from './order-sync.service';
+import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
 describe('OrderSyncService', () => {
   let service: OrderSyncService;
 
   const mockOrderReconciliationService = {
     reconcileOpenOrders: jest.fn(),
+  };
+
+  const mockAccountCashSync = {
+    refreshMarketCash: jest.fn(),
   };
 
   const mockKisDomestic = {
@@ -44,6 +49,7 @@ describe('OrderSyncService', () => {
       providers: [
         OrderSyncService,
         { provide: TradingOrderReconciliationService, useValue: mockOrderReconciliationService },
+        { provide: TradingAccountCashSyncService, useValue: mockAccountCashSync },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: PrismaService, useValue: mockPrisma },
@@ -60,6 +66,7 @@ describe('OrderSyncService', () => {
   });
 
   it('should sync domestic open orders with broker executions and unfilled orders', async () => {
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
     mockPrisma.tradeRecord.findMany.mockResolvedValue([
       { createdAt: new Date('2026-04-08T00:30:00.000Z') },
     ]);
@@ -100,6 +107,46 @@ describe('OrderSyncService', () => {
         },
       ],
     );
+  });
+
+  it('refreshes domestic cash once when reconciliation finds new fills', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: true });
+
+    await service.syncMarketOrders('DOMESTIC', []);
+
+    expect(mockAccountCashSync.refreshMarketCash).toHaveBeenCalledTimes(1);
+    expect(mockAccountCashSync.refreshMarketCash).toHaveBeenCalledWith('DOMESTIC');
+  });
+
+  it('does not refresh cash when reconciliation finds no new fill', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
+
+    await service.syncMarketOrders('DOMESTIC', []);
+
+    expect(mockAccountCashSync.refreshMarketCash).not.toHaveBeenCalled();
+  });
+
+  it('keeps order reconciliation successful when cash refresh fails', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: true });
+    mockAccountCashSync.refreshMarketCash.mockRejectedValue(new Error('balance unavailable'));
+
+    await expect(service.syncMarketOrders('DOMESTIC', [])).resolves.toBeUndefined();
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledTimes(1);
   });
 
   it('should skip non-forced sync when last sync is still within the dynamic interval', async () => {

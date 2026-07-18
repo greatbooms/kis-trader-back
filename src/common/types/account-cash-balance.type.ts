@@ -1,7 +1,5 @@
-import { Market } from '@prisma/client';
-
 export interface AccountCashBalance {
-  market: Market;
+  market: 'DOMESTIC' | 'OVERSEAS';
   currencyCode: string;
   currencyName?: string;
   amount: number;

@@ -18,6 +18,7 @@ export { InfiniteBuyStrategyParams, InfiniteBuySecondaryExitPlan, Buy2DipMode, R
 export { MomentumBreakoutStrategyParams } from './momentum-breakout-strategy-params.type';
 export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-params.type';
 export { PositionQuantitySnapshot } from './order-reconciliation.type';
+export { OrderReconciliationResult } from './order-reconciliation-result.type';
 export { OrderSyncOptions } from './order-sync-options.type';
 export { OrderSyncWindow } from './order-sync-window.type';
 export { DailySummaryScope } from './daily-summary-scope.type';

@@ -7,6 +7,7 @@ import { BalanceItem, StockPriceResult } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
+import { TradingAccountCashSyncService } from '../trading/trading-account-cash-sync.service';
 
 @Injectable()
 export class TradeRecordService {
@@ -18,6 +19,7 @@ export class TradeRecordService {
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
     private marketAnalysis: MarketAnalysisService,
+    private readonly accountCashSync: TradingAccountCashSyncService,
   ) {}
 
   findAll(options?: {
@@ -222,34 +224,7 @@ export class TradeRecordService {
     }
 
     if (cashBalances.length > 0) {
-      const cacheValue = {
-        cashBalances: cashBalances.map((item) => ({
-          market: item.market,
-          currencyCode: item.currencyCode,
-          currencyName: item.currencyName ?? null,
-          amount: item.amount,
-          withdrawableAmount: item.withdrawableAmount ?? null,
-          orderableAmount: item.orderableAmount ?? null,
-          generalOrderableAmount: item.generalOrderableAmount ?? null,
-          integratedOrderableAmount: item.integratedOrderableAmount ?? null,
-          pendingBuyAmount: item.pendingBuyAmount ?? null,
-          pendingSellAmount: item.pendingSellAmount ?? null,
-          receivableAmount: item.receivableAmount ?? null,
-          marginAmount: item.marginAmount ?? null,
-        })),
-        lastSyncedAt: new Date().toISOString(),
-      } as Prisma.InputJsonValue;
-
-      await this.prisma.appSetting.upsert({
-        where: { key: this.accountStatusCacheKey },
-        create: {
-          key: this.accountStatusCacheKey,
-          value: cacheValue,
-        },
-        update: {
-          value: cacheValue,
-        },
-      });
+      await this.accountCashSync.replaceCache(cashBalances);
     }
 
     this.logger.debug(
