@@ -14,7 +14,7 @@ import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
 import type { TradeAlertContext } from '../notification/types/notification.types';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
-import { PositionQuantitySnapshot, TradingSignal } from './types';
+import { OrderReconciliationResult, PositionQuantitySnapshot, TradingSignal } from './types';
 import { TradingService } from './trading.service';
 import { TradingBrokerContextService } from './trading-broker-context.service';
 
@@ -34,7 +34,7 @@ export class TradingOrderReconciliationService {
     currentPositions: PositionQuantitySnapshot[],
     unfilledOrders: UnfilledOrder[],
     brokerOrders: BrokerOrderStatus[],
-  ): Promise<void> {
+  ): Promise<OrderReconciliationResult> {
     const currentBrokerContext = this.brokerContext.getCurrentContext();
     const openRecords = await this.prisma.tradeRecord.findMany({
       where: {
@@ -47,7 +47,9 @@ export class TradingOrderReconciliationService {
       orderBy: { createdAt: 'asc' },
     });
 
-    if (openRecords.length === 0) return;
+    if (openRecords.length === 0) return { hasNewFill: false };
+
+    let hasNewFill = false;
 
     const currentPositionMap = new Map<string, number>();
     for (const position of currentPositions) {
@@ -78,12 +80,13 @@ export class TradingOrderReconciliationService {
         const isStillOpen = unfilledOrders.some((order) =>
           this.matchesOrderTuple(record, order, market),
         );
-        await this.reconcileAcceptedCancellation(
+        const cancellationHasNewFill = await this.reconcileAcceptedCancellation(
           record,
           brokerOrder,
           isStillOpen,
           currentPositionQty,
         );
+        hasNewFill ||= cancellationHasNewFill;
         continue;
       }
 
@@ -120,6 +123,7 @@ export class TradingOrderReconciliationService {
           if (changed.count === 0) continue;
 
           if (filledNowQty > 0) {
+            hasNewFill = true;
             const qtyBeforeFill = record.side === Side.BUY
               ? Math.max(0, currentPositionQty - filledNowQty)
               : currentPositionQty + filledNowQty;
@@ -181,6 +185,8 @@ export class TradingOrderReconciliationService {
         await this.logReconciledOrder(record.id, OrderStatus.CANCELLED, executedQty);
       }
     }
+
+    return { hasNewFill };
   }
 
   // ── Helpers ──
@@ -260,7 +266,7 @@ export class TradingOrderReconciliationService {
       });
       return true;
     });
-    if (!resolved) return true;
+    if (!resolved) return false;
 
     if (filledNowQty > 0) {
       const qtyBeforeFill = record.side === Side.BUY
@@ -272,7 +278,7 @@ export class TradingOrderReconciliationService {
     }
     await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
     await this.notifyTradeFill(record.id, nextStatus, filledNowQty);
-    return true;
+    return filledNowQty > 0;
   }
 
   private getPositionKey(

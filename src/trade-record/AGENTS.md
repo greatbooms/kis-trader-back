@@ -26,5 +26,5 @@
 - **`profitRate`는 % 단위로 저장됨** → resolver에서 `/100`로 decimal 변환해 응답
 - 대시보드 요약(`getDashboardSummary`)은 모든 `FILLED` TradeRecord를 in-memory aggregate — TradeRecord 수가 매우 커지면 성능 검토 (현재는 수천 건 수준)
 - 시세 조회(`getDomesticQuote`/`getOverseasQuote`)는 KIS API + `MarketAnalysisService.calculateTechnicalRatings` 합쳐서 반환 — 한 번에 RSI/MA/ATR 등 표시
-- **`refreshAccountState`**: KIS broker 잔고를 강제 동기화하고 in-memory `AccountStatusCache`를 갱신. resolver에서 직접 호출 가능 — 운영 중 잔고 불일치 발생 시 사용
+- **`refreshAccountState`**: KIS broker 잔고를 강제 동기화하고 exported `TradingAccountCashSyncService.replaceCache`로 `AccountStatusCache`를 원자적으로 갱신. resolver에서 직접 호출 가능 — 운영 중 잔고 불일치 발생 시 사용
 - 신주문 생성이 필요한 흐름은 반드시 `TradingService` 경유: 이 모듈에서 새 BUY 주문을 만들지 않을 것

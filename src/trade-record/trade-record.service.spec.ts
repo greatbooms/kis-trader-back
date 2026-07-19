@@ -5,6 +5,7 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { ConfigService } from '@nestjs/config';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
+import { TradingAccountCashSyncService } from '../trading/trading-account-cash-sync.service';
 
 describe('TradeRecordService', () => {
   let service: TradeRecordService;
@@ -70,6 +71,10 @@ describe('TradeRecordService', () => {
     })),
   };
 
+  const mockAccountCashSync = {
+    replaceCache: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -79,6 +84,7 @@ describe('TradeRecordService', () => {
         { provide: KisOverseasService, useValue: mockKisOverseas },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
+        { provide: TradingAccountCashSyncService, useValue: mockAccountCashSync },
       ],
     }).compile();
 
@@ -270,11 +276,10 @@ describe('TradeRecordService', () => {
       const result = await service.refreshAccountState();
 
       expect(result.success).toBe(true);
-      expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { key: 'account_status_cache' },
-        }),
-      );
+      expect(mockAccountCashSync.replaceCache).toHaveBeenCalledWith([
+        expect.objectContaining({ market: 'DOMESTIC', currencyCode: 'KRW', amount: 500000 }),
+        expect.objectContaining({ market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5 }),
+      ]);
       expect(result.accountSummary.cashBalances).toEqual([
         expect.objectContaining({ currencyCode: 'KRW', amount: 500000 }),
         expect.objectContaining({ currencyCode: 'USD', amount: 1200.5 }),

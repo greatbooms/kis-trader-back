@@ -7,6 +7,7 @@ import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PrismaService } from '../prisma.service';
 import { OrderSyncOptions, OrderSyncWindow, PositionQuantitySnapshot } from './types';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
+import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
 @Injectable()
 export class OrderSyncService {
@@ -20,6 +21,7 @@ export class OrderSyncService {
     private kisOverseas: KisOverseasService,
     private prisma: PrismaService,
     private configService: ConfigService,
+    private readonly accountCashSync: TradingAccountCashSyncService,
   ) {
     this.isPaper = this.configService.get<string>('kis.env') === 'paper';
   }
@@ -36,12 +38,20 @@ export class OrderSyncService {
     const brokerOrders = await this.getBrokerOrders(market, window.startDate, window.endDate);
     const unfilledOrders = await this.mapUnfilledOrders(market, brokerOrders);
 
-    await this.orderReconciliationService.reconcileOpenOrders(
+    const result = await this.orderReconciliationService.reconcileOpenOrders(
       market,
       currentPositions,
       unfilledOrders,
       brokerOrders,
     );
+    if (result.hasNewFill) {
+      try {
+        await this.accountCashSync.refreshMarketCash(market);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Cash refresh after ${market} fill failed: ${reason}`);
+      }
+    }
     this.lastSyncedAt.set(market, new Date());
   }
 

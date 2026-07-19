@@ -41,6 +41,7 @@ import { TradingBrokerOrderRecoveryResolver } from './trading-broker-order-recov
 import { TradingBrokerRecoverySlackAlertService } from './trading-broker-recovery-slack-alert.service';
 import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingSellApprovalNotificationService } from './trading-sell-approval-notification.service';
+import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
 @Module({
   imports: [KisModule, NotificationModule],
@@ -51,6 +52,7 @@ import { TradingSellApprovalNotificationService } from './trading-sell-approval-
     TradingSellApprovalService,
     TradingSellApprovalWorkflowService,
     TradingSellApprovalNotificationService,
+    TradingAccountCashSyncService,
     TradingOrderReconciliationService,
     OrderSyncService,
     TradingOrchestrator,
@@ -104,6 +106,7 @@ import { TradingSellApprovalNotificationService } from './trading-sell-approval-
     TradingBrokerOrderRecoveryService,
     TradingLiveSwitchService,
     TradingOrderGuardService,
+    TradingAccountCashSyncService,
   ],
 })
 export class TradingModule {}

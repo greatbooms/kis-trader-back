@@ -81,7 +81,7 @@ describe('TradingOrderReconciliationService', () => {
     it('loads only open orders bound to the current broker context', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
 
-      await service.reconcileOpenOrders('OVERSEAS', [], [], []);
+      const result = await service.reconcileOpenOrders('OVERSEAS', [], [], []);
 
       expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith({
         where: {
@@ -93,6 +93,7 @@ describe('TradingOrderReconciliationService', () => {
         },
         orderBy: { createdAt: 'asc' },
       });
+      expect(result).toEqual({ hasNewFill: false });
     });
 
     it('atomically resolves an accepted cancellation when broker closure is confirmed', async () => {
@@ -521,7 +522,7 @@ describe('TradingOrderReconciliationService', () => {
         },
       });
 
-      await service.reconcileOpenOrders(
+      const result = await service.reconcileOpenOrders(
         'DOMESTIC',
         [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
         [],
@@ -569,6 +570,7 @@ describe('TradingOrderReconciliationService', () => {
           }),
         }),
       );
+      expect(result).toEqual({ hasNewFill: true });
     });
 
     it('uses the newest valid submitted signal when the latest submission log lacks signal details', async () => {

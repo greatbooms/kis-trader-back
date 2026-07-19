@@ -11,6 +11,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 - `trading-broker-order-submission.service.ts` — 국내/해외·BUY/SELL KIS 주문 mutation dispatch의 단일 gateway
 - `trading-position-sync.service.ts` — Broker 잔고를 DB `Position` 테이블에 반영
 - `trading-position-refresh.service.ts` — 주문 직전 broker 잔고 조회와 DB position 동기화를 한 번에 수행하는 공용 서비스
+- `trading-account-cash-sync.service.ts` — KIS 예수금 조회와 `account_status_cache`의 전체/시장별 원자적 갱신
 - `trading-order-reconciliation.service.ts` — 미체결 주문 상태 추적, 취소/체결 확정 + 전략별 후처리(carry 리셋 등)
 - `trading-broker-order-matcher.service.ts` — 저장된 broker context를 검증하고 완전한 KIS 주문 이력에서 불명 주문 복구 후보만 보수적으로 필터링하는 GET-only 서비스
 - `trading-broker-order-resolution.service.ts` — 불명 주문 후보의 기존 기록 충돌 검사, 사용자 선택 후보 연결, 미주문/기존 기록 일치 확정을 CAS/감사 트랜잭션으로 처리하는 서비스. 모든 확인은 mutation 시점의 완전한 KIS 재조회 후 수행하며 KIS POST는 호출하지 않음
@@ -46,12 +47,14 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
   - `TradingService.executePerStockStrategy` / `handleStrategySignalFill` — 신호 평가/일반 주문 위임/전략 fill 후처리 진입점
   - `TradingSellApprovalWorkflowService.approve` / `reject` — SELL 승인 결정 및 승인 주문 제출의 유일한 진입점
   - `TradingPositionSyncService.syncPositions` — Broker 잔고 기반 포지션 동기화 (scheduler/orchestrator에서 호출)
+  - `TradingAccountCashSyncService.refreshMarketCash` / `replaceCache` — 체결 후 시장별 예수금 갱신과 수동 전체 계좌 캐시 교체
   - `TradingOrderReconciliationService.reconcileOpenOrders` / `markOpenOrderCancelled` — 미체결 주문 정리 (order-sync/market-state-sync에서 호출)
   - `TradingOrchestrator.executeDomestic` / `executeOverseas` / `triggerWatchStockNow` / `runMarketRegimeDetection` / `isBusy` — cron이 호출하는 거래 루프 엔트리
   - `MarketStateSyncService.syncDomesticOpenOrders` / `syncOverseasOpenOrders` / `syncDomesticPortfolioState` / `syncOverseasPortfolioState` / `isMarketOpen` / `isExchangeHoliday` — 장중 broker 상태 동기화 및 시장 오픈 판단
   - `StrategyRegistryService.getStrategy(name)` — `screening`/`simulation`/`backtest`에서 같은 전략 인스턴스를 재사용
 - `TradingOrderReconciliationService`는 전략별 체결 후처리(carry 리셋 등)를 위해 `TradingService.handleStrategySignalFill`을 호출 — `TradingService` → `TradingOrderReconciliationService` 주입 금지 (순환 의존성)
 - 주문 직전 포지션 재동기화는 `TradingPositionRefreshService`를 사용하는 order execution/approval workflow가 담당한다. `TradingService`에 승인 전용 refresh/order 로직을 다시 추가하지 않는다.
+- **체결 후 예수금 동기화**: `OrderSyncService`는 reconciliation에서 새 체결이 확인된 경우에만 `TradingAccountCashSyncService.refreshMarketCash`를 시장당 한 번 호출한다. KIS/캐시 실패는 체결 확정을 되돌리지 않으며, 캐시 병합은 `account_status_cache` advisory transaction lock 아래 반대 시장 항목을 보존한다.
 - `TradingOrchestrator` → `TradingService`, `MarketStateSyncService` 주입. 반대로 `MarketStateSyncService`는 `TradingOrchestrator`를 참조하지 않음 (순환 의존성 회피)
 - **Slack 호출 게이트웨이**: 체결 알림은 `TradingOrderReconciliationService` 내부의 `reconcileOpenOrders`가 자체 호출(`notifyTradeFill` private). 승인 요청 전송은 `TradingSellApprovalService`, 승인 결과 원본 메시지 갱신은 `TradingSellApprovalNotificationService`, 불명 주문 알림/복구 표현은 `TradingBrokerRecoverySlackAlertService`/`TradingSlackRecoveryPresentationService`가 담당한다. strategy와 승인 workflow가 직접 `SlackService`를 호출하는 것은 금지한다.
 - **Slack adapter 소유권**: `TradingSlackCommandsService`, Slack 복구 authorization/presentation/actions/alert 서비스, `TradingSellApprovalWorkflowService`는 `TradingModule`의 local provider이며 export하지 않는다. `TradingModule -> NotificationModule` 단방향만 허용하고 `NotificationModule`은 Trading을 역참조하지 않는다.
