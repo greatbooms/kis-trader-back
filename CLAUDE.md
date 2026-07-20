@@ -190,9 +190,21 @@ client/src/
 
 - **Conventional Commits** (글로벌 CLAUDE.md 참조)
   - `feat`, `fix`, `refactor`, `chore`, `docs`, `style`, `perf`, `test`
+- **커밋 메시지 형식**: `type(scope): summary` 형태를 기본으로 한다.
+  - 예: `fix(deploy): verify pm2 release path`
+  - scope는 선택이지만, 변경 영역이 분명하면 사용한다 (`deploy`, `trading`, `screening` 등)
+- **브랜치명 형식**: 에이전트/도구 이름 prefix를 쓰지 말고 Conventional Commits의 type을 앞세운다.
+  - 예: `fix/deploy-pm2-release-path`, `feat/news-scoring`, `docs/update-agent-rules`
+  - 금지 예: `codex/fix-deploy-pm2-release-path`, `claude/...`, `agent/...`
+- **작업 시작 절차**: 작업 전에는 항상 `main` 브랜치로 전환해 최신 원격 변경을 pull 받은 뒤, 그 최신 `main`을 베이스로 작업 브랜치를 생성하고 작업을 진행한다.
 - **커밋 단위 작게**: 한 커밋 = 한 논리적 변경
 - **리팩토링과 기능 변경 섞지 말 것**: `refactor:` 먼저, 이어서 `feat:`
 - 커밋/푸시는 **사용자가 요청할 때만** 수행
+
+## Claude / Codex 역할 분담
+
+- **설계는 Claude, 구현은 Codex**: Claude가 설계(스펙/계획)를 작성하고, 구현 작업은 Codex에게 위임한다.
+- **푸시 전 Codex 적대적 리뷰 필수**: push 전에 Codex 적대적 리뷰를 실행한다. 수정해야 할 사항이 나오면 푸시를 취소하고, 수정 후 리뷰를 다시 통과한 뒤에만 푸시한다.
 
 ## Agent Team Configuration
 

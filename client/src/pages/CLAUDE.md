@@ -20,7 +20,7 @@
   - `SimulationCapitalSummary.tsx`, `SimulationControls.tsx`, `SimulationEquityChart.tsx`, `SimulationMetricsCards.tsx`, `SimulationPositionsTable.tsx`, `SimulationTradesTable.tsx`
   - `simulation/types/simulation.types.ts` — 시뮬레이션 sub-component props
 - `watchlist/` — 관심종목 페이지 sub-component (`WatchlistFilters`, `WatchlistTable`, `WatchStockRow`, `AddWatchStockModal`, `EditWatchStockModal`, `strategy-meta.ts`)
-- `portfolio/` — 포트폴리오 페이지 sub-component (`PortfolioFilters`, `AccountSummaryCard`, `PositionsCard`, `TradesCard`, `PortfolioCommon`, `portfolio-helpers.ts`)
+- `portfolio/` — 포트폴리오 페이지 sub-component (`PortfolioFilters`, `AccountSummaryCard`, `PositionsCard`, `UnknownOrderReconciliationCard`, `UnknownOrderReconciliationDialog`, `TradesCard`, `PortfolioCommon`, `portfolio-helpers.ts`)
 - `screening/` — 스크리닝 페이지 sub-component (`DateListView`, `StockDetailView`, `RecommendationCard`, `AddToSimulationModal`, `ScreeningCommon`, `screening-helpers.ts`)
 - `types/` — 페이지 간 공유되는 props/입력 타입 (`dashboard.types.ts`, `add-watch-stock-form-*.type.ts`, `watch-stock-row-props.type.ts`, `market-{select,filter}-props.type.ts` 등)
 
@@ -40,4 +40,5 @@
 - **`SimulationPage` 패턴**: query string(`?id=`) 기반 master-detail. 페이지 자체는 분기만, 실제 UI는 `simulation/` 하위 `*Section` 컴포넌트가 담당.
 - **거대 페이지 분해 패턴**: `WatchlistPage`/`PortfolioPage`/`ScreeningPage`는 entry 파일에서 GraphQL hook + 상태만 관리하고, 섹션별 UI(필터, 테이블, 카드, 모달)는 `pages/{name}/` 하위로 분리. 자식 컴포넌트는 명시적 props 받고 stateless에 가깝게 유지하며, 공통 헬퍼/타입은 `{name}-helpers.ts`/`types/{name}.types.ts`로 따로 둔다.
 - **다국가 시장 처리**: 거래소/통화 매핑은 `lib/market-constants.ts`로 통합 — 페이지에서 직접 매핑 테이블을 만들지 말 것 (단, `DashboardPage`처럼 국가→통화 같은 페이지 한정 작은 매핑은 페이지 내 const 허용).
+- **확인 필요 주문 polling**: `UnknownOrderReconciliationCard`의 15초 query는 DB 목록만 조회하고 `fetchPolicy='network-only'`를 유지한다. KIS 조회는 사용자가 명시적으로 후보/취소 상태 조회 mutation을 누를 때만 수행한다. legacy 계좌 배정 전에는 별도 preview query로 환경과 마스킹 계좌만 보여주며 raw 계좌/hash를 클라이언트 타입이나 화면에 추가하지 않는다.
 - **`refetchQueries`는 operation 이름 문자열로** (예: `['GetWatchStocks']`).
