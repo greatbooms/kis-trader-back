@@ -205,6 +205,7 @@ client/src/
 
 - **설계는 Claude, 구현은 Codex**: Claude가 설계(스펙/계획)를 작성하고, 구현 작업은 Codex에게 위임한다. 아래 Agent Team Configuration의 backend/frontend/tester 구현 role도 Codex 위임 대상이며, reviewer와 설계는 Claude가 맡는다.
 - **푸시 전 Codex 적대적 리뷰 필수**: push 전에 Codex 적대적 리뷰를 실행한다. 수정해야 할 사항이 나오면 푸시를 취소하고, 수정 후 리뷰를 다시 통과한 뒤에만 푸시한다.
+- **리뷰 범위는 브랜치 작업분에 한정**: 푸시 전 적대적 리뷰는 해당 브랜치에서 작업한 변경분(main 대비 diff)만 대상으로 한다. 변경분과 무관한 기존 코드/문서의 문제는 푸시를 막지 않으며 별도 이슈나 후속 브랜치로 다룬다. 단, 변경분의 동작·안전에 영향을 주는 기존 문제는 리뷰 대상이며 푸시를 막는다.
 
 ## Agent Team Configuration
 
