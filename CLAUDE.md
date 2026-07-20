@@ -159,7 +159,7 @@ client/src/
 - 구현만 보고 의도 추측할 수 없으면 주석 1~2줄
 
 ### 5. KIS / 외부 API
-- **Rate limit**: KIS 실전 20건/초, 모의 2건/초. 반복 호출 시 `await new Promise(r => setTimeout(r, 60))` 방식 딜레이
+- **Rate limit**: `KisBaseService`가 직렬화 큐로 일괄 관리 (prod 67ms ≈ 15req/s, paper 300ms ≈ 3req/s). 호출자에서 별도 딜레이/throttle 추가 금지 (이중 지연)
 - **수정주가 기본**: 백테스트/과거 데이터 조회 시 수정주가(`MODP=1`/`FID_ORG_ADJ_PRC=0`) 강제
 - **시세 캐시**: 반복 조회는 `MarketDataCacheService` 경유. 직접 API 호출 반복 금지
 - **장 시간 외 호출**: 스케줄러는 장 시간 내에만 작동해야 함. `isMarketOpen` 체크 필수
@@ -168,7 +168,7 @@ client/src/
 - **실전 주문은 `trading.enabled=true`인 환경에서만** (`ConfigService`로 가드)
 - 손절/청산 시그널은 별도 승인(`StopLossApproval`) 후 실행
 - 동시 실행 방지 플래그(`isRunning`) — 중복 주문 방지
-- **액션 전 재동기화**: `refreshMarketPositionsBeforeOrder()` 패턴 — 주문 제출 직전 KIS 최신 잔고 재조회
+- **액션 전 재동기화**: `TradingPositionRefreshService.refresh(market)` — 주문 제출 직전 KIS 최신 잔고 재조회 + DB 포지션 동기화
 
 ### 7. 비밀키 / 환경
 - `.env.dev`, `.env.prod` 커밋 금지 (`.gitignore` 확인)
@@ -190,9 +190,22 @@ client/src/
 
 - **Conventional Commits** (글로벌 CLAUDE.md 참조)
   - `feat`, `fix`, `refactor`, `chore`, `docs`, `style`, `perf`, `test`
+- **커밋 메시지 형식**: `type(scope): summary` 형태를 기본으로 한다.
+  - 예: `fix(deploy): verify pm2 release path`
+  - scope는 선택이지만, 변경 영역이 분명하면 사용한다 (`deploy`, `trading`, `screening` 등)
+- **브랜치명 형식**: 에이전트/도구 이름 prefix를 쓰지 말고 Conventional Commits의 type을 앞세운다.
+  - 예: `fix/deploy-pm2-release-path`, `feat/news-scoring`, `docs/update-agent-rules`
+  - 금지 예: `codex/fix-deploy-pm2-release-path`, `claude/...`, `agent/...`
+- **작업 시작 절차**: 작업 전에는 항상 `main` 브랜치로 전환해 최신 원격 변경을 pull 받은 뒤, 그 최신 `main`을 베이스로 작업 브랜치를 생성하고 작업을 진행한다.
 - **커밋 단위 작게**: 한 커밋 = 한 논리적 변경
 - **리팩토링과 기능 변경 섞지 말 것**: `refactor:` 먼저, 이어서 `feat:`
 - 커밋/푸시는 **사용자가 요청할 때만** 수행
+
+## Claude / Codex 역할 분담
+
+- **설계는 Claude, 구현은 Codex**: Claude가 설계(스펙/계획)를 작성하고, 구현 작업은 Codex에게 위임한다. 아래 Agent Team Configuration의 backend/frontend/tester 구현 role도 Codex 위임 대상이며, reviewer와 설계는 Claude가 맡는다.
+- **푸시 전 Codex 적대적 리뷰 필수**: push 전에 Codex 적대적 리뷰를 실행한다. 수정해야 할 사항이 나오면 푸시를 취소하고, 수정 후 리뷰를 다시 통과한 뒤에만 푸시한다.
+- **리뷰 범위는 브랜치 작업분에 한정**: 푸시 전 적대적 리뷰는 해당 브랜치에서 작업한 변경분(main 대비 diff)만 대상으로 한다. 변경분과 무관한 기존 코드/문서의 문제는 푸시를 막지 않으며 별도 이슈나 후속 브랜치로 다룬다. 단, 변경분의 동작·안전에 영향을 주는 기존 문제는 리뷰 대상이며 푸시를 막는다.
 
 ## Agent Team Configuration
 

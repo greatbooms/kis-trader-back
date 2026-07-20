@@ -6,7 +6,7 @@
 ## 주요 서비스 / 컴포넌트
 - `backtest.module.ts` — DB 캐시(`HistoricalDailyPrice`) + KIS API 수집 모드. `BacktestCLI`가 사용
 - `backtest-memory.module.ts` — DB 의존 없이 매번 KIS API에서 수집해 in-memory로만 백테스트 (테스트/즉석 실험용)
-- `data/historical-collector.service.ts` — KIS daily price 수집 + DB upsert. 7일 슬랙으로 캐시 hit 판정, 거래소 종류별로 from/to ↔ count 환산
+- `data/historical-collector.service.ts` — KIS daily price 수집 + DB upsert. 10일 슬랙으로 캐시 hit 판정, 거래소 종류별로 from/to ↔ count 환산
 - `data/indicator-calculator.ts` — 순수 함수형 SMA/RSI/ATR/ADX/Bollinger 계산. **chronological order(0=oldest)** — `market-analysis.service.ts`와 다름
 - `engine/backtest.engine.ts` — `runBacktest()`. `PerStockTradingStrategy.evaluate`를 호출 → 가상 limit 주문 큐 처리 → 슬리피지 적용 체결 → daily portfolio value 기록
 - `engine/metrics.ts` — `computeMetrics()`. CAGR / Sharpe / MDD / win rate / profit factor 계산 (252 거래일 기준)
@@ -46,13 +46,13 @@ npm run backtest -- --strategy momentum-breakout --from 20230601 --to 20260531 \
 ## 주의사항 / 비자명한 규칙
 - **AppModule에 import되지 않음**: NestFactory standalone context로만 부팅. `npm run backtest` 스크립트로 실행
 - **OHLCV 인덱스 컨벤션 차이 주의**: `indicator-calculator.ts`는 chronological(0=oldest), 운영 `market-analysis.service.ts`는 reverse-chronological. 실전 코드와 함께 수정할 때 인덱스 방향 헷갈리지 말 것
-- 해외 KIS API는 from/to 미지원 → `count` 기반. `(days/365 * 252 * 1.3)` 추정치로 환산 (max 2000)
+- 해외 KIS API는 from/to 미지원 → `count` 기반. `(days/365 * 250 * 1.3)` 추정치로 환산 (max 2000)
 - 슬리피지 기본 0.5% (`DEFAULT_SLIPPAGE`). momentum CLI 경로는 기본 0.2% (`--slippage`로 조정). infinite-buy의 limit 주문은 다음 거래일 종가 기준 만료
 - 워밍업 기본 200봉 (MA200 계산용). momentum CLI는 30봉 (MA20+RSI14만 필요). 부족하면 그 시점까지 거래 발생 X
 - **momentum 일봉 근사의 한계 (리포트에도 명시)**: 트레일링 스탑 미반영(장중 고가 경로 미상), 손절은 터치 기반 근사, 실거래 soft 조건(시간보정 거래량/VWAP/수급)은 lookahead 방지를 위해 미적용 → 실거래 신호는 백테스트보다 적고 보수적. 최종 검증은 simulation(페이퍼)으로
 - **momentum stop-fill 모델의 편향 방향**: `'low'`는 돌파 **이전**(아침)의 저점까지 손절로 집계해 과도하게 비관적 (stop ≈ 시가-1% 수준이라 대부분의 날이 터치됨), `'close'`는 장중 손절 후 회복을 무손절 처리해 낙관적. **진실은 둘 사이** — 두 모델을 모두 돌려 범위로 해석할 것. 2023-06~2026-05 122630 기준: K=0.5 low -18.0% ~ close +23.8%, K=0.7 low -16.1% ~ close +19.0% (MDD -9.0%, 승률 52.0%)
 - **momentum 진입 체결 판정은 슬리피지 포함가 기준** (`high ≥ trigger×(1+slippage)`): 기록상 고가보다 높은 "불가능한 체결" 방지 + 돌파가를 한 틱 스치고 꺾인 날(1분 폴링 라이브도 놓치기 쉬움) 제외
 - **momentum daily-bar는 meta MDD(-8%) 매수차단 미적용**: 단일 전략 equity 백테스트에서는 거래가 멈추면 드로다운이 회복될 수 없어 영구 잠금(absorbing state)이 됨. 엔진 riskState의 -25% 파국 방지선만 적용 (실거래에서는 포트폴리오 전체 MDD라 회복 가능하므로 meta 게이트 정상 작동)
-- 캐시: `persist=true`+`force=false`이면 DB에서 로드. 7일 슬랙으로 "충분히 커버" 판단. force=true면 재수집해서 upsert
+- 캐시: `persist=true`+`force=false`이면 DB에서 로드. 10일 슬랙으로 "충분히 커버" 판단. force=true면 재수집해서 upsert
 - `runner/backtest-cli.ts`는 결과를 `docs/backtest-reports/backtest-{timestamp}.md`로 저장
 - `BacktestModule`은 `PrismaService`를 직접 provider로 등록 (다른 모듈처럼 `@Global` 의존이 아님 — standalone context이므로)

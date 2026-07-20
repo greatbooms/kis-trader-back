@@ -6,7 +6,7 @@
 
 ## 주요 파일 / 하위 폴더
 - `ui/` — shadcn/ui 기반 디자인 시스템 (Button, Input, Select, Table, Card, Badge, Label, Tooltip)
-  - 모두 `cn()` + `class-variance-authority`(cva)로 variant 정의, `forwardRef` 패턴 사용
+  - `cn()` 기반 스타일 합성. variant가 필요한 컴포넌트(Button 등)는 cva, DOM ref가 필요한 곳은 `forwardRef` 사용 (Tooltip처럼 단순 함수형도 있음)
 - `layout/` — 인증된 라우트의 셸
   - `Layout.tsx` — Sidebar/Header/Footer + `<Outlet />` 컴포지션
   - `Sidebar.tsx` — 네비게이션 메뉴 정의(navItems 배열). 라우트 추가 시 여기에 항목 추가

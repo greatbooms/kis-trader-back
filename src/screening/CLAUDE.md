@@ -1,7 +1,7 @@
 # Screening Module
 
 ## 책임
-매일 국내/해외 시장에서 투자 매력도가 높은 종목을 자동 스크리닝하여 추천 리스트를 제공. 기본 지표 필터 → 다중 요인 점수화 → 전략 매칭 → DB 저장. 별도 schedule(국가별 09:10/00:10/00:30 KST 등)로 1차 fast 스크리닝 + 별도 시간대에 deep 분석을 실행한다.
+매일 국내/해외 시장에서 투자 매력도가 높은 종목을 자동 스크리닝하여 추천 리스트를 제공. 기본 지표 필터 → 다중 요인 점수화 → 전략 매칭 → DB 저장. 국가별 cron(국내 09:10 / 미국 00:10 / 아시아 10:50 KST, 데이트레이드 후보 08:30)으로 1차 fast 스크리닝을 실행하고, deep 분석은 1차 스크리닝 흐름에서 inline으로 이어 실행한다.
 
 ## 주요 서비스
 - `screening.service.ts` — 얇은 façade (public API 호환성)
@@ -11,7 +11,7 @@
 - `deep-analysis.service.ts` — 상세 딥 분석 (DCF / 리스크 / 배당 / 컨센서스)
 - `day-trade-screening.service.ts` — 당일청산(변동성 돌파) 후보 선정 파이프라인. 08:30 KST에 전일 확정 일봉 기준 ETF 필터/점수화 → 기초지수 프록시 레짐 확인 → 최근 구간 미니 백테스트 → `DayTradeCandidate` 저장 → Slack 리포트 → 상위 N개 시뮬 세션 자동 투입
 - `day-trade-selector.ts` — 데이트레이드 후보 순수 함수 (strict ETF 판별, MA20/ATR14/거래대금 계산, 기초지수 방향/레짐, 미니 백테스트, 하드 필터, 점수화). strategy-matcher의 momentum-breakout 게이트와 임계값 상수 공유
-- `screening.scheduler.ts` — 1차/딥 스크리닝 cron 등록 (국가별 시간대 분리, `screening-scheduler-runs` 키로 실행 상태 영속화). Slack 리포트 전송 트리거
+- `screening.scheduler.ts` — 1차 스크리닝/데이트레이드 cron 등록 (국가별 시간대 분리, `screening-scheduler-runs` 키로 실행 상태 영속화). Slack 리포트 전송 트리거
 - `screening.resolver.ts` — `recommendations` / `screeningDateSummaries` / `stockDeepAnalysis` 등 조회 query, `runScreening` mutation
 - `multi-factor-scorer.ts` / `strategy-matcher.ts` — 점수화/전략 매칭 순수 유틸
 - `utils/` — `date.util.ts` (스크리닝 전용 KST 날짜 헬퍼). 다른 utility들(`api-data`, `consensus`, `dividend`)은 cross-module 사용으로 `src/common/utils/`로 이전됨
@@ -19,7 +19,7 @@
 - `dto/` — GraphQL ObjectType/Input (factor score, deep analysis, settings 등)
 
 ## 외부 의존성
-- `@prisma/client` — `StockRecommendation`, `StockDeepAnalysis`, `Setting`(스케줄러 상태), `ScreeningResult` 등
+- `@prisma/client` — `StockRecommendation`, `StockDeepAnalysis`, `AppSetting`(스케줄러 상태), `DayTradeCandidate` 등
 - `KisModule` — 종목 검색/시세/재무 (`KisDomesticService`, `KisOverseasService`)
 - `TradingModule` — `MarketAnalysisService`, `StrategyRegistryService` (지표/전략 공유)
 - `MarketDataModule` (Global) — `MarketDataCacheService` (재무/공시/매크로 시그널)
@@ -42,10 +42,10 @@
   - 세 서비스는 서로 참조하지 않는다 — 조율은 `ScreeningService` 파사드가 담당
 - `saveResults` / `getRecommendations`에서 `StrategyRegistry`로 실행 가능 전략만 남기는 필터는 facade가 `Analyzer.filterExecutableStrategies`를 콜백으로 넘겨 Repository에서 적용 (Repository가 StrategyRegistry에 의존하지 않도록 유지)
 - 신규 코드는 `ScreeningCandidateCollector` / `ScreeningAnalyzer` / `ScreeningRepository` 중 해당 책임의 서비스를 직접 주입할 것을 권장
-- 딥 분석은 별도 스케줄(`runDeepAnalysisForMarket`)에서 실행되며 `DeepAnalysisService`를 재사용하여 상세 DCF/리스크 리포트를 생성
+- 딥 분석은 1차 스크리닝 흐름에서 inline으로 이어 실행(`runDeepAnalysisForMarket`)되며 `DeepAnalysisService`를 재사용하여 상세 DCF/리스크 리포트를 생성
 - **분석 후보 상한**: 국내 30개, 해외 25개 (`MAX_DOMESTIC_ANALYSIS_CANDIDATES` / `MAX_OVERSEAS_ANALYSIS_CANDIDATES`) — KIS rate limit + 분석 시간 균형
 - **데이터 가용성 필터**: `dataAvailability < 30`인 점수는 결과에서 제외 (재무 데이터 부족 종목 제외)
-- **스케줄러 상태 영속화**: `Setting` 테이블에 `screening-scheduler-runs` 키로 마지막 실행 결과 저장 — UI에서 확인 가능
+- **스케줄러 상태 영속화**: `AppSetting` 테이블에 `screening-scheduler-runs` 키로 마지막 실행 결과 저장 — UI에서 확인 가능
 - cross-module 공유 utility는 `src/common/utils/`에 위치 — `trading-orchestrator`/`screening-analyzer`/`deep-analysis`가 모두 거기서 import. 시그니처 변경 시 3곳 영향
 - **데이트레이드 스크리닝(`day-trade-fast`)의 비자명한 규칙**:
   - 실행 시간 08:30 KST 근거: 후보 선정 입력(전일 변동폭·MA20·거래대금)이 모두 전일 장 마감에 확정되므로 장 시작 전에 선정하고, 당일 적용 유의종목/거래정지 상태를 같은 시점에 반영한다. 기존 09:10 투자 스크리닝과 별개 파이프라인 (목적·기준·산출물이 다름)
