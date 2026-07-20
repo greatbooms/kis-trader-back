@@ -159,7 +159,7 @@ client/src/
 - 구현만 보고 의도 추측할 수 없으면 주석 1~2줄
 
 ### 5. KIS / 외부 API
-- **Rate limit**: KIS 실전 20건/초, 모의 2건/초. 반복 호출 시 `await new Promise(r => setTimeout(r, 60))` 방식 딜레이
+- **Rate limit**: `KisBaseService`가 직렬화 큐로 일괄 관리 (prod 67ms ≈ 15req/s, paper 300ms ≈ 3req/s). 호출자에서 별도 딜레이/throttle 추가 금지 (이중 지연)
 - **수정주가 기본**: 백테스트/과거 데이터 조회 시 수정주가(`MODP=1`/`FID_ORG_ADJ_PRC=0`) 강제
 - **시세 캐시**: 반복 조회는 `MarketDataCacheService` 경유. 직접 API 호출 반복 금지
 - **장 시간 외 호출**: 스케줄러는 장 시간 내에만 작동해야 함. `isMarketOpen` 체크 필수
@@ -168,7 +168,7 @@ client/src/
 - **실전 주문은 `trading.enabled=true`인 환경에서만** (`ConfigService`로 가드)
 - 손절/청산 시그널은 별도 승인(`StopLossApproval`) 후 실행
 - 동시 실행 방지 플래그(`isRunning`) — 중복 주문 방지
-- **액션 전 재동기화**: `refreshMarketPositionsBeforeOrder()` 패턴 — 주문 제출 직전 KIS 최신 잔고 재조회
+- **액션 전 재동기화**: `TradingPositionRefreshService.refresh(market)` — 주문 제출 직전 KIS 최신 잔고 재조회 + DB 포지션 동기화
 
 ### 7. 비밀키 / 환경
 - `.env.dev`, `.env.prod` 커밋 금지 (`.gitignore` 확인)
@@ -203,7 +203,7 @@ client/src/
 
 ## Claude / Codex 역할 분담
 
-- **설계는 Claude, 구현은 Codex**: Claude가 설계(스펙/계획)를 작성하고, 구현 작업은 Codex에게 위임한다.
+- **설계는 Claude, 구현은 Codex**: Claude가 설계(스펙/계획)를 작성하고, 구현 작업은 Codex에게 위임한다. 아래 Agent Team Configuration의 backend/frontend/tester 구현 role도 Codex 위임 대상이며, reviewer와 설계는 Claude가 맡는다.
 - **푸시 전 Codex 적대적 리뷰 필수**: push 전에 Codex 적대적 리뷰를 실행한다. 수정해야 할 사항이 나오면 푸시를 취소하고, 수정 후 리뷰를 다시 통과한 뒤에만 푸시한다.
 
 ## Agent Team Configuration

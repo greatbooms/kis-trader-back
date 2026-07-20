@@ -4,7 +4,7 @@
 KIS 재무·시세·공시·매크로 데이터의 통합 캐시 레이어. 외부 API 호출을 in-memory + DB(`MarketDataSnapshot`) 2-tier 캐시로 감싸 전략/스크리닝/딥분석에서 재호출 비용을 줄인다. **`@Global()` 모듈** — `AppModule` 한 번 import로 모든 모듈에서 `MarketDataCacheService`/`MarketDataSnapshotService` 주입 가능.
 
 ## 주요 서비스 / 컴포넌트
-- `market-data.module.ts` — `@Global()`. `KisModule`/`OpenDartModule`/`SecModule`/`FredModule` 통합 + Snapshot/Cache/Warmup export
+- `market-data.module.ts` — `@Global()`. `KisModule`/`OpenDartModule`/`SecModule`/`FredModule` 통합 + Snapshot/Cache export (Warmup은 내부 provider)
 - `market-data-snapshot.service.ts` — 범용 cache primitive. `getOrLoad<T>(request, loader)` — in-memory `Map` → DB `marketDataSnapshot` → loader 순. inflight dedup으로 중복 호출 방지. 캐시 키는 `source/category/market/exchangeCode/stockCode` 조합
 - `market-data-cache.service.ts` — 도메인별 wrapper. KIS 재무 12종, OpenDART, SEC, FRED 등 카테고리별 메서드 + TTL 정의 (24h / 12h / 6h / 2h)
 - `market-data-warmup.service.ts` — `@Cron('0 10 */6 * * *', Asia/Seoul)`. WatchStock의 활성 strategy 종목들을 6시간 단위로 사전 워밍업. 전략별로 필요한 카테고리 분기
