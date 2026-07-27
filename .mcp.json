@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kis-code-assistant": {
+      "command": "npx",
+      "args": ["-y", "@koreainvestment/kis-code-assistant-mcp@0.1.1"]
+    },
+    "kis-trading": {
+      "command": "bash",
+      "args": ["scripts/mcp/kis-trading-mcp.sh"]
+    }
+  }
+}
