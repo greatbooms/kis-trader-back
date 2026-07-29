@@ -97,6 +97,33 @@ describe('TradingSellApprovalService', () => {
       .toBe(expected);
   });
 
+  describe('infinite-buy-v4 승인 allowlist 예외 (D3)', () => {
+    // v4-quarter-sell/v4-reverse-sell/v4-final-sell은 정례 매도라 자동 실행되어야 한다 (§6.3).
+    // 1) MANUAL_SELL_APPROVAL_PHASES/보호성 reason 패턴에 걸리지 않아야 하고,
+    // 2) "infinite-buy T>=20 익절 승인" 규칙이 strategyName 정확 일치(!== 'infinite-buy')라
+    //    'infinite-buy-v4'를 오폭하지 않아야 한다.
+    it.each(['v4-quarter-sell', 'v4-reverse-sell', 'v4-final-sell'])(
+      '%s는 T가 20 이상이어도 승인 없이 자동 실행된다',
+      (phase) => {
+        const signal = makeSell(
+          { phase, tValue: 39.5 },
+          { reason: `V4 ${phase}: 25주 @ 53.75` },
+        );
+        expect(service.shouldRequireApproval(signal, 'infinite-buy-v4')).toBe(false);
+      },
+    );
+
+    it('전략명이 정확히 infinite-buy가 아니면(-v4) 기존 고T 익절 승인 규칙이 적용되지 않는다', () => {
+      const signal = makeSell(
+        { phase: 'v4-quarter-sell', tValue: 39.5 },
+        { reason: 'V4 v4-quarter-sell: 25주 @ 53.75' },
+      );
+      expect(service.shouldRequireApproval(signal, 'infinite-buy-v4', {
+        watchStock: { strategyName: 'infinite-buy-v4' },
+      } as any)).toBe(false);
+    });
+  });
+
   it('creates the approval pair atomically through the shared order guard', async () => {
     const tx = {
       tradeRecord: {

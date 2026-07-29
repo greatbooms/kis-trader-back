@@ -1546,6 +1546,407 @@ describe('TradingService', () => {
     });
   });
 
+  describe('infinite-buy-v4 상태 영속화 (persistInfiniteBuyV4State)', () => {
+    function buildV4Ctx(v4: Record<string, any>): any {
+      return {
+        watchStock: {
+          id: 'ws-v4',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy-v4',
+          quota: 20000,
+          cycle: 0,
+          maxCycles: 40,
+          stopLossRate: 0.5,
+          maxPortfolioRate: 1,
+          strategyParams: { v4 },
+        },
+        price: { currentPrice: 50 },
+        alreadyExecutedToday: false,
+        marketCondition: {},
+        stockIndicators: {},
+        buyableAmount: 15000,
+        totalPortfolioValue: 20000,
+      };
+    }
+
+    it('mode/recentCloses를 strategyParams.v4에 저장하고 turn/cashRemaining/cycleSeq는 보존한다', async () => {
+      const strategy = {
+        name: 'infinite-buy-v4',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['오늘 이미 실행됨'],
+          details: {
+            v4StateUpdate: { mode: 'NORMAL', recentCloses: [{ date: '2026-07-27', close: 51 }] },
+          },
+        }),
+      };
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-v4',
+        strategyParams: { v4: { mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 } },
+      });
+
+      await service.executePerStockStrategy(
+        strategy as any,
+        [buildV4Ctx({ mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 })],
+      );
+
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith({
+        where: { id: 'ws-v4' },
+        data: {
+          strategyParams: {
+            v4: {
+              mode: 'NORMAL',
+              turn: 10,
+              cashRemaining: 15000,
+              cycleSeq: 0,
+              recentCloses: [{ date: '2026-07-27', close: 51 }],
+            },
+          },
+        },
+      });
+    });
+
+    it('NORMAL→REVERSE 전환 시 로그를 1회 남긴다', async () => {
+      const strategy = {
+        name: 'infinite-buy-v4',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['오늘 이미 실행됨'],
+          details: { v4StateUpdate: { mode: 'REVERSE', recentCloses: [] } },
+        }),
+      };
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-v4',
+        strategyParams: { v4: { mode: 'NORMAL', turn: 39.5, cashRemaining: 100, cycleSeq: 0 } },
+      });
+
+      await service.executePerStockStrategy(
+        strategy as any,
+        [buildV4Ctx({ mode: 'NORMAL', turn: 39.5, cashRemaining: 100, cycleSeq: 0 })],
+      );
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: 'SIGNAL_CREATED',
+            message: expect.stringContaining('REVERSE 모드 진입'),
+            details: { phase: 'v4-reverse-enter' },
+          }),
+        }),
+      );
+    });
+
+    it('이미 REVERSE 모드면 진입 알림을 다시 남기지 않는다', async () => {
+      const strategy = {
+        name: 'infinite-buy-v4',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [],
+          skipReasons: ['오늘 이미 실행됨'],
+          details: { v4StateUpdate: { mode: 'REVERSE', recentCloses: [] } },
+        }),
+      };
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-v4',
+        strategyParams: { v4: { mode: 'REVERSE', turn: 39.5, cashRemaining: 100, cycleSeq: 0 } },
+      });
+
+      await service.executePerStockStrategy(
+        strategy as any,
+        [buildV4Ctx({ mode: 'REVERSE', turn: 39.5, cashRemaining: 100, cycleSeq: 0 })],
+      );
+
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ message: expect.stringContaining('REVERSE 모드 진입') }),
+        }),
+      );
+    });
+  });
+
+  describe('infinite-buy-v4 체결 후처리 (handleInfiniteBuyV4SignalFill)', () => {
+    function mockWatchStockV4(v4: Record<string, any>, overrides: Record<string, any> = {}) {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-v4',
+        stockCode: 'TQQQ',
+        quota: 20000,
+        maxCycles: 40,
+        strategyParams: { v4 },
+        ...overrides,
+      });
+    }
+
+    it('NORMAL BUY 체결: 실제 체결가(executedPrice) 기준으로 cashRemaining 차감 + T 증가', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          quantity: 10,
+          price: 50,
+          reason: 'V4 v4-avg-buy: 10주 @ 50',
+          orderDivision: '34',
+          metadata: { phase: 'v4-avg-buy', v4AttemptAmount: 250 },
+        },
+        100, // previousHoldingQty
+        undefined,
+        49.8, // executedPrice — 제출가(50)와 다른 실제 체결가
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.cashRemaining).toBeCloseTo(15000 - 49.8 * 10, 2); // 498 체결금액 기준
+      expect(updated.turn).toBeCloseTo(10 + (49.8 * 10) / 250, 6);
+      expect(updated.lastKnownHoldQty).toBe(110);
+      expect(updated.cycleSeq).toBe(0);
+    });
+
+    it('전반전 두 leg 전량 체결 시 합계 ΔT=+1 (분모는 당일 총액 — leg별 분모면 +2가 되는 회귀 고정)', async () => {
+      // 평단 leg 5주@50=250 + 별지점 leg 5주@50=250, 당일 BUY 총액 500.
+      const dayTotal = 500;
+      const legMeta = (phase: string) => ({
+        phase,
+        v4AttemptAmount: 250,
+        v4DayBuyAttemptTotal: dayTotal,
+      });
+      const legSignal = (phase: string) => ({
+        market: 'OVERSEAS' as const,
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY' as const,
+        quantity: 5,
+        price: 50,
+        reason: `V4 ${phase}: 5주 @ 50`,
+        orderDivision: '34',
+        metadata: legMeta(phase),
+      });
+
+      mockWatchStockV4({ mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 });
+      await service.handleStrategySignalFill('infinite-buy-v4', 'ws-v4', legSignal('v4-avg-buy'), 100, undefined, 50);
+      const afterFirst = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(afterFirst.turn).toBeCloseTo(10.5, 6); // 250/500 = +0.5
+
+      // 두 번째 leg는 첫 체결이 반영된 상태에서 이어진다.
+      mockWatchStockV4({ ...afterFirst });
+      await service.handleStrategySignalFill('infinite-buy-v4', 'ws-v4', legSignal('v4-star-buy'), 105, undefined, 50);
+      const afterSecond = mockPrisma.watchStock.update.mock.calls[1][0].data.strategyParams.v4;
+      expect(afterSecond.turn).toBeCloseTo(11, 6); // 합계 정확히 +1
+      expect(afterSecond.cashRemaining).toBeCloseTo(15000 - 500, 2);
+    });
+
+    it('BUY 체결가 없으면 제출가(signal.price)로 대체한다', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 0, cashRemaining: 20000, cycleSeq: 0 });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          quantity: 8,
+          price: 56,
+          reason: 'V4 v4-first-buy: 8주 @ 56',
+          orderDivision: '34',
+          metadata: { phase: 'v4-first-buy', v4AttemptAmount: 448 },
+        },
+        0,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.cashRemaining).toBeCloseTo(20000 - 56 * 8, 2);
+    });
+
+    it('REVERSE BUY 체결: applyBuyFillToT의 reverse 식(N 포함)을 사용한다', async () => {
+      mockWatchStockV4({ mode: 'REVERSE', turn: 37.525, cashRemaining: 400, cycleSeq: 0 });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          quantity: 2,
+          price: 45.99,
+          reason: 'V4 v4-reverse-buy: 2주 @ 45.99',
+          orderDivision: '34',
+          metadata: { phase: 'v4-reverse-buy', v4AttemptAmount: 100 },
+        },
+        190,
+        undefined,
+        45.99,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      const fillAmount = 45.99 * 2;
+      const expectedT = 37.525 + (40 - 37.525) * 0.25 * (fillAmount / 100);
+      expect(updated.turn).toBeCloseTo(expectedT, 6);
+      expect(updated.cashRemaining).toBeCloseTo(400 - fillAmount, 2);
+      expect(updated.lastKnownHoldQty).toBe(192);
+    });
+
+    it('SELL 부분 체결(쿼터매도): metadata.v4PrevHolding 기준으로 T를 축소하고 cashRemaining을 늘린다', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 25,
+          price: 53.75,
+          reason: 'V4 v4-quarter-sell: 25주 @ 53.75',
+          orderDivision: '34',
+          metadata: { phase: 'v4-quarter-sell', v4PrevHolding: 100 },
+        },
+        100, // previousHoldingQty (reconciliation 관점의 fill 직전 보유수량)
+        undefined,
+        53.75,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.turn).toBeCloseTo(10 * (1 - 25 / 100), 6); // 7.5
+      expect(updated.cashRemaining).toBeCloseTo(15000 + 53.75 * 25, 2);
+      expect(updated.lastKnownHoldQty).toBe(75);
+      expect(updated.cycleSeq).toBe(0); // 사이클 종료 아님 (보유 잔존)
+    });
+
+    it('SELL 체결 후 보유수량 0: 사이클 종료 — T=0, cycleSeq+=1, compoundMode=true면 수익 재투입', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 2.5, cashRemaining: 16343.75, cycleSeq: 0, compoundMode: true });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 75,
+          price: 57.5,
+          reason: 'V4 v4-final-sell: 75주 @ 57.5',
+          orderDivision: '00',
+          metadata: { phase: 'v4-final-sell', v4PrevHolding: 75 },
+        },
+        75,
+        undefined,
+        57.5,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.turn).toBe(0);
+      expect(updated.cycleSeq).toBe(1);
+      expect(updated.cashRemaining).toBeCloseTo(16343.75 + 57.5 * 75, 2); // 복리 — 수익 그대로 재투입
+      expect(updated.lastKnownHoldQty).toBe(0);
+    });
+
+    it('SELL 체결 후 보유수량 0 + compoundMode=false: 원금 초과분은 제외하고 재설정', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 2.5, cashRemaining: 16343.75, cycleSeq: 0, compoundMode: false });
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 75,
+          price: 57.5,
+          reason: 'V4 v4-final-sell: 75주 @ 57.5',
+          orderDivision: '00',
+          metadata: { phase: 'v4-final-sell', v4PrevHolding: 75 },
+        },
+        75,
+        undefined,
+        57.5,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.turn).toBe(0);
+      expect(updated.cycleSeq).toBe(1);
+      expect(updated.cashRemaining).toBe(20000); // quota(원금) 상한으로 클램프 — 단리
+    });
+  });
+
+  describe('infinite-buy-v4 제출 순서: SELL을 BUY보다 먼저 제출', () => {
+    it('같은 평가에서 BUY/SELL 신호가 함께 나오면 SELL을 먼저 executeSignal에 넘긴다', async () => {
+      const strategy = {
+        name: 'infinite-buy-v4',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [
+            {
+              market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ',
+              side: 'BUY', quantity: 5, price: 50, reason: 'V4 v4-avg-buy', orderDivision: '34',
+              metadata: { phase: 'v4-avg-buy', v4AttemptAmount: 250 },
+            },
+            {
+              market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ',
+              side: 'BUY', quantity: 5, price: 53.74, reason: 'V4 v4-star-buy', orderDivision: '34',
+              metadata: { phase: 'v4-star-buy', v4AttemptAmount: 250 },
+            },
+            {
+              market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ',
+              side: 'SELL', quantity: 25, price: 53.75, reason: 'V4 v4-quarter-sell', orderDivision: '34',
+              metadata: { phase: 'v4-quarter-sell', v4PrevHolding: 100 },
+            },
+            {
+              market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ',
+              side: 'SELL', quantity: 75, price: 57.5, reason: 'V4 v4-final-sell', orderDivision: '00',
+              metadata: { phase: 'v4-final-sell', v4PrevHolding: 100 },
+            },
+          ],
+          skipReasons: [],
+          details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } },
+        }),
+      };
+      const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'ws-v4',
+        strategyParams: { v4: { mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 } },
+      });
+
+      await service.executePerStockStrategy(strategy as any, [{
+        watchStock: {
+          id: 'ws-v4',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy-v4',
+          quota: 20000,
+          cycle: 0,
+          maxCycles: 40,
+          stopLossRate: 0.5,
+          maxPortfolioRate: 1,
+          strategyParams: { v4: { mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0 } },
+        },
+        price: { currentPrice: 55 },
+        position: { stockCode: 'TQQQ', quantity: 100, avgPrice: 50, currentPrice: 55, totalInvested: 5000 },
+        alreadyExecutedToday: false,
+        marketCondition: {},
+        stockIndicators: {},
+        buyableAmount: 15000,
+        totalPortfolioValue: 20000,
+      }] as any);
+
+      const submittedSides = executeSignalSpy.mock.calls.map((call) => (call[0] as any).side);
+      expect(submittedSides).toEqual(['SELL', 'SELL', 'BUY', 'BUY']);
+    });
+  });
+
   describe('관망(silent wait) skip', () => {
     function buildWaitContext() {
       return {

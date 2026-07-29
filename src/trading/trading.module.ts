@@ -18,6 +18,7 @@ import { MarketRegimeService } from './market-regime.service';
 import { RiskManagementService } from './risk-management.service';
 import { StrategyRegistryService } from './strategy/strategy-registry.service';
 import { InfiniteBuyStrategy } from './strategy/infinite-buy.strategy';
+import { InfiniteBuyV4Strategy } from './strategy/infinite-buy-v4.strategy';
 import { MomentumBreakoutStrategy } from './strategy/momentum-breakout.strategy';
 import { GridMeanReversionStrategy } from './strategy/grid-mean-reversion.strategy';
 import { ConservativeStrategy } from './strategy/conservative.strategy';
@@ -69,6 +70,7 @@ import { TradingAccountCashSyncService } from './trading-account-cash-sync.servi
     RiskManagementService,
     StrategyRegistryService,
     InfiniteBuyStrategy,
+    InfiniteBuyV4Strategy,
     MomentumBreakoutStrategy,
     GridMeanReversionStrategy,
     ConservativeStrategy,

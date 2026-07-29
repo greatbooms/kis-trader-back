@@ -8,6 +8,7 @@ import {
   PerStockTradingStrategy,
   StockStrategyContext,
   InfiniteBuyStrategyParams,
+  InfiniteBuyV4Params,
   MomentumBreakoutStrategyParams,
   GridMeanReversionStrategyParams,
 } from './types';
@@ -17,6 +18,8 @@ import { MarketAnalysisService } from './market-analysis.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
+import { roundToCent } from './strategy/infinite-buy-v4-math.util';
+import { applyV4Fill, V4LedgerState } from './strategy/infinite-buy-v4-ledger.util';
 
 @Injectable()
 export class TradingService {
@@ -282,6 +285,10 @@ export class TradingService {
         const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
         const terminalQuotaReached = this.isTerminalQuotaExhaustedSkip(skipReasons);
 
+        if (strategy.name === 'infinite-buy-v4' && details?.v4StateUpdate) {
+          await this.persistInfiniteBuyV4State(ctx, details.v4StateUpdate);
+        }
+
         if (signals.length === 0) {
           if (this.isQuotaCarryEligible(skipReasons)) {
             quotaCarryEligibleIds.add(ctx.watchStock.id);
@@ -403,10 +410,19 @@ export class TradingService {
           );
         }
 
+        // v4: SELL을 BUY보다 먼저 제출 — TradeRecord.createdAt 순서를 근거로 reconciliation이
+        // 매도 체결을 먼저 반영하도록 보장한다 (§3 "매도 먼저 반영 후 매수 반영", 상세는 CLAUDE.md 참조).
+        const submissionOrderedSignals = strategy.name === 'infinite-buy-v4'
+          ? [...executableSignals].sort((a, b) => {
+              if (a.side === b.side) return 0;
+              return a.side === 'SELL' ? -1 : 1;
+            })
+          : executableSignals;
+
         // 각 시그널 제출 결과를 추적 — 이월금 리셋/복구 판단에 사용
         const buySubmissionOutcomes: boolean[] = [];
         let hadBuySignal = false;
-        for (const signal of executableSignals) {
+        for (const signal of submissionOrderedSignals) {
           const submitted = await this.executeSignal(signal, strategy.name, ctx, details);
           if (signal.side === 'BUY') {
             hadBuySignal = true;
@@ -687,6 +703,114 @@ export class TradingService {
     await this.prisma.watchStock.update({
       where: { id: watchStockId },
       data: { strategyParams: updater(currentParams) },
+    });
+  }
+
+  // ── 무한매수 V4 (infinite-buy-v4) ──
+
+  /**
+   * 전략 평가 결과의 details.v4StateUpdate({mode, recentCloses})를 strategyParams.v4에 영속화한다.
+   * T/cashRemaining/cycleSeq/lastKnownHoldQty는 체결 확정 시점(handleInfiniteBuyV4SignalFill)에서만
+   * 갱신하므로 여기서는 건드리지 않는다.
+   * NORMAL→REVERSE 전환 시 Slack 알림 1회 — 전용 SlackService 템플릿이 없어(§6.3와 별개 사안)
+   * logger.log + 기존 실행 로그로 대체한다 (ponytail: 필요 시 전용 sendXxx 템플릿 추가).
+   */
+  private async persistInfiniteBuyV4State(
+    ctx: StockStrategyContext,
+    update: { mode: 'NORMAL' | 'REVERSE'; recentCloses: unknown[] },
+  ): Promise<void> {
+    const previousMode = ((ctx.watchStock.strategyParams as Record<string, any> | undefined)?.v4 as
+      | InfiniteBuyV4Params
+      | undefined)?.mode ?? 'NORMAL';
+
+    await this.updateWatchStockStrategyParams(ctx.watchStock.id, (params) => ({
+      ...params,
+      v4: {
+        ...((params.v4 as InfiniteBuyV4Params | undefined) || {}),
+        mode: update.mode,
+        recentCloses: update.recentCloses,
+      },
+    }));
+
+    if (previousMode !== 'REVERSE' && update.mode === 'REVERSE') {
+      const message = `[${ctx.watchStock.stockCode}] 무한매수 V4 REVERSE 모드 진입 (T > N-1, 소진 후 리버스 전환)`;
+      this.logger.log(message);
+      await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SIGNAL_CREATED, message, {
+        phase: 'v4-reverse-enter',
+      });
+    }
+  }
+
+  /**
+   * 체결 확정 시점의 T/잔금 갱신 (스펙 §3/§4.5/§5.2). fillPrice는 reconciliation이 넘겨주는
+   * 실제 체결가(executedPrice)를 우선 사용하고, 없으면 제출가(signal.price)로 대체한다.
+   */
+  private async handleInfiniteBuyV4SignalFill(
+    watchStockId: string,
+    signal: TradingSignal,
+    previousHoldingQty: number,
+    executedPrice?: number,
+  ): Promise<void> {
+    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+    if (!watchStock) return;
+
+    const N = watchStock.maxCycles;
+    const principal = watchStock.quota ? Number(watchStock.quota) : 0;
+    const currentParams = (watchStock.strategyParams as Record<string, any>) || {};
+    const v4 = (currentParams.v4 as InfiniteBuyV4Params | undefined) || {};
+    const compoundMode = v4.compoundMode ?? true;
+
+    const fillPrice = Number.isFinite(executedPrice) ? (executedPrice as number) : (signal.price ?? 0);
+    const fillAmount = roundToCent(fillPrice * signal.quantity);
+    const phase = String(signal.metadata?.phase || '');
+
+    const before: V4LedgerState = {
+      turn: Number.isFinite(v4.turn) ? (v4.turn as number) : 0,
+      cashRemaining: Number.isFinite(v4.cashRemaining) ? (v4.cashRemaining as number) : principal,
+      cycleSeq: v4.cycleSeq ?? 0,
+      lastKnownHoldQty: previousHoldingQty,
+    };
+
+    const result = applyV4Fill(before, {
+      side: signal.side,
+      phase,
+      quantity: signal.quantity,
+      fillAmount,
+      previousHoldingQty,
+      // 분모는 그 leg 자체가 아니라 당일 BUY 신호 전체(사다리 포함) 총액이어야 한다 —
+      // 전반전에 평단+별지점 두 leg가 모두 전량 체결되면 "당일 1회매수 전량 체결"이라
+      // ΔT=+1이어야 하는데, leg 단위 분모면 각 leg가 독립적으로 거의 +1씩 더해 ΔT=+2가 된다.
+      attemptAmount: Number(
+        signal.metadata?.v4DayBuyAttemptTotal ?? signal.metadata?.v4AttemptAmount ?? fillAmount,
+      ),
+      sellRatioPrevHolding: Number(signal.metadata?.v4PrevHolding ?? previousHoldingQty),
+      N,
+      quota: principal,
+      compoundMode,
+    });
+
+    if (result.cycleCompleted) {
+      this.logger.log(
+        `[${watchStock.stockCode}] V4 사이클 종료: cycleSeq=${result.state.cycleSeq}, ` +
+        `cashRemaining=${result.state.cashRemaining.toFixed(2)}, compoundMode=${compoundMode}` +
+        (result.discardedExcess > 0 ? `, 단리 초과분 제외=${result.discardedExcess.toFixed(2)}` : ''),
+      );
+    }
+
+    await this.prisma.watchStock.update({
+      where: { id: watchStockId },
+      data: {
+        strategyParams: {
+          ...currentParams,
+          v4: {
+            ...v4,
+            turn: result.state.turn,
+            cashRemaining: result.state.cashRemaining,
+            cycleSeq: result.state.cycleSeq,
+            lastKnownHoldQty: result.state.lastKnownHoldQty,
+          },
+        } as unknown as Prisma.InputJsonValue,
+      },
     });
   }
 
@@ -1185,9 +1309,15 @@ export class TradingService {
     signal: TradingSignal,
     currentPositionQty: number,
     filledAt?: Date,
+    executedPrice?: number,
   ): Promise<void> {
     if (strategyName === 'infinite-buy') {
       await this.handleInfiniteBuySignalFill(watchStockId, signal, currentPositionQty);
+      return;
+    }
+
+    if (strategyName === 'infinite-buy-v4') {
+      await this.handleInfiniteBuyV4SignalFill(watchStockId, signal, currentPositionQty, executedPrice);
       return;
     }
 
