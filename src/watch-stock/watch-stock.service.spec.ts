@@ -433,6 +433,14 @@ describe('WatchStockService', () => {
       await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow('이미 infinite-buy-v4 전략입니다.');
     });
 
+    it('should reject non-infinite-buy source strategies (UI 우회 직접 호출 방지)', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, strategyName: 'momentum-breakout' });
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow(
+        'V4 전환은 infinite-buy 전략 종목만 지원합니다.',
+      );
+    });
+
     it('should reject when quota/maxCycles are not configured', async () => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, quota: 0 });
 
@@ -508,7 +516,7 @@ describe('WatchStockService', () => {
         .mockResolvedValueOnce({ ...baseWatchStock, strategyName: 'infinite-buy-v4' });
       mockPrisma.position.findUnique.mockResolvedValue(null);
 
-      await expect(service.convertToInfiniteBuyV4('1', false)).rejects.toThrow('이미 infinite-buy-v4 전략입니다.');
+      await expect(service.convertToInfiniteBuyV4('1', false)).rejects.toThrow('전환 도중 전략이 변경되어 중단합니다');
       expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
     });
   });

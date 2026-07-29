@@ -467,6 +467,10 @@ export class WatchStockService {
     if (watchStock.strategyName === 'infinite-buy-v4') {
       throw new BadRequestException('이미 infinite-buy-v4 전략입니다.');
     }
+    // 시딩 역산(T=투입액/회차금)은 infinite-buy 계열 사이클 의미를 전제 — 다른 전략은 UI 우회 호출도 거부
+    if (watchStock.strategyName !== 'infinite-buy') {
+      throw new BadRequestException('V4 전환은 infinite-buy 전략 종목만 지원합니다.');
+    }
 
     const quota = Number(watchStock.quota ?? 0);
     if (quota <= 0 || watchStock.maxCycles <= 0) {
@@ -529,8 +533,8 @@ export class WatchStockService {
       if (!fresh) {
         throw new BadRequestException('관심종목을 찾을 수 없습니다.');
       }
-      if (fresh.strategyName === 'infinite-buy-v4') {
-        throw new BadRequestException('이미 infinite-buy-v4 전략입니다.');
+      if (fresh.strategyName !== 'infinite-buy') {
+        throw new BadRequestException('전환 도중 전략이 변경되어 중단합니다. 다시 확인 후 시도하세요.');
       }
 
       const mergedParams = this.toStrategyParams(fresh.strategyParams);
