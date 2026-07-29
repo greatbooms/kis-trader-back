@@ -116,3 +116,19 @@ mutation ResetWatchStockCarry($id: ID!) {
     message
   }
 }
+
+mutation ConvertWatchStockToInfiniteBuyV4($watchStockId: ID!, $dryRun: Boolean) {
+  convertWatchStockToInfiniteBuyV4(watchStockId: $watchStockId, dryRun: $dryRun) {
+    watchStockId
+    dryRun
+    applied
+    isActive
+    starBasePct
+    turn
+    cashRemaining
+    lastKnownHoldQty
+    mode
+    cycleSeq
+    warnings
+  }
+}

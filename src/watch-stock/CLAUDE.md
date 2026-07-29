@@ -5,9 +5,10 @@
 
 ## 주요 서비스 / 컴포넌트
 - `watch-stock.module.ts` — `WatchStockService` export. `TradingModule` import (resolver가 `TradingOrchestrator` 사용)
-- `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `logExecution`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), `@Cron`로 7일 지난 SKIPPED 로그 정리
-- `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행
-- `dto/` — `WatchStockType`, `CreateWatchStockInput`, `UpdateWatchStockInput`, `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult` (모두 1타입 1파일로 분리됨)
+- `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `logExecution`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), **`convertToInfiniteBuyV4`** — 기존 `infinite-buy` 종목을 `infinite-buy-v4`로 전환(시딩 계산 + dryRun 미리보기), `@Cron`로 7일 지난 SKIPPED 로그 정리
+- `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`/`convertWatchStockToInfiniteBuyV4`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행
+- `dto/` — `WatchStockType`, `CreateWatchStockInput`, `UpdateWatchStockInput`, `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult`, `ConvertWatchStockToInfiniteBuyV4Result` (모두 1타입 1파일로 분리됨)
+- `types/` — `ConvertWatchStockToV4Seed` (서비스 내부 반환 타입, dto의 GraphQL 타입과 필드 동일)
 
 ## 외부 의존성
 - `@prisma/client` — `WatchStock`, `WatchStockExecutionLog`, `Position`, `Market`, `WatchStockExecutionEventType`, `Prisma.Decimal`
@@ -21,3 +22,4 @@
 - **strategyParams는 JSON 컬럼**: resolver에서 `JSON.stringify` ↔ `JSON.parse`로 변환. 내부 타입은 `InfiniteBuyStrategyParams` 등 (전략별 정의는 `src/trading/types/`)
 - 7일 지난 SKIPPED 실행 로그는 `@Cron('0 3 * * *')`에서 정리. FILLED/CANCELLED 등은 영구 보관
 - `findLatestExecutionLogs`는 batch 조회로 N+1 회피 — list 쿼리에서 활용
+- **`convertToInfiniteBuyV4`**: OVERSEAS + quota/maxCycles 설정 + `infinite-buy-v4`가 아닌 종목만 대상. 별% 기본값(`starBasePct`)은 `InfiniteBuyV4Strategy`가 export하는 `DEFAULT_STAR_BASE_PCT_BY_STOCK`(TQQQ/SOXL)을 참조하고, 없으면 `strategyParams.v4.starBasePct` 명시가 있어야 진행(D8, 중복 정의 금지). 시딩값(`turn`/`cashRemaining`/`lastKnownHoldQty`)은 `Position.totalInvested`/`quantity`에서 역산하며 무포지션이면 T=0/잔금=quota 전액으로 시작. `dryRun=true`(기본)는 계산만 반환하고 DB를 쓰지 않으며, `dryRun=false`일 때만 `$transaction` 안에서 `strategyName='infinite-buy-v4'`와 `strategyParams.v4`(mode=NORMAL, cycleSeq=0, recentCloses=[])를 원자 갱신한다 — 트랜잭션 내부에서 최신 상태를 다시 읽어 동시 전환(중복 클릭 등)을 재차 거부한다. `isActive`는 건드리지 않음(기존 토글 사용)

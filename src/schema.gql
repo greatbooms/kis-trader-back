@@ -45,9 +45,9 @@ type MarketRegimeType {
 }
 
 type BrokerContextPreviewType {
-  contextToken: String!
   environment: BrokerEnvironment!
   maskedAccount: String!
+  contextToken: String!
 }
 
 enum BrokerEnvironment {
@@ -208,6 +208,22 @@ enum WatchStockExecutionEventType {
 type ManualTriggerResult {
   success: Boolean!
   message: String!
+}
+
+type ConvertWatchStockToInfiniteBuyV4Result {
+  watchStockId: ID!
+  dryRun: Boolean!
+
+  """실제로 strategyName/strategyParams가 갱신되었는지 (dryRun=true면 항상 false)"""
+  applied: Boolean!
+  isActive: Boolean!
+  starBasePct: Float!
+  turn: Float!
+  cashRemaining: Float!
+  lastKnownHoldQty: Int!
+  mode: String!
+  cycleSeq: Int!
+  warnings: [String!]!
 }
 
 type TradeRecordType {
@@ -687,6 +703,7 @@ type Mutation {
   deleteWatchStock(id: ID!): Boolean!
   triggerWatchStockNow(id: ID!): ManualTriggerResult!
   resetWatchStockCarry(id: ID!): ManualTriggerResult!
+  convertWatchStockToInfiniteBuyV4(watchStockId: ID!, dryRun: Boolean = true): ConvertWatchStockToInfiniteBuyV4Result!
   refreshAccountState: RefreshAccountStateResult!
   manualSell(input: ManualSellInput!): ManualSellResult!
   cancelTradeOrder(input: CancelTradeOrderInput!): CancelTradeOrderResult!

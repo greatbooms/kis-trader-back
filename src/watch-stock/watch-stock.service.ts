@@ -2,7 +2,9 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
-import { InfiniteBuyStrategyParams } from '../trading/types';
+import { InfiniteBuyStrategyParams, InfiniteBuyV4Params } from '../trading/types';
+import { DEFAULT_STAR_BASE_PCT_BY_STOCK } from '../trading/strategy/infinite-buy-v4.strategy';
+import { ConvertWatchStockToV4Seed } from './types';
 
 const MAX_TOTAL_ACTIVE_WATCH_STOCKS = 30;
 const DUPLICATE_WATCH_STOCK_MESSAGE = '이미 등록된 관심종목입니다.';
@@ -443,5 +445,119 @@ export class WatchStockService {
 
   delete(id: string) {
     return this.prisma.watchStock.delete({ where: { id } });
+  }
+
+  private resolveV4StarBasePct(stockCode: string, strategyParams: Record<string, any>): number | undefined {
+    const existingV4 = (strategyParams.v4 ?? {}) as InfiniteBuyV4Params;
+    return existingV4.starBasePct ?? DEFAULT_STAR_BASE_PCT_BY_STOCK[stockCode.toUpperCase()];
+  }
+
+  /**
+   * 기존 `infinite-buy` 종목을 `infinite-buy-v4`로 전환한다 (docs/infinite-buy-v4-spec.md §2/§9).
+   * dryRun=true(기본)면 시딩 값만 계산해 반환하고 DB는 건드리지 않는다. dryRun=false여야 실제 전환한다.
+   */
+  async convertToInfiniteBuyV4(watchStockId: string, dryRun = true): Promise<ConvertWatchStockToV4Seed> {
+    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+    if (!watchStock) {
+      throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+    }
+    if (watchStock.market !== Market.OVERSEAS) {
+      throw new BadRequestException('V4 전환은 해외(OVERSEAS) 종목만 지원합니다.');
+    }
+    if (watchStock.strategyName === 'infinite-buy-v4') {
+      throw new BadRequestException('이미 infinite-buy-v4 전략입니다.');
+    }
+
+    const quota = Number(watchStock.quota ?? 0);
+    if (quota <= 0 || watchStock.maxCycles <= 0) {
+      throw new BadRequestException('투자금(quota)과 최대 사이클(maxCycles)이 설정되어야 V4로 전환할 수 있습니다.');
+    }
+
+    const currentParams = this.toStrategyParams(watchStock.strategyParams);
+    const starBasePct = this.resolveV4StarBasePct(watchStock.stockCode, currentParams);
+    if (starBasePct === undefined) {
+      throw new BadRequestException(
+        `${watchStock.stockCode} 종목은 별% 기본값이 없습니다. strategyParams.v4.starBasePct를 지정한 뒤 다시 시도하세요.`,
+      );
+    }
+
+    const position = await this.prisma.position.findUnique({
+      where: {
+        market_exchangeCode_stockCode: {
+          market: watchStock.market,
+          exchangeCode: watchStock.exchangeCode,
+          stockCode: watchStock.stockCode,
+        },
+      },
+      select: { totalInvested: true, quantity: true },
+    });
+
+    const totalInvested = Number(position?.totalInvested ?? 0);
+    const perCycleQuota = quota / watchStock.maxCycles;
+    const turn = perCycleQuota > 0 ? totalInvested / perCycleQuota : 0;
+    const cashRemaining = this.roundQuota(Math.max(0, quota - totalInvested));
+    const lastKnownHoldQty = position?.quantity ?? 0;
+
+    const warnings: string[] = [];
+    if (turn >= watchStock.maxCycles / 2) {
+      warnings.push('후반전 이어받기 — 별지점이 평단 아래라 쿼터매도가 손절성으로 즉시 나갈 수 있습니다.');
+    }
+    if (turn > watchStock.maxCycles - 1) {
+      warnings.push('소진 상태 — 첫 평가에서 REVERSE 모드로 진입합니다.');
+    }
+
+    const seed: ConvertWatchStockToV4Seed = {
+      watchStockId,
+      dryRun,
+      applied: false,
+      isActive: watchStock.isActive,
+      starBasePct,
+      turn,
+      cashRemaining,
+      lastKnownHoldQty,
+      mode: 'NORMAL',
+      cycleSeq: 0,
+      warnings,
+    };
+
+    if (dryRun) {
+      return seed;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const fresh = await tx.watchStock.findUnique({ where: { id: watchStockId } });
+      if (!fresh) {
+        throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+      }
+      if (fresh.strategyName === 'infinite-buy-v4') {
+        throw new BadRequestException('이미 infinite-buy-v4 전략입니다.');
+      }
+
+      const mergedParams = this.toStrategyParams(fresh.strategyParams);
+      const v4Params: InfiniteBuyV4Params = {
+        ...(mergedParams.v4 ?? {}),
+        mode: 'NORMAL',
+        turn,
+        cashRemaining,
+        cycleSeq: 0,
+        recentCloses: [],
+        lastKnownHoldQty,
+      };
+      mergedParams.v4 = v4Params;
+
+      await tx.watchStock.update({
+        where: { id: watchStockId },
+        data: {
+          strategyName: 'infinite-buy-v4',
+          strategyParams: mergedParams,
+        },
+      });
+
+      this.logger.log(
+        `[${watchStock.stockCode}] Converted infinite-buy -> infinite-buy-v4: turn=${turn}, cashRemaining=${cashRemaining}, lastKnownHoldQty=${lastKnownHoldQty}`,
+      );
+    });
+
+    return { ...seed, applied: true };
   }
 }

@@ -20,8 +20,11 @@ import {
   StarPointResult,
 } from './infinite-buy-v4-math.util';
 
-/** 원본 방법론이 TQQQ/SOXL 전제로 튜닝된 계수 — 다른 종목은 strategyParams.v4.starBasePct 명시 필요 (D8). */
-const DEFAULT_STAR_BASE_PCT_BY_STOCK: Record<string, number> = {
+/**
+ * 원본 방법론이 TQQQ/SOXL 전제로 튜닝된 계수 — 다른 종목은 strategyParams.v4.starBasePct 명시 필요 (D8).
+ * `WatchStockService.convertToInfiniteBuyV4`도 동일 표를 참조 — 중복 정의 금지.
+ */
+export const DEFAULT_STAR_BASE_PCT_BY_STOCK: Record<string, number> = {
   TQQQ: 15,
   SOXL: 20,
 };

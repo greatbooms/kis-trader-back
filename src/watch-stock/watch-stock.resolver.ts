@@ -11,6 +11,7 @@ import {
   WatchStocksFilterInput,
   WatchStockExecutionLogType,
   ManualTriggerResult,
+  ConvertWatchStockToInfiniteBuyV4Result,
 } from './dto';
 
 registerEnumType(Market, { name: 'Market' });
@@ -126,5 +127,13 @@ export class WatchStockResolver {
       success: true,
       message: '이월 금액을 초기화했습니다.',
     };
+  }
+
+  @Mutation(() => ConvertWatchStockToInfiniteBuyV4Result)
+  async convertWatchStockToInfiniteBuyV4(
+    @Args('watchStockId', { type: () => ID }) watchStockId: string,
+    @Args('dryRun', { type: () => Boolean, nullable: true, defaultValue: true }) dryRun: boolean,
+  ): Promise<ConvertWatchStockToInfiniteBuyV4Result> {
+    return this.watchStockService.convertToInfiniteBuyV4(watchStockId, dryRun);
   }
 }
