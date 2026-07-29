@@ -496,6 +496,10 @@ export class TradingOrderReconciliationService {
     const signal = await this.getSubmittedSignal(tradeRecordId);
     if (!signal) return;
 
+    // 실제 체결가(broker 평균체결가). LOC/MOC는 제출가(지정/시장)와 다를 수 있어
+    // v4 등 금액 기반 장부(cashRemaining/T)를 쓰는 전략은 이 값을 우선한다.
+    const executedPrice = record.executedPrice !== null ? Number(record.executedPrice) : undefined;
+
     if (record.side === Side.BUY && filledNowQty > 0) {
       await this.tradingService.handleStrategySignalFill(
         record.strategyName,
@@ -506,6 +510,7 @@ export class TradingOrderReconciliationService {
         },
         currentPositionQty,
         record.createdAt, // entryDate 등 날짜 상태는 주문 시각 기준 (reconciliation 지연에 영향받지 않게)
+        executedPrice,
       );
       return;
     }
@@ -517,6 +522,7 @@ export class TradingOrderReconciliationService {
         signal,
         currentPositionQty,
         record.createdAt,
+        executedPrice,
       );
     }
   }

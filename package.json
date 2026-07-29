@@ -18,7 +18,7 @@
     "prisma:migrate:prod": "set -a; source .env.prod; set +a; prisma migrate deploy",
     "prisma:reset": "set -a; source .env.dev; set +a; prisma migrate reset --force",
     "prisma:studio": "set -a; source .env.dev; set +a; prisma studio",
-    "db:sync:prod-to-env": "node scripts/sync-prod-db-to-env.js",
+    "db:sync:prod-to-env": "node scripts/sync-prod-db-to-env.js --confirm-target kis_trader_back --pg-client-image postgres:18",
     "client:install": "cd client && yarn install",
     "client:build": "cd client && yarn build",
     "client:dev": "set -a; source .env.dev; set +a; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && CLIENT_PORT=$CLIENT_PORT PORT=$PORT yarn dev",

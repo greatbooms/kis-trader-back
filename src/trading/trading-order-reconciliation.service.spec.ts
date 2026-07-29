@@ -846,6 +846,7 @@ describe('TradingOrderReconciliationService', () => {
         approvedSignal,
         10,
         filledRecord.createdAt,
+        82,
       );
       expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
         expect.objectContaining({

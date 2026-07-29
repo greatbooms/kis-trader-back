@@ -5,8 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
+import { formatCurrency, formatNumber } from '@/lib/utils'
+import { useConvertWatchStockToInfiniteBuyV4Mutation } from '@/graphql/generated'
+import type { ConvertWatchStockToInfiniteBuyV4Mutation } from '@/graphql/generated'
 import { STRATEGY_META, DEFAULT_STRATEGY_META, parseStrategyParams } from './strategy-meta'
 import type { EditWatchStockModalProps } from './types'
+
+type V4Preview = ConvertWatchStockToInfiniteBuyV4Mutation['convertWatchStockToInfiniteBuyV4']
 
 // ── 종목 설정 수정 모달 ──
 
@@ -21,7 +26,12 @@ export function EditWatchStockModal({ stock, strategies, onSave, onClose }: Edit
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
+  const [v4Preview, setV4Preview] = useState<V4Preview | null>(null)
+  const [v4Error, setV4Error] = useState('')
+  const [convertToV4, { loading: v4Loading }] = useConvertWatchStockToInfiniteBuyV4Mutation()
+
   const meta = STRATEGY_META[strategyName] ?? DEFAULT_STRATEGY_META
+  const canConvertToV4 = strategyName === 'infinite-buy' && stock.market === 'OVERSEAS'
 
   const handleSubmit = async () => {
     setError('')
@@ -58,6 +68,29 @@ export function EditWatchStockModal({ stock, strategies, onSave, onClose }: Edit
   void maxCycles
   void setMaxCycles
 
+  const handlePreviewV4 = async () => {
+    setV4Error('')
+    try {
+      const { data } = await convertToV4({ variables: { watchStockId: stock.id, dryRun: true } })
+      if (data) setV4Preview(data.convertWatchStockToInfiniteBuyV4)
+    } catch (e: unknown) {
+      setV4Error(getMutationErrorMessage(e, 'V4 전환 미리보기 중 오류가 발생했습니다'))
+    }
+  }
+
+  const handleConfirmV4 = async () => {
+    setV4Error('')
+    try {
+      await convertToV4({
+        variables: { watchStockId: stock.id, dryRun: false },
+        refetchQueries: ['GetWatchStocks'],
+      })
+      onClose()
+    } catch (e: unknown) {
+      setV4Error(getMutationErrorMessage(e, 'V4 전환 중 오류가 발생했습니다'))
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
@@ -90,6 +123,66 @@ export function EditWatchStockModal({ stock, strategies, onSave, onClose }: Edit
               {strategies.find((s) => s.name === strategyName)?.displayName ?? (strategyName || '전략 없음')}
             </div>
           </div>
+
+          {canConvertToV4 && (
+            <div className="rounded-md border border-primary-200 bg-primary-50/50 dark:bg-primary-950/20 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">무한매수법 V4로 전환</p>
+                {!v4Preview && (
+                  <Button size="sm" variant="outline" onClick={handlePreviewV4} disabled={v4Loading}>
+                    {v4Loading ? '계산중...' : '전환 미리보기'}
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                기존 사이클/보유수량을 그대로 이어받아 V4 방식(별지점·소진 후 REVERSE)으로 전환합니다. DB 값은 시딩 계산 결과이며, 확정 전까지는 아무것도 바뀌지 않습니다.
+              </p>
+
+              {v4Preview && (
+                <div className="space-y-2 rounded-md bg-card border border-border p-3">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-muted-foreground">회차 (T)</div>
+                      <div className="font-medium">{v4Preview.turn.toFixed(2)} / {stock.maxCycles}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">잔금</div>
+                      <div className="font-medium">{formatCurrency(v4Preview.cashRemaining, stock.market, stock.exchangeCode ?? undefined)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">보유수량</div>
+                      <div className="font-medium">{formatNumber(v4Preview.lastKnownHoldQty)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">별% 기준</div>
+                      <div className="font-medium">{v4Preview.starBasePct}%</div>
+                    </div>
+                  </div>
+
+                  {v4Preview.warnings.length > 0 && (
+                    <div className="space-y-1">
+                      {v4Preview.warnings.map((warning) => (
+                        <Badge key={warning} variant="warning" className="block w-fit text-xs whitespace-normal text-left">
+                          {warning}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button size="sm" variant="outline" onClick={() => setV4Preview(null)} disabled={v4Loading}>
+                      취소
+                    </Button>
+                    <Button size="sm" onClick={handleConfirmV4} disabled={v4Loading}>
+                      {v4Loading ? '전환중...' : '전환 확정'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {v4Error && <p className="text-xs text-danger">{v4Error}</p>}
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">투자금 (quota)</label>

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PerStockTradingStrategy } from '../types';
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
+import { InfiniteBuyV4Strategy } from './infinite-buy-v4.strategy';
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
 import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
 import { ConservativeStrategy } from './conservative.strategy';
@@ -18,6 +19,7 @@ export class StrategyRegistryService {
   constructor(
     private prisma: PrismaService,
     infiniteBuy: InfiniteBuyStrategy,
+    infiniteBuyV4: InfiniteBuyV4Strategy,
     momentumBreakout: MomentumBreakoutStrategy,
     gridMeanReversion: GridMeanReversionStrategy,
     conservative: ConservativeStrategy,
@@ -26,6 +28,7 @@ export class StrategyRegistryService {
     dailyDca: DailyDcaStrategy,
   ) {
     this.register(infiniteBuy);
+    this.register(infiniteBuyV4);
     this.register(momentumBreakout);
     this.register(gridMeanReversion);
     this.register(conservative);

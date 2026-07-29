@@ -19,6 +19,7 @@ describe('WatchStockService', () => {
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -30,6 +31,7 @@ describe('WatchStockService', () => {
     }).compile();
 
     service = module.get<WatchStockService>(WatchStockService);
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
   });
 
   afterEach(() => {
@@ -348,6 +350,174 @@ describe('WatchStockService', () => {
           },
         },
       });
+    });
+  });
+
+  describe('convertToInfiniteBuyV4', () => {
+    const baseWatchStock = {
+      id: '1',
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      strategyName: 'infinite-buy',
+      isActive: true,
+      quota: 500000,
+      maxCycles: 40,
+      strategyParams: null,
+    };
+
+    it('should seed T=0 / full cashRemaining when there is no position', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(baseWatchStock);
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      const result = await service.convertToInfiniteBuyV4('1', true);
+
+      expect(result.turn).toBe(0);
+      expect(result.cashRemaining).toBe(500000);
+      expect(result.lastKnownHoldQty).toBe(0);
+      expect(result.mode).toBe('NORMAL');
+      expect(result.cycleSeq).toBe(0);
+      expect(result.starBasePct).toBe(15);
+      expect(result.warnings).toEqual([]);
+      expect(result.applied).toBe(false);
+      expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+    });
+
+    it('should seed turn/cashRemaining from an existing position in the front half with no warnings', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(baseWatchStock);
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 100000, quantity: 30 });
+
+      const result = await service.convertToInfiniteBuyV4('1', true);
+
+      // perCycleQuota = 500000/40 = 12500, T = 100000/12500 = 8 (< maxCycles/2 = 20)
+      expect(result.turn).toBe(8);
+      expect(result.cashRemaining).toBe(400000);
+      expect(result.lastKnownHoldQty).toBe(30);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('should warn about back-half takeover when turn >= maxCycles/2', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(baseWatchStock);
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 250000, quantity: 100 });
+
+      const result = await service.convertToInfiniteBuyV4('1', true);
+
+      expect(result.turn).toBe(20);
+      expect(result.warnings).toEqual(['후반전 이어받기 — 별지점이 평단 아래라 쿼터매도가 손절성으로 즉시 나갈 수 있습니다.']);
+    });
+
+    it('should warn about exhausted state when turn > maxCycles-1', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(baseWatchStock);
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 495000, quantity: 200 });
+
+      const result = await service.convertToInfiniteBuyV4('1', true);
+
+      expect(result.turn).toBeCloseTo(39.6);
+      expect(result.warnings).toEqual([
+        '후반전 이어받기 — 별지점이 평단 아래라 쿼터매도가 손절성으로 즉시 나갈 수 있습니다.',
+        '소진 상태 — 첫 평가에서 REVERSE 모드로 진입합니다.',
+      ]);
+    });
+
+    it('should reject DOMESTIC stocks', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, market: 'DOMESTIC' });
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow(
+        'V4 전환은 해외(OVERSEAS) 종목만 지원합니다.',
+      );
+    });
+
+    it('should reject stocks already on infinite-buy-v4', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, strategyName: 'infinite-buy-v4' });
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow('이미 infinite-buy-v4 전략입니다.');
+    });
+
+    it('should reject non-infinite-buy source strategies (UI 우회 직접 호출 방지)', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, strategyName: 'momentum-breakout' });
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow(
+        'V4 전환은 infinite-buy 전략 종목만 지원합니다.',
+      );
+    });
+
+    it('should reject when quota/maxCycles are not configured', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, quota: 0 });
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow(
+        '투자금(quota)과 최대 사이클(maxCycles)이 설정되어야 V4로 전환할 수 있습니다.',
+      );
+    });
+
+    it('should reject unknown stocks without an explicit starBasePct override', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, stockCode: 'AAPL' });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      await expect(service.convertToInfiniteBuyV4('1', true)).rejects.toThrow('별% 기본값이 없습니다');
+    });
+
+    it('should accept an explicit strategyParams.v4.starBasePct override for unknown stocks', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        ...baseWatchStock,
+        stockCode: 'AAPL',
+        strategyParams: { v4: { starBasePct: 12 } },
+      });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      const result = await service.convertToInfiniteBuyV4('1', true);
+
+      expect(result.starBasePct).toBe(12);
+    });
+
+    it('should not touch the DB when dryRun is true', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(baseWatchStock);
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 100000, quantity: 30 });
+
+      await service.convertToInfiniteBuyV4('1', true);
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+    });
+
+    it('should atomically update strategyName + strategyParams.v4 when dryRun is false, preserving other params', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        ...baseWatchStock,
+        strategyParams: { accumulatedQuota: 12345 },
+      });
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 100000, quantity: 30 });
+      mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+      const result = await service.convertToInfiniteBuyV4('1', false);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.watchStock.update).toHaveBeenCalledWith({
+        where: { id: '1' },
+        data: {
+          strategyName: 'infinite-buy-v4',
+          strategyParams: {
+            accumulatedQuota: 12345,
+            v4: {
+              mode: 'NORMAL',
+              turn: 8,
+              cashRemaining: 400000,
+              cycleSeq: 0,
+              recentCloses: [],
+              lastKnownHoldQty: 30,
+            },
+          },
+        },
+      });
+      expect(result.applied).toBe(true);
+    });
+
+    it('should re-check inside the transaction and refuse a stock already converted concurrently', async () => {
+      mockPrisma.watchStock.findUnique
+        .mockResolvedValueOnce(baseWatchStock)
+        .mockResolvedValueOnce({ ...baseWatchStock, strategyName: 'infinite-buy-v4' });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      await expect(service.convertToInfiniteBuyV4('1', false)).rejects.toThrow('전환 도중 전략이 변경되어 중단합니다');
+      expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -18,6 +18,13 @@ export const STRATEGY_META: Record<string, StrategyMeta> = {
     quotaDesc: '이 종목에 배정할 총 투자 금액입니다. 최대 사이클에 걸쳐 분할 매수합니다.',
     stopLossDesc: '평균 매수가 대비 이 비율만큼 하락하면 Slack 알림을 보내고, 포트폴리오에서 수동 매도합니다.',
   },
+  'infinite-buy-v4': {
+    defaultStopLoss: 0,
+    hasMaxCycles: true,
+    hasSellRates: false,
+    quotaDesc: '이 종목에 배정할 총 투자 금액(원금)입니다. 최대 사이클(분할수)에 걸쳐 분할 매수합니다.',
+    stopLossDesc: '라오어 무한매수법 V4.0 원본 규칙 — 전량 손절이 없습니다. T가 소진되면(N-1 초과) 자동으로 REVERSE 모드로 전환해 리스크를 해소합니다.',
+  },
   'grid-mean-reversion': {
     defaultStopLoss: 8,
     hasMaxCycles: false,
