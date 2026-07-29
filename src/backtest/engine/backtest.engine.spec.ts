@@ -1,8 +1,458 @@
 import { InfiniteBuyStrategy } from '../../trading/strategy/infinite-buy.strategy';
 import { MomentumBreakoutStrategy } from '../../trading/strategy/momentum-breakout.strategy';
+import {
+  PerStockTradingStrategy,
+  StockStrategyContext,
+  StrategyEvaluationResult,
+  TradingSignal,
+} from '../../trading/types';
 import { OHLCV } from '../data/indicator-calculator';
 import { runBacktest, BacktestConfig } from './backtest.engine';
 import { computeMetrics } from './metrics';
+
+/**
+ * 테스트 전용 스크립트 전략: bar 인덱스별로 미리 정해진 시그널을 그대로 반환한다.
+ * loc/moc fillModel 체결 판정은 엔진 책임이므로, 실제 v4 전략 없이 엔진만 검증한다.
+ */
+class ScriptedStrategy implements PerStockTradingStrategy {
+  name = 'scripted-test';
+  displayName = 'Scripted Test Strategy';
+  description = 'test-only strategy that replays a fixed signal script per bar';
+  executionMode = { type: 'continuous' } as const;
+  meta = {
+    riskLevel: 'MEDIUM',
+    mddBuyBlock: -0.1,
+    mddLiquidate: -0.25,
+    expectedReturn: 'n/a',
+    maxLoss: 'n/a',
+    investmentPeriod: 'n/a',
+    tradingFrequency: 'n/a',
+    suitableFor: [],
+    tags: [],
+  } as any;
+  private callIndex = 0;
+
+  constructor(private readonly script: TradingSignal[][]) {}
+
+  async evaluateStock(): Promise<StrategyEvaluationResult> {
+    const signals = this.script[this.callIndex] ?? [];
+    this.callIndex++;
+    return { signals, skipReasons: signals.length ? [] : ['scripted: no signal'] };
+  }
+}
+
+/** 종가만 의미 있는 loc/moc 테스트용 flat bar 시퀀스 (open=high=low=close). */
+function flatBars(closes: number[], startDate = new Date('2026-01-05')): OHLCV[] {
+  const bars: OHLCV[] = [];
+  const d = new Date(startDate);
+  for (const close of closes) {
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    bars.push({ date: d.toISOString().slice(0, 10).replace(/-/g, ''), open: close, high: close, low: close, close, volume: 1_000_000 });
+    d.setDate(d.getDate() + 1);
+  }
+  return bars;
+}
+
+function locSignal(side: 'BUY' | 'SELL', price: number, quantity: number): TradingSignal {
+  return {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    side,
+    quantity,
+    price,
+    reason: `v4-loc-${side.toLowerCase()}`,
+    metadata: { fillModel: 'loc' },
+  };
+}
+
+function mocSignal(side: 'BUY' | 'SELL', quantity: number): TradingSignal {
+  return {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    side,
+    quantity,
+    reason: `v4-moc-${side.toLowerCase()}`,
+    metadata: { fillModel: 'moc' },
+  };
+}
+
+function limitTouchSignal(side: 'BUY' | 'SELL', price: number, quantity: number): TradingSignal {
+  return {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    side,
+    quantity,
+    price,
+    reason: `v4-limit-touch-${side.toLowerCase()}`,
+    metadata: { fillModel: 'limit-touch' },
+  };
+}
+
+/** limit-touch 테스트용: 고가/저가가 종가와 다른 bar. */
+function ohlcBars(
+  bars: { open: number; high: number; low: number; close: number }[],
+  startDate = new Date('2026-01-05'),
+): OHLCV[] {
+  const out: OHLCV[] = [];
+  const d = new Date(startDate);
+  for (const b of bars) {
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    out.push({ date: d.toISOString().slice(0, 10).replace(/-/g, ''), ...b, volume: 1_000_000 });
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+describe('backtest engine (loc/moc fillModel)', () => {
+  const baseConfig: BacktestConfig = {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    stockName: 'TQQQ',
+    quota: 100000,
+    maxCycles: 40,
+    stopLossRate: 0.5,
+    startingCash: 100000,
+    warmupBars: 0,
+    slippageRate: 0,
+  };
+
+  it('loc BUY: 종가 ≤ limit이면 종가 체결, 초과하면 미체결', async () => {
+    const bars = flatBars([100, 105]);
+    const strategy = new ScriptedStrategy([
+      [locSignal('BUY', 105, 10)], // close 100 <= limit 105 → 체결
+      [locSignal('BUY', 100, 10)], // close 105 > limit 100 → 미체결
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(1);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    expect(res.finalPosition.quantity).toBe(10);
+  });
+
+  it('loc SELL: 종가 ≥ limit이면 종가 체결, 미달하면 미체결', async () => {
+    const bars = flatBars([100, 95, 105]);
+    const strategy = new ScriptedStrategy([
+      [mocSignal('BUY', 10)], // 포지션 확보 (종가 100)
+      [locSignal('SELL', 100, 10)], // close 95 < limit 100 → 미체결
+      [locSignal('SELL', 100, 10)], // close 105 >= limit 100 → 체결
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(2);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    expect(res.trades[1]).toMatchObject({ side: 'SELL', price: 105, quantity: 10 });
+    expect(res.finalPosition.quantity).toBe(0);
+  });
+
+  it('경계값: 종가 == limit이면 BUY/SELL 모두 체결 (≤ / ≥ 는 등호 포함)', async () => {
+    const bars = flatBars([100, 100]);
+    const strategy = new ScriptedStrategy([
+      [locSignal('BUY', 100, 10)], // close 100 == limit 100 → 체결
+      [locSignal('SELL', 100, 10)], // close 100 == limit 100 → 체결
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(2);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    expect(res.trades[1]).toMatchObject({ side: 'SELL', price: 100, quantity: 10 });
+  });
+
+  it('moc: limit 유무·방향 무관하게 당일 종가로 무조건 체결', async () => {
+    const bars = flatBars([100, 110]);
+    const strategy = new ScriptedStrategy([
+      [mocSignal('BUY', 10)],
+      [mocSignal('SELL', 10)],
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(2);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    expect(res.trades[1]).toMatchObject({ side: 'SELL', price: 110, quantity: 10 });
+  });
+
+  it('feeConfig: stop-entry와 동일하게 loc/moc 체결에도 수수료/거래세가 적용된다', async () => {
+    const bars = flatBars([100, 110]);
+    const strategy = new ScriptedStrategy([
+      [mocSignal('BUY', 10)],
+      [locSignal('SELL', 100, 10)],
+    ]);
+
+    const res = await runBacktest(strategy, bars, {
+      ...baseConfig,
+      feeConfig: { buyFeeRate: 0.001, sellFeeRate: 0.001, sellTaxRate: 0.002 },
+    });
+
+    // BUY: fee 100×10×0.001 = 1, 체결가 자체는 그대로 100
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    // SELL: gross (110-100)×10=100, sellFees 110×10×0.003=3.3 → net 96.7
+    expect(res.trades[1].pnl).toBeCloseTo(100 - 3.3, 6);
+    expect(res.finalCash).toBeCloseTo(100000 - 1000 - 1 + 1100 - 3.3, 6);
+  });
+});
+
+describe('backtest engine (limit-touch fillModel)', () => {
+  const baseConfig: BacktestConfig = {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    stockName: 'TQQQ',
+    quota: 100000,
+    maxCycles: 40,
+    stopLossRate: 0.5,
+    startingCash: 100000,
+    warmupBars: 0,
+    slippageRate: 0,
+  };
+
+  it('SELL: 장중 고가 ≥ limit이면 limit가로 체결, 미달하면 미체결', async () => {
+    const bars = ohlcBars([
+      { open: 100, high: 100, low: 100, close: 100 }, // 포지션 확보용 moc BUY
+      { open: 100, high: 105, low: 98, close: 100 }, // high 105 < limit 110 → 미체결
+      { open: 100, high: 112, low: 99, close: 105 }, // high 112 >= limit 110 → 체결 @110
+    ]);
+    const strategy = new ScriptedStrategy([
+      [mocSignal('BUY', 10)],
+      [limitTouchSignal('SELL', 110, 10)],
+      [limitTouchSignal('SELL', 110, 10)],
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(2);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    // 체결가는 limit(110) — 종가(105)도 고가(112)도 아님
+    expect(res.trades[1]).toMatchObject({ side: 'SELL', price: 110, quantity: 10 });
+    expect(res.finalPosition.quantity).toBe(0);
+  });
+
+  it('BUY: 장중 저가 ≤ limit이면 limit가로 체결, 미달하면 미체결', async () => {
+    const bars = ohlcBars([
+      { open: 100, high: 102, low: 96, close: 100 }, // low 96 > limit 95 → 미체결
+      { open: 100, high: 102, low: 94, close: 100 }, // low 94 <= limit 95 → 체결 @95
+    ]);
+    const strategy = new ScriptedStrategy([
+      [limitTouchSignal('BUY', 95, 10)],
+      [limitTouchSignal('BUY', 95, 10)],
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(1);
+    // 체결가는 limit(95) — 종가(100)도 저가(94)도 아님
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 95, quantity: 10 });
+  });
+
+  it('경계값: high==limit(SELL)/low==limit(BUY) 도 체결 (≥ / ≤ 는 등호 포함)', async () => {
+    const bars = ohlcBars([
+      { open: 105, high: 105, low: 100, close: 105 }, // low == limit 100 (BUY)
+      { open: 105, high: 110, low: 100, close: 105 }, // high == limit 110 (SELL)
+    ]);
+    const strategy = new ScriptedStrategy([
+      [limitTouchSignal('BUY', 100, 10)],
+      [limitTouchSignal('SELL', 110, 10)],
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.trades).toHaveLength(2);
+    expect(res.trades[0]).toMatchObject({ side: 'BUY', price: 100, quantity: 10 });
+    expect(res.trades[1]).toMatchObject({ side: 'SELL', price: 110, quantity: 10 });
+  });
+});
+
+/**
+ * infinite-buy-v4 bar간 상태 스레딩(§7) 전용 스크립트 전략 — bar 인덱스별로 미리 정해진
+ * {signals, details} 쌍을 그대로 반환하고, 엔진이 넘긴 ctx를 기록해 다음 bar에서
+ * strategyParams.v4가 이전 bar의 체결/모드전환을 반영했는지 검증할 수 있게 한다.
+ */
+class ScriptedV4Strategy implements PerStockTradingStrategy {
+  name = 'infinite-buy-v4';
+  displayName = 'Scripted V4 Test Strategy';
+  description = 'test-only strategy for backtest engine v4 threading';
+  executionMode = {
+    type: 'once-daily' as const,
+    hours: { domestic: 11, overseas: { basis: 'afterOpen' as const, offsetHours: 2 } },
+  };
+  meta = {
+    riskLevel: 'high',
+    mddBuyBlock: -0.99,
+    mddLiquidate: -0.99,
+    expectedReturn: 'n/a',
+    maxLoss: 'n/a',
+    investmentPeriod: 'n/a',
+    tradingFrequency: 'n/a',
+    suitableFor: [],
+    tags: [],
+  } as any;
+  readonly receivedCtx: StockStrategyContext[] = [];
+  private callIndex = 0;
+
+  constructor(private readonly script: { signals: TradingSignal[]; details?: Record<string, any> }[]) {}
+
+  async evaluateStock(ctx: StockStrategyContext): Promise<StrategyEvaluationResult> {
+    // watchStock.strategyParams는 엔진이 bar마다 같은 객체를 이어서 mutate하므로,
+    // 그대로 저장하면 이후 bar에서 값이 계속 바뀌어 버린다 — 캡처 시점 스냅샷으로 깊은 복사한다.
+    this.receivedCtx.push({
+      ...ctx,
+      watchStock: { ...ctx.watchStock, strategyParams: JSON.parse(JSON.stringify(ctx.watchStock.strategyParams ?? {})) },
+    });
+    const entry = this.script[this.callIndex] ?? { signals: [] };
+    this.callIndex++;
+    return {
+      signals: entry.signals,
+      skipReasons: entry.signals.length ? [] : ['scripted-v4: no signal'],
+      details: entry.details,
+    };
+  }
+}
+
+function v4Signal(
+  side: 'BUY' | 'SELL',
+  price: number,
+  quantity: number,
+  phase: string,
+  metadata: Record<string, any> = {},
+): TradingSignal {
+  return {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    side,
+    quantity,
+    price,
+    reason: `V4 ${phase}`,
+    metadata: { fillModel: 'loc', phase, ...metadata },
+  };
+}
+
+describe('backtest engine (infinite-buy-v4 bar간 상태 스레딩)', () => {
+  const baseConfig: Omit<BacktestConfig, 'strategyParams'> = {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    quota: 1000,
+    maxCycles: 40,
+    stopLossRate: 0.5,
+    startingCash: 2000,
+    warmupBars: 0,
+  };
+
+  it('v4StateUpdate(mode/recentCloses)과 체결로 갱신된 T/잔금이 다음 bar 평가로 이어진다', async () => {
+    const bars = flatBars([100, 100, 100]);
+    const strategy = new ScriptedV4Strategy([
+      {
+        signals: [v4Signal('BUY', 100, 5, 'v4-first-buy', { v4AttemptAmount: 500 })],
+        details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [{ date: '2026-01-05', close: 100 }] } },
+      },
+      {
+        signals: [],
+        details: {
+          v4StateUpdate: {
+            mode: 'NORMAL',
+            recentCloses: [{ date: '2026-01-05', close: 100 }, { date: '2026-01-06', close: 100 }],
+          },
+        },
+      },
+      { signals: [] },
+    ]);
+
+    await runBacktest(strategy, bars, baseConfig);
+
+    // bar1(index 1) 평가 시점 ctx는 bar0의 체결(ΔT=500/500=1, cashRemaining=1000-500)과
+    // v4StateUpdate(mode/recentCloses)를 모두 반영한 상태여야 한다.
+    const v4AtBar1 = strategy.receivedCtx[1].watchStock.strategyParams?.v4;
+    expect(v4AtBar1?.mode).toBe('NORMAL');
+    expect(v4AtBar1?.recentCloses).toHaveLength(1);
+    expect(v4AtBar1?.turn).toBeCloseTo(1, 6);
+    expect(v4AtBar1?.cashRemaining).toBeCloseTo(500, 2);
+
+    // bar2는 신호가 없었던 bar1을 거친 뒤에도 그대로 이어진다 (recentCloses만 갱신).
+    const v4AtBar2 = strategy.receivedCtx[2].watchStock.strategyParams?.v4;
+    expect(v4AtBar2?.recentCloses).toHaveLength(2);
+    expect(v4AtBar2?.turn).toBeCloseTo(1, 6);
+  });
+
+  it('같은 bar에 SELL·BUY가 함께 체결되면 신호 배열 순서와 무관하게 SELL을 먼저 장부에 반영한다', async () => {
+    const bars = flatBars([1, 1, 1]);
+    const strategy = new ScriptedV4Strategy([
+      // bar0: 보유 100주를 만들기 위한 첫 매수 (T: 0 -> 1)
+      {
+        signals: [v4Signal('BUY', 1, 100, 'v4-first-buy', { v4AttemptAmount: 100 })],
+        details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } },
+      },
+      // bar1: 배열에는 BUY를 SELL보다 먼저 넣어도, 엔진은 SELL을 먼저 반영해야 한다.
+      {
+        signals: [
+          v4Signal('BUY', 1, 10, 'v4-avg-buy', { v4AttemptAmount: 10 }),
+          v4Signal('SELL', 1, 25, 'v4-quarter-sell', { v4PrevHolding: 100 }),
+        ],
+        details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } },
+      },
+      { signals: [] },
+    ]);
+
+    await runBacktest(strategy, bars, baseConfig);
+
+    // SELL 먼저: T = 1×(1−25/100) + (10/10) = 0.75 + 1 = 1.75
+    // (BUY 먼저였다면: T = (1+1)×(1−25/100) = 1.5 — 반드시 달라야 함)
+    const v4AtBar2 = strategy.receivedCtx[2].watchStock.strategyParams?.v4;
+    expect(v4AtBar2?.turn).toBeCloseTo(1.75, 6);
+    expect(v4AtBar2?.turn).not.toBeCloseTo(1.5, 6);
+    // cashRemaining: (1000-100) + 25(매도) - 10(매수) = 915
+    expect(v4AtBar2?.cashRemaining).toBeCloseTo(915, 2);
+  });
+
+  it('SELL로 보유수량이 0이 되면 사이클이 종료되어 T=0/cycleSeq+1로 다음 bar에 전달된다', async () => {
+    const bars = flatBars([1, 1, 1]);
+    const strategy = new ScriptedV4Strategy([
+      // bar0: 10주 매수 (T: 0 -> 1)
+      {
+        signals: [v4Signal('BUY', 1, 10, 'v4-first-buy', { v4AttemptAmount: 10 })],
+        details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } },
+      },
+      // bar1: 보유 전량(10주) 매도 — §4.5 사이클 종료
+      {
+        signals: [v4Signal('SELL', 1, 10, 'v4-final-sell', { v4PrevHolding: 10 })],
+        details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } },
+      },
+      { signals: [] },
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    const v4AtBar2 = strategy.receivedCtx[2].watchStock.strategyParams?.v4;
+    expect(v4AtBar2?.turn).toBe(0);
+    expect(v4AtBar2?.cycleSeq).toBe(1);
+    expect(v4AtBar2?.lastKnownHoldQty).toBe(0);
+    // compoundMode 기본값(true) — 사이클 종료 시 잔금 재투입 (원금으로 리셋하지 않음)
+    expect(v4AtBar2?.cashRemaining).toBeCloseTo(1000, 2);
+    expect(res.v4Summary).toMatchObject({ cycleCount: 1, finalTurn: 0, finalCashRemaining: 1000 });
+  });
+
+  it('REVERSE 진입/복귀가 반복되면 v4Summary.reverseEntryCount가 진입 횟수만큼 누적된다', async () => {
+    const bars = flatBars([1, 1, 1, 1, 1]);
+    const strategy = new ScriptedV4Strategy([
+      { signals: [], details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } } },
+      { signals: [], details: { v4StateUpdate: { mode: 'REVERSE', recentCloses: [] } } }, // 1차 진입
+      { signals: [], details: { v4StateUpdate: { mode: 'NORMAL', recentCloses: [] } } }, // 복귀
+      { signals: [], details: { v4StateUpdate: { mode: 'REVERSE', recentCloses: [] } } }, // 2차 진입
+      { signals: [], details: { v4StateUpdate: { mode: 'REVERSE', recentCloses: [] } } }, // 유지(재진입 아님)
+    ]);
+
+    const res = await runBacktest(strategy, bars, baseConfig);
+
+    expect(res.v4Summary?.reverseEntryCount).toBe(2);
+    expect(res.v4Summary?.finalMode).toBe('REVERSE');
+  });
+});
 
 /** Generate synthetic OHLCV series: sinusoidal price around base with light drift. */
 function synth(

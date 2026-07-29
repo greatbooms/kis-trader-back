@@ -6,6 +6,8 @@
  *   npm run backtest -- --from 20200101 --to 20251231 --policies none,legacy-hard,continuous
  *   npm run backtest -- --strategy momentum-breakout --from 20230601 --to 20260531 \
  *     --tickers 005930,122630,069500 --k 0.3,0.5,0.7 --stop-loss 0.02
+ *   npm run backtest -- --strategy infinite-buy-v4 --from 20200101 --to 20260601 \
+ *     --tickers TQQQ,SOXL --quota 20000 --splits 40
  *
  * 결과: docs/backtest-reports/backtest-{timestamp}.md
  */
@@ -16,6 +18,7 @@ import { Market } from '@prisma/client';
 import { BacktestModule } from '../backtest.module';
 import { HistoricalCollectorService, HistoricalTicker } from '../data/historical-collector.service';
 import { InfiniteBuyStrategy } from '../../trading/strategy/infinite-buy.strategy';
+import { InfiniteBuyV4Strategy } from '../../trading/strategy/infinite-buy-v4.strategy';
 import { MomentumBreakoutStrategy } from '../../trading/strategy/momentum-breakout.strategy';
 import { RsiPolicy } from '../../trading/types';
 import { runBacktest } from '../engine/backtest.engine';
@@ -23,14 +26,14 @@ import { computeMetrics, BacktestMetrics } from '../engine/metrics';
 import * as fs from 'fs';
 import * as path from 'path';
 
-type BacktestStrategyName = 'infinite-buy' | 'momentum-breakout';
+type BacktestStrategyName = 'infinite-buy' | 'momentum-breakout' | 'infinite-buy-v4';
 
 interface CliArgs {
   strategy: BacktestStrategyName;
   from: string;
   to: string;
   policies: RsiPolicy[];
-  tickers?: string; // "overseas,domestic,all" 프리셋 또는 종목코드 csv (momentum)
+  tickers?: string; // "overseas,domestic,all" 프리셋 또는 종목코드 csv (momentum/v4)
   persist: boolean;
   force: boolean;
   outDir: string;
@@ -41,15 +44,27 @@ interface CliArgs {
   stopFill: 'low' | 'close';
   slippage?: number;
   sellTaxRate?: number; // 미지정 시 종목별 기본값 (ETF 0, 일반 주식 0.18%)
+  // infinite-buy-v4 전용
+  v4Quota: number;  // 원금 (WatchStock.quota)
+  v4Splits: number; // 분할수 N (WatchStock.maxCycles)
 }
 
-const BACKTEST_STRATEGIES: BacktestStrategyName[] = ['infinite-buy', 'momentum-breakout'];
+const BACKTEST_STRATEGIES: BacktestStrategyName[] = ['infinite-buy', 'momentum-breakout', 'infinite-buy-v4'];
 
 /** 숫자 CLI 인자 검증 — NaN/범위 밖 값이 조용히 흘러들어 잘못된 리포트를 만들지 않게 한다 */
 function parseRate(flag: string, raw: string | undefined, min: number, max: number): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value < min || value > max) {
     throw new Error(`${flag} 값이 잘못됐습니다: "${raw}" (허용 범위 ${min}~${max})`);
+  }
+  return value;
+}
+
+/** quota/splits처럼 범위가 정해지지 않은 양수 CLI 인자 검증 */
+function parsePositiveNumber(flag: string, raw: string | undefined): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} 값이 잘못됐습니다: "${raw}" (0 초과 숫자)`);
   }
   return value;
 }
@@ -75,6 +90,8 @@ function parseArgs(argv: string[]): CliArgs {
     kValues: [0.5],
     stopLossRate: 0.02,
     stopFill: 'low',
+    v4Quota: 20000,
+    v4Splits: 40,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -94,6 +111,8 @@ function parseArgs(argv: string[]): CliArgs {
       case '--stop-fill': defaults.stopFill = next === 'close' ? 'close' : 'low'; i++; break;
       case '--slippage': defaults.slippage = parseRate(arg, next, 0, 0.05); i++; break;
       case '--sell-tax': defaults.sellTaxRate = parseRate(arg, next, 0, 0.05); i++; break;
+      case '--quota': defaults.v4Quota = parsePositiveNumber(arg, next); i++; break;
+      case '--splits': defaults.v4Splits = parsePositiveNumber(arg, next); i++; break;
     }
   }
   if (!BACKTEST_STRATEGIES.includes(defaults.strategy)) {
@@ -126,6 +145,8 @@ async function main() {
   try {
     if (args.strategy === 'momentum-breakout') {
       await runMomentumBacktest(app, args, logger);
+    } else if (args.strategy === 'infinite-buy-v4') {
+      await runInfiniteBuyV4Backtest(app, args, logger);
     } else {
       await runInfiniteBuyBacktest(app, args, logger);
     }
@@ -229,6 +250,151 @@ async function runInfiniteBuyBacktest(
   });
   fs.writeFileSync(outPath, md, 'utf-8');
   logger.log(`Report written: ${outPath}`);
+}
+
+// ── infinite-buy-v4 (V4.0 원본 준수, 해외 전용) ─────────────────
+
+/** infinite-buy-v4 기본 대상 — TQQQ/SOXL (§1: 3배 레버리지 ETF 전제로 계수가 튜닝됨) */
+function resolveV4Tickers(tickersArg: string | undefined): HistoricalTicker[] {
+  const overseasDefaults = DEFAULT_TICKERS.filter((t) => ['TQQQ', 'SOXL'].includes(t.stockCode));
+  if (!tickersArg || ['all', 'overseas'].includes(tickersArg)) return overseasDefaults;
+  if (tickersArg === 'domestic') {
+    throw new Error('infinite-buy-v4는 해외 전용 전략입니다 (--tickers domestic 불가)');
+  }
+
+  // 종목코드 csv — 알려진 기본 티커면 이름 재사용, 아니면 해외 종목으로 간주 (AMEX 기본)
+  return tickersArg.split(',').map((raw) => {
+    const code = raw.trim().toUpperCase();
+    const known = DEFAULT_TICKERS.find((t) => t.stockCode === code);
+    if (known) {
+      if (known.market !== 'OVERSEAS') {
+        throw new Error(`infinite-buy-v4는 해외 전용 전략입니다 (${code}는 ${known.market})`);
+      }
+      return known;
+    }
+    return { market: 'OVERSEAS' as Market, exchangeCode: 'AMEX', stockCode: code, stockName: code };
+  });
+}
+
+interface V4Row {
+  ticker: string;
+  metrics: BacktestMetrics;
+  cycleCount: number;
+  reverseEntryCount: number;
+  finalMode: string;
+  finalTurn: number;
+  finalCashRemaining: number;
+}
+
+async function runInfiniteBuyV4Backtest(
+  app: INestApplicationContext,
+  args: CliArgs,
+  logger: Logger,
+): Promise<void> {
+  logger.log(
+    `Starting infinite-buy-v4 backtest: ${args.from} ~ ${args.to}, ` +
+    `quota=${args.v4Quota}, splits=${args.v4Splits}`,
+  );
+
+  const collector = app.get(HistoricalCollectorService);
+  const strategy = app.get(InfiniteBuyV4Strategy);
+  const tickers = resolveV4Tickers(args.tickers);
+
+  logger.log(`Collecting historical data for ${tickers.length} tickers...`);
+  const dataMap = await collector.collectBatch(tickers, {
+    from: args.from,
+    to: args.to,
+    persist: args.persist,
+    force: args.force,
+  });
+
+  const rows: V4Row[] = [];
+  let skipped = 0;
+
+  for (const ticker of tickers) {
+    const bars = dataMap.get(ticker.stockCode) ?? [];
+    if (bars.length < 30) {
+      logger.warn(`[${ticker.stockCode}] not enough data (${bars.length} bars), skipping`);
+      skipped++;
+      continue;
+    }
+
+    const startingCash = args.v4Quota * 2.5;
+    const res = await runBacktest(strategy, bars, {
+      market: ticker.market,
+      exchangeCode: ticker.exchangeCode,
+      stockCode: ticker.stockCode,
+      stockName: ticker.stockName,
+      quota: args.v4Quota,
+      maxCycles: args.v4Splits,
+      stopLossRate: 0.5, // v4는 stopLossRate 미사용(REVERSE 모드가 손절을 대체) — 엔진 BacktestConfig 계약상 필요한 placeholder
+      startingCash,
+      warmupBars: 5, // 리버스 별지점(최근 5거래일 종가 평균) 롤링 윈도우 확보용 — MA200 등은 v4가 사용하지 않음
+    });
+
+    const metrics = computeMetrics(res.dailyValues, res.trades, startingCash);
+    rows.push({
+      ticker: ticker.stockCode,
+      metrics,
+      cycleCount: res.v4Summary?.cycleCount ?? 0,
+      reverseEntryCount: res.v4Summary?.reverseEntryCount ?? 0,
+      finalMode: res.v4Summary?.finalMode ?? 'NORMAL',
+      finalTurn: res.v4Summary?.finalTurn ?? 0,
+      finalCashRemaining: res.v4Summary?.finalCashRemaining ?? args.v4Quota,
+    });
+    logger.log(
+      `[${ticker.stockCode}] Return ${(metrics.totalReturn * 100).toFixed(1)}%, ` +
+      `CAGR ${(metrics.cagr * 100).toFixed(1)}%, MaxDD ${(metrics.maxDrawdown * 100).toFixed(1)}%, ` +
+      `cycles=${res.v4Summary?.cycleCount ?? 0}, reverseEntries=${res.v4Summary?.reverseEntryCount ?? 0}, ` +
+      `finalMode=${res.v4Summary?.finalMode}, finalTurn=${(res.v4Summary?.finalTurn ?? 0).toFixed(2)}`,
+    );
+  }
+
+  const outPath = resolveReportPath(args.outDir);
+  const md = buildV4Report({ args, rows, skippedCount: skipped, tickerCount: tickers.length });
+  fs.writeFileSync(outPath, md, 'utf-8');
+  logger.log(`Report written: ${outPath}`);
+}
+
+function buildV4Report(opts: {
+  args: CliArgs;
+  rows: V4Row[];
+  skippedCount: number;
+  tickerCount: number;
+}): string {
+  const { args, rows, skippedCount, tickerCount } = opts;
+  const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
+  const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+
+  const lines: string[] = [];
+  lines.push('# 무한매수법 V4 백테스트');
+  lines.push('');
+  lines.push(`- **기간**: ${args.from} ~ ${args.to}`);
+  lines.push(`- **원금(quota)**: ${usd(args.v4Quota)} / **분할수(N)**: ${args.v4Splits}`);
+  lines.push(`- **티커**: ${tickerCount}개 (${skippedCount}개 데이터 부족으로 제외)`);
+  lines.push(`- **생성 시각**: ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push('## 전체 결과');
+  lines.push('');
+  lines.push('| Ticker | 총수익률 | CAGR | MaxDD | Sharpe | 거래횟수 | 사이클완료 | REVERSE진입 | 최종모드 | 최종T | 최종잔금 |');
+  lines.push('|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|');
+  for (const r of rows) {
+    lines.push(
+      `| ${r.ticker} | ${pct(r.metrics.totalReturn)} | ${pct(r.metrics.cagr)} | ${pct(r.metrics.maxDrawdown)} | ` +
+      `${r.metrics.sharpeRatio.toFixed(2)} | ${r.metrics.tradeCount} | ${r.cycleCount} | ${r.reverseEntryCount} | ` +
+      `${r.finalMode} | ${r.finalTurn.toFixed(2)} | ${usd(r.finalCashRemaining)} |`,
+    );
+  }
+  lines.push('');
+  lines.push('## 해석 가이드 / 한계');
+  lines.push('');
+  lines.push('- **사이클완료**: 원금을 전량 회수하고 T=0으로 재시작한 횟수. 많을수록 짧은 주기로 수익을 실현했다는 의미.');
+  lines.push('- **REVERSE진입**: 원금 소진(T > N-1) 후 손절 대신 리버스 모드로 전환된 횟수. 하락장에서 빈번할수록 원금 소진이 잦았다는 신호.');
+  lines.push('- **최종T/최종잔금**: 백테스트 종료 시점의 회차와 잔금 — 사이클 중간에 끝나면 완전 청산 상태가 아닐 수 있다 (남은 포지션은 mark-to-market으로만 평가).');
+  lines.push('- **일봉 근사**: LOC/MOC는 종가 기준 체결로 실제와 거의 동일. 최종매도(limit-touch)만 장중 고가 터치 기반 근사.');
+  lines.push('- 원본 방법론 문서(라오어 무한매수법 V4.0)는 재배포 금지 자료 — 상세 규칙은 `docs/infinite-buy-v4-spec.md` 참조.');
+
+  return lines.join('\n') + '\n';
 }
 
 // ── momentum-breakout (당일청산 변동성 돌파) ──────────────────

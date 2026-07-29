@@ -23,6 +23,11 @@ npm run backtest -- --strategy momentum-breakout --from 20230601 --to 20260531 \
   --tickers 005930,122630,069500 --k 0.3,0.5,0.7 --stop-loss 0.02
 # 옵션: --take-profit 0.03 (익절 활성화) / --stop-fill low|close / --slippage 0.002 / --sell-tax 0
 # 거래세: 기본 종목별 자동 (KRX_ETF_CODES에 있는 ETF는 0, 일반 주식 0.18%). --sell-tax로 일괄 override
+
+# 무한매수 V4 (해외 전용, LOC/MOC 순정 체결)
+npm run backtest -- --strategy infinite-buy-v4 --from 20200101 --to 20260601 \
+  --tickers TQQQ,SOXL --quota 20000 --splits 40
+# --tickers 미지정 시 TQQQ,SOXL 기본. --quota=원금(WatchStock.quota), --splits=분할수 N(WatchStock.maxCycles)
 ```
 
 ## 체결 모델 (engine)
@@ -36,10 +41,19 @@ npm run backtest -- --strategy momentum-breakout --from 20230601 --to 20260531 \
 
 엔진은 ctx에 `evaluationMode: 'daily-bar'`와 `prevHigh/prevLow/prevClose`(직전 bar)를 주입한다.
 
+## infinite-buy-v4 bar간 상태 스레딩
+
+`strategy.name === 'infinite-buy-v4'`일 때만 엔진이 매 bar마다 다음을 수행한다 (다른 전략은 영향 없음):
+1. `evaluateStock` 결과의 `details.v4StateUpdate({mode, recentCloses})`를 `state.strategyParams.v4`에 병합 — 다음 bar 평가에 전달
+2. 그 bar의 loc/moc/limit-touch 체결을 `infinite-buy-v4-ledger.util.applyV4Fill`로 장부(T/cashRemaining/cycleSeq/lastKnownHoldQty)에 반영. **같은 bar에 SELL·BUY가 함께 체결되면 SELL 먼저** (신호 배열의 원래 순서와 무관하게 엔진이 재정렬 — 실거래 제출 순서(`trading.service.ts`의 `submissionOrderedSignals`)와 동일 규칙)
+3. `TradingService.handleInfiniteBuyV4SignalFill`과 동일한 `applyV4Fill` 순수 함수를 공유하므로 백테스트/실거래 장부 규칙이 갈라지지 않는다
+
+`BacktestResult.v4Summary`(finalMode/finalTurn/finalCashRemaining/cycleCount/reverseEntryCount)는 v4 전략일 때만 채워진다.
+
 ## 외부 의존성
 - `@nestjs/core` (NestFactory.createApplicationContext) — standalone Nest app
 - `KisModule` — 과거 시세 수집
-- `InfiniteBuyStrategy`, `MomentumBreakoutStrategy` (from `TradingModule`) — 평가 대상 전략
+- `InfiniteBuyStrategy`, `InfiniteBuyV4Strategy`, `MomentumBreakoutStrategy` (from `TradingModule`) — 평가 대상 전략
 - `@prisma/client` — `HistoricalDailyPrice`, `Market` enum
 - 표준 lib: `fs`, `path`
 

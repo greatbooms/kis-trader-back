@@ -6,10 +6,22 @@ import {
   WatchStockConfig,
   StockIndicators,
   MarketCondition,
+  InfiniteBuyV4Mode,
 } from '../../trading/types';
 import { Market } from '@prisma/client';
 import { OHLCV, computeIndicators } from '../data/indicator-calculator';
 import { BacktestTrade } from './metrics';
+import { applyV4Fill, V4LedgerState } from '../../trading/strategy/infinite-buy-v4-ledger.util';
+import { roundToCent } from '../../trading/strategy/infinite-buy-v4-math.util';
+
+const INFINITE_BUY_V4_STRATEGY_NAME = 'infinite-buy-v4';
+
+/** OHLCV.date는 'YYYYMMDD'(압축) 또는 'YYYY-MM-DD' 둘 다 나타날 수 있어 방어적으로 파싱한다. */
+function parseBarDate(date: string): Date {
+  const compact = /^\d{8}$/.test(date);
+  const iso = compact ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}` : date;
+  return new Date(iso);
+}
 
 export interface BacktestConfig {
   market: Market;
@@ -64,6 +76,14 @@ export interface BacktestResult {
     totalInvested: number;
   };
   finalCash: number;
+  /** strategy.name === 'infinite-buy-v4'일 때만 채워지는 전용 리포트 지표 (§7). */
+  v4Summary?: {
+    finalMode: InfiniteBuyV4Mode;
+    finalTurn: number;
+    finalCashRemaining: number;
+    cycleCount: number;
+    reverseEntryCount: number;
+  };
 }
 
 interface PendingLimitOrder {
@@ -124,6 +144,12 @@ export async function runBacktest(
     referenceIndexName: isOverseas ? 'S&P500' : 'KOSPI',
     interestRateRising: false,
   };
+
+  // infinite-buy-v4 전용 bar간 상태 스레딩(§7) — 다른 전략의 기존 동작에는 영향 없음.
+  const isV4Strategy = strategy.name === INFINITE_BUY_V4_STRATEGY_NAME;
+  let v4CycleCount = 0;
+  let v4ReverseEntryCount = 0;
+  let v4PrevMode: InfiniteBuyV4Mode | undefined;
 
   for (let i = 0; i < bars.length; i++) {
     const today = bars[i];
@@ -236,6 +262,10 @@ export async function runBacktest(
       marketCondition,
       stockIndicators,
       evaluationMode: 'daily-bar',
+      // 시뮬레이션 bar의 날짜 — 전략이 "오늘" 기준으로 날짜별 상태(예: 롤링 종가 윈도우)를
+      // 갱신할 때 실제 wall-clock 대신 참조한다 (백테스트는 수천 bar를 밀리초 단위로 순회하므로
+      // wall-clock 기준으로는 모든 bar가 "같은 날"로 보인다).
+      now: parseBarDate(today.date),
       buyableAmount: state.cash,
       totalPortfolioValue: portfolioValue,
       riskState: {
@@ -252,10 +282,39 @@ export async function runBacktest(
     // 4. 전략 호출
     const result = await strategy.evaluateStock(ctx);
 
+    // 4-1. v4 전용: 평가 시점 상태(mode/recentCloses)를 다음 bar 평가에 전달할 strategyParams.v4에 반영.
+    //      T/cashRemaining/cycleSeq/lastKnownHoldQty는 아래 체결 반영(applyV4Fill)에서만 갱신한다
+    //      (실거래의 persistInfiniteBuyV4State/handleInfiniteBuyV4SignalFill 분리와 동일한 시점 규칙).
+    if (isV4Strategy && result.details?.v4StateUpdate) {
+      const v4StateUpdate = result.details.v4StateUpdate as {
+        mode: InfiniteBuyV4Mode;
+        recentCloses: unknown[];
+      };
+      state.strategyParams.v4 = {
+        ...(state.strategyParams.v4 ?? {}),
+        mode: v4StateUpdate.mode,
+        recentCloses: v4StateUpdate.recentCloses,
+      };
+      if (v4PrevMode !== 'REVERSE' && v4StateUpdate.mode === 'REVERSE') {
+        v4ReverseEntryCount++;
+      }
+      v4PrevMode = v4StateUpdate.mode;
+    }
+
     // 5. 시그널 체결
     const prevQuantity = state.quantity;
-    for (const signal of result.signals) {
-      executeSignal(signal, state, today, trades, pendingOrders, slippage, isOverseas, dayTradeFill);
+    // v4 전용: 같은 bar에 SELL·BUY가 함께 체결되면 SELL 먼저 장부에 반영 — 실거래 제출 순서(§3, 매도 먼저 반영 후 매수 반영)와 동일 규칙.
+    // sort는 stable이므로 각 side 그룹 내 원래 순서(쿼터매도→최종매도, 평단매수→별지점매수→사다리)는 보존된다.
+    const orderedSignals = isV4Strategy
+      ? [...result.signals].sort((a, b) => (a.side === b.side ? 0 : a.side === 'SELL' ? -1 : 1))
+      : result.signals;
+    for (const signal of orderedSignals) {
+      const holdBeforeSignal = state.quantity;
+      const fillResult = executeSignal(signal, state, today, trades, pendingOrders, slippage, isOverseas, dayTradeFill);
+      if (isV4Strategy && fillResult) {
+        const cycleCompleted = applyV4LedgerFill(state, signal, fillResult, holdBeforeSignal, config);
+        if (cycleCompleted) v4CycleCount++;
+      }
     }
     const boughtToday = state.quantity > prevQuantity;
 
@@ -282,6 +341,7 @@ export async function runBacktest(
   }
 
   // 종료: 남은 포지션 종가 청산 (선택적, 여기서는 hold로 둠 — 메트릭은 mark-to-market)
+  const v4 = state.strategyParams.v4 as Record<string, any> | undefined;
   return {
     config,
     dailyValues,
@@ -293,7 +353,67 @@ export async function runBacktest(
       totalInvested: state.totalInvested,
     },
     finalCash: state.cash,
+    v4Summary: isV4Strategy
+      ? {
+          finalMode: (v4?.mode as InfiniteBuyV4Mode) ?? 'NORMAL',
+          finalTurn: Number.isFinite(v4?.turn) ? (v4!.turn as number) : 0,
+          finalCashRemaining: Number.isFinite(v4?.cashRemaining) ? (v4!.cashRemaining as number) : config.quota,
+          cycleCount: v4CycleCount,
+          reverseEntryCount: v4ReverseEntryCount,
+        }
+      : undefined,
   };
+}
+
+/** v4 전용 체결 결과 — SELL/BUY 체결이 실제로 일어났을 때만 반환되어 호출자가 장부(T/cashRemaining)를 갱신할 수 있게 한다. 다른 전략 경로는 사용하지 않으므로 undefined로 둔다. */
+interface FillOutcome {
+  price: number;
+  quantity: number;
+}
+
+/**
+ * infinite-buy-v4 전용: 체결 1건을 strategyParams.v4 장부(T/cashRemaining/cycleSeq/lastKnownHoldQty)에
+ * 반영한다. `TradingService.handleInfiniteBuyV4SignalFill`과 동일한 infinite-buy-v4-ledger.util을
+ * 공유하므로 실거래와 계산 규칙이 갈라지지 않는다.
+ */
+function applyV4LedgerFill(
+  state: SimState,
+  signal: TradingSignal,
+  fill: FillOutcome,
+  previousHoldingQty: number,
+  config: BacktestConfig,
+): boolean {
+  const v4 = (state.strategyParams.v4 ?? {}) as Record<string, any>;
+  const before: V4LedgerState = {
+    turn: Number.isFinite(v4.turn) ? v4.turn : 0,
+    cashRemaining: Number.isFinite(v4.cashRemaining) ? v4.cashRemaining : config.quota,
+    cycleSeq: v4.cycleSeq ?? 0,
+    lastKnownHoldQty: previousHoldingQty,
+  };
+  const fillAmount = roundToCent(fill.price * fill.quantity);
+
+  const result = applyV4Fill(before, {
+    side: signal.side,
+    phase: String(signal.metadata?.phase || ''),
+    quantity: fill.quantity,
+    fillAmount,
+    previousHoldingQty,
+    sellRatioPrevHolding: Number(signal.metadata?.v4PrevHolding ?? previousHoldingQty),
+    attemptAmount: Number(signal.metadata?.v4DayBuyAttemptTotal ?? signal.metadata?.v4AttemptAmount ?? fillAmount),
+    N: config.maxCycles,
+    quota: config.quota,
+    compoundMode: v4.compoundMode ?? true,
+  });
+
+  state.strategyParams.v4 = {
+    ...v4,
+    turn: result.state.turn,
+    cashRemaining: result.state.cashRemaining,
+    cycleSeq: result.state.cycleSeq,
+    lastKnownHoldQty: result.state.lastKnownHoldQty,
+  };
+
+  return result.cycleCompleted;
 }
 
 function executeSignal(
@@ -305,11 +425,18 @@ function executeSignal(
   slippage: number,
   isOverseas: boolean,
   dayTradeFill: DayTradeFillConfig,
-) {
+): FillOutcome | undefined {
   // metadata.fillModel 기반 체결 — reason-prefix 분기(infinite-buy 전용)보다 먼저 처리
   if (signal.side === 'BUY' && signal.metadata?.fillModel === 'stop-entry') {
     executeStopEntryDayTrade(signal, state, today, trades, slippage, dayTradeFill);
-    return;
+    return undefined;
+  }
+  if (
+    signal.metadata?.fillModel === 'loc' ||
+    signal.metadata?.fillModel === 'moc' ||
+    signal.metadata?.fillModel === 'limit-touch'
+  ) {
+    return executeCloseFill(signal, state, today, trades, dayTradeFill);
   }
 
   const reason = signal.reason ?? '';
@@ -441,6 +568,64 @@ function executeStopEntryDayTrade(
     reason: exitReason,
     pnl,
   });
+}
+
+/**
+ * LOC(Limit-On-Close)/MOC(Market-On-Close)/장중 지정가(limit-touch) 체결 근사:
+ * - 'loc': BUY는 종가 ≤ limit, SELL은 종가 ≥ limit 일 때만 종가로 체결. 미충족 시 그날로 소멸 (이월 없음 — 전략이 다음 bar에서 재생성해야 다시 시도됨).
+ * - 'moc': 방향 무관 종가로 무조건 체결.
+ * - 'limit-touch': 실제 지정가 주문(orderDivision='00' 등) 근사 — BUY는 장중 저가 ≤ limit, SELL은 장중 고가 ≥ limit 이면 지정가 그대로 체결 (종가 아님). 미충족 시 그날로 소멸.
+ * - loc/moc 체결가는 종가 그대로 (슬리피지 미적용 — 단일가 체결이 정의 자체이므로 근사가 아니라 실제 체결 방식).
+ * - 수수료/거래세는 stop-entry와 동일한 feeConfig 적용. 현금/보유수량 초과분은 조용히 드랍하지 않고 수량을 줄여 체결.
+ */
+function executeCloseFill(
+  signal: TradingSignal,
+  state: SimState,
+  today: OHLCV,
+  trades: BacktestTrade[],
+  fill: DayTradeFillConfig,
+): FillOutcome | undefined {
+  if (signal.quantity <= 0) return undefined;
+  const fillModel = signal.metadata?.fillModel;
+  const limitPrice = signal.price;
+
+  let fillPrice: number;
+  if (fillModel === 'limit-touch') {
+    if (limitPrice === undefined) return undefined;
+    if (signal.side === 'BUY' && today.low > limitPrice) return undefined;
+    if (signal.side === 'SELL' && today.high < limitPrice) return undefined;
+    fillPrice = limitPrice;
+  } else {
+    if (
+      fillModel === 'loc' &&
+      (limitPrice === undefined ||
+        (signal.side === 'BUY' && today.close > limitPrice) ||
+        (signal.side === 'SELL' && today.close < limitPrice))
+    ) {
+      return undefined;
+    }
+    fillPrice = today.close;
+  }
+
+  if (signal.side === 'BUY') {
+    const unitCost = fillPrice * (1 + fill.buyFeeRate);
+    const quantity = Math.min(signal.quantity, Math.floor(state.cash / unitCost));
+    if (quantity <= 0) return undefined;
+    const buyFee = fillPrice * quantity * fill.buyFeeRate;
+    fillBuy(state, fillPrice, quantity);
+    state.cash -= buyFee;
+    trades.push({ date: today.date, side: 'BUY', price: fillPrice, quantity, reason: signal.reason });
+    return { price: fillPrice, quantity };
+  } else {
+    const quantity = Math.min(signal.quantity, state.quantity);
+    if (quantity <= 0) return undefined;
+    const sellFees = fillPrice * quantity * (fill.sellFeeRate + fill.sellTaxRate);
+    const pnl = (fillPrice - state.avgPrice) * quantity - sellFees;
+    fillSell(state, fillPrice, quantity);
+    state.cash -= sellFees;
+    trades.push({ date: today.date, side: 'SELL', price: fillPrice, quantity, reason: signal.reason, pnl });
+    return { price: fillPrice, quantity };
+  }
 }
 
 function fillBuy(state: SimState, price: number, qty: number) {
