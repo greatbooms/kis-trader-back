@@ -397,20 +397,32 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     }
 
     // 매도는 D(매수 예산)와 무관하게 항상 평가한다.
+    // 매수 쪽(starLegQty 등)과 대칭으로 가격이 0 이하면 신호를 생성하지 않는다 —
+    // 후반전 별%가 과도하게 음전환되는 극단값(오설정 등)에서 음수/0 지정가 주문 제출 방지.
     if (hasPosition) {
       let quarterSellQty = 0;
       if (holdQty >= 2) {
-        quarterSellQty = Math.max(1, Math.floor(holdQty / 4));
-        signals.push(
-          this.buildSellSignal(ctx, quarterSellQty, star!.sellLimitPrice, 'v4-quarter-sell', holdQty, LOC_ORDER_DIVISION, 'loc'),
-        );
+        const candidateQuarterSellQty = Math.max(1, Math.floor(holdQty / 4));
+        const quarterSellPrice = star!.sellLimitPrice;
+        if (quarterSellPrice > 0) {
+          quarterSellQty = candidateQuarterSellQty;
+          signals.push(
+            this.buildSellSignal(ctx, quarterSellQty, quarterSellPrice, 'v4-quarter-sell', holdQty, LOC_ORDER_DIVISION, 'loc'),
+          );
+        } else {
+          skipReasons.push(`쿼터매도 가격 비정상 (${quarterSellPrice}) — 매도 스킵`);
+        }
       }
       const finalSellQty = holdQty - quarterSellQty;
       if (finalSellQty > 0) {
         const finalSellPrice = roundToCent(avgPrice * (1 + coeff.finalTargetPct / 100));
-        signals.push(
-          this.buildSellSignal(ctx, finalSellQty, finalSellPrice, 'v4-final-sell', holdQty, LIMIT_ORDER_DIVISION, 'limit-touch'),
-        );
+        if (finalSellPrice > 0) {
+          signals.push(
+            this.buildSellSignal(ctx, finalSellQty, finalSellPrice, 'v4-final-sell', holdQty, LIMIT_ORDER_DIVISION, 'limit-touch'),
+          );
+        } else {
+          skipReasons.push(`최종매도 가격 비정상 (${finalSellPrice}) — 매도 스킵`);
+        }
       }
     }
 
@@ -428,10 +440,13 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     const skipReasons: string[] = [];
     const M = N / 2;
     const sellQty = Math.floor(holdQty / M);
-    if (sellQty > 0) {
+    const sellPrice = roundToCent(curPrice);
+    if (sellQty > 0 && sellPrice > 0) {
       signals.push(
-        this.buildSellSignal(ctx, sellQty, roundToCent(curPrice), 'v4-reverse-sell', holdQty, MOC_SELL_ORDER_DIVISION, 'moc'),
+        this.buildSellSignal(ctx, sellQty, sellPrice, 'v4-reverse-sell', holdQty, MOC_SELL_ORDER_DIVISION, 'moc'),
       );
+    } else if (sellQty > 0) {
+      skipReasons.push(`리버스 진입 첫날 매도 가격 비정상 (${sellPrice}) — 매도 스킵`);
     } else {
       skipReasons.push(`리버스 진입 첫날 매도 수량 0 (보유 ${holdQty} / M=${M})`);
     }
@@ -465,9 +480,13 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     if (holdQty > 0) {
       const sellQty = Math.floor(holdQty / M);
       if (sellQty > 0) {
-        signals.push(
-          this.buildSellSignal(ctx, sellQty, reverseStarPrice, 'v4-reverse-sell', holdQty, LOC_ORDER_DIVISION, 'loc'),
-        );
+        if (reverseStarPrice > 0) {
+          signals.push(
+            this.buildSellSignal(ctx, sellQty, reverseStarPrice, 'v4-reverse-sell', holdQty, LOC_ORDER_DIVISION, 'loc'),
+          );
+        } else {
+          skipReasons.push(`리버스 매도 가격 비정상 (${reverseStarPrice}) — 매도 스킵`);
+        }
       }
     }
 

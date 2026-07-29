@@ -764,11 +764,19 @@ export class TradingService {
     const fillAmount = roundToCent(fillPrice * signal.quantity);
     const phase = String(signal.metadata?.phase || '');
 
+    // v4 장부(lastKnownHoldQty)가 진실(D5) — reconciliation의 qtyBeforeFill은 pass당 1회 뜬
+    // 포지션 스냅샷을 역산한 값이라, 같은 pass에 같은 종목 체결이 2건 이상이면(쿼터매도+최종매도
+    // 동시 체결 등) 각 건의 "체결 전 보유수량"이 어긋난다. 장부가 있으면(최초 체결이 아니면)
+    // 그 값으로 체이닝해 각 체결이 DB를 순차 갱신하는 실제 순서를 그대로 반영한다.
+    const effectivePreviousHoldingQty = Number.isFinite(v4.lastKnownHoldQty)
+      ? (v4.lastKnownHoldQty as number)
+      : previousHoldingQty;
+
     const before: V4LedgerState = {
       turn: Number.isFinite(v4.turn) ? (v4.turn as number) : 0,
       cashRemaining: Number.isFinite(v4.cashRemaining) ? (v4.cashRemaining as number) : principal,
       cycleSeq: v4.cycleSeq ?? 0,
-      lastKnownHoldQty: previousHoldingQty,
+      lastKnownHoldQty: effectivePreviousHoldingQty,
     };
 
     const result = applyV4Fill(before, {
@@ -776,14 +784,14 @@ export class TradingService {
       phase,
       quantity: signal.quantity,
       fillAmount,
-      previousHoldingQty,
+      previousHoldingQty: effectivePreviousHoldingQty,
       // 분모는 그 leg 자체가 아니라 당일 BUY 신호 전체(사다리 포함) 총액이어야 한다 —
       // 전반전에 평단+별지점 두 leg가 모두 전량 체결되면 "당일 1회매수 전량 체결"이라
       // ΔT=+1이어야 하는데, leg 단위 분모면 각 leg가 독립적으로 거의 +1씩 더해 ΔT=+2가 된다.
       attemptAmount: Number(
         signal.metadata?.v4DayBuyAttemptTotal ?? signal.metadata?.v4AttemptAmount ?? fillAmount,
       ),
-      sellRatioPrevHolding: Number(signal.metadata?.v4PrevHolding ?? previousHoldingQty),
+      sellRatioPrevHolding: Number(signal.metadata?.v4PrevHolding ?? effectivePreviousHoldingQty),
       N,
       quota: principal,
       compoundMode,

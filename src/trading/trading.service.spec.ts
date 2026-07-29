@@ -1879,6 +1879,93 @@ describe('TradingService', () => {
       expect(updated.cycleSeq).toBe(1);
       expect(updated.cashRemaining).toBe(20000); // quota(원금) 상한으로 클램프 — 단리
     });
+
+    it(
+      '같은 pass 쿼터+최종매도 동시 체결: reconciliation의 스냅샷 역산 prevHolding이 틀려도 '
+      + 'v4.lastKnownHoldQty 체이닝으로 쿼터매도에서 조기 사이클 종료가 없고 최종매도에서 정확히 1회 종료된다',
+      async () => {
+        // 실제 순서: 보유 100 → 쿼터매도 25체결(보유 75) → 최종매도 75체결(보유 0).
+        // reconciliation은 pass 종료 후 스냅샷(0)을 역산해 qtyBeforeFill을 구하므로
+        // 쿼터 레코드에 25(오답, 정답은 100), 최종 레코드에 75(우연히 정답)를 넘긴다.
+        mockWatchStockV4({ mode: 'NORMAL', turn: 10, cashRemaining: 15000, cycleSeq: 0, lastKnownHoldQty: 100 });
+
+        await service.handleStrategySignalFill(
+          'infinite-buy-v4',
+          'ws-v4',
+          {
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            side: 'SELL',
+            quantity: 25,
+            price: 53.75,
+            reason: 'V4 v4-quarter-sell: 25주 @ 53.75',
+            orderDivision: '34',
+            metadata: { phase: 'v4-quarter-sell', v4PrevHolding: 100 },
+          },
+          25, // reconciliation의 (틀린) qtyBeforeFill — 체이닝이 없으면 25-25=0으로 오판
+          undefined,
+          53.75,
+        );
+
+        const afterQuarter = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+        expect(afterQuarter.lastKnownHoldQty).toBe(75); // 체이닝된 100 - 25
+        expect(afterQuarter.turn).toBeCloseTo(10 * (1 - 25 / 100), 6); // 7.5 — 조기 T=0 리셋 없음
+        expect(afterQuarter.cycleSeq).toBe(0); // 조기 사이클 종료 없음
+
+        mockWatchStockV4({ ...afterQuarter });
+        await service.handleStrategySignalFill(
+          'infinite-buy-v4',
+          'ws-v4',
+          {
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            side: 'SELL',
+            quantity: 75,
+            price: 57.5,
+            reason: 'V4 v4-final-sell: 75주 @ 57.5',
+            orderDivision: '00',
+            metadata: { phase: 'v4-final-sell', v4PrevHolding: 75 },
+          },
+          75, // reconciliation의 qtyBeforeFill (이 경우는 우연히 정답)
+          undefined,
+          57.5,
+        );
+
+        const afterFinal = mockPrisma.watchStock.update.mock.calls[1][0].data.strategyParams.v4;
+        expect(afterFinal.turn).toBe(0);
+        expect(afterFinal.cycleSeq).toBe(1); // 딱 1회만 종료 (이중 증가 없음)
+        expect(afterFinal.lastKnownHoldQty).toBe(0);
+      },
+    );
+
+    it('v4.lastKnownHoldQty가 없으면(최초 체결) reconciliation이 전달한 previousHoldingQty로 fallback한다', async () => {
+      mockWatchStockV4({ mode: 'NORMAL', turn: 5, cashRemaining: 10000, cycleSeq: 0 }); // lastKnownHoldQty 미설정
+
+      await service.handleStrategySignalFill(
+        'infinite-buy-v4',
+        'ws-v4',
+        {
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'SELL',
+          quantity: 50,
+          price: 55,
+          reason: 'V4 v4-final-sell: 50주 @ 55',
+          orderDivision: '00',
+          metadata: { phase: 'v4-final-sell', v4PrevHolding: 50 },
+        },
+        50, // lastKnownHoldQty 부재 — 이 reconciliation 전달값이 그대로 사용돼야 함
+        undefined,
+        55,
+      );
+
+      const updated = mockPrisma.watchStock.update.mock.calls[0][0].data.strategyParams.v4;
+      expect(updated.lastKnownHoldQty).toBe(0); // 50 - 50 = 0
+      expect(updated.cycleSeq).toBe(1);
+    });
   });
 
   describe('infinite-buy-v4 제출 순서: SELL을 BUY보다 먼저 제출', () => {

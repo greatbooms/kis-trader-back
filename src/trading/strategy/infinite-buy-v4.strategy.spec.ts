@@ -259,6 +259,54 @@ describe('InfiniteBuyV4Strategy', () => {
     });
   });
 
+  describe('가격 가드 (매수 쪽과 대칭 — 음수/0 가격이면 SELL 미생성)', () => {
+    it('쿼터매도/최종매도 가격이 0 이하로 계산되면 두 SELL 모두 생성하지 않고 skipReason을 남긴다', async () => {
+      // starBasePct/finalTargetPct를 극단값으로 두면(오설정) T=39(N-1=39라 REVERSE 미진입 경계)
+      // 에서도 별지점/최종목표가가 평단 아래로 크게 내려가 가격이 음수가 될 수 있다.
+      // starBasePct=200 → starPct=200×(1−78/40)=−190 → sellLimitPrice=50×(1−1.9)=−45
+      // finalTargetPct=−200 → finalSellPrice=50×(1−2)=−50
+      const ctx = withV4(
+        createContext({
+          position: { stockCode: 'TQQQ', quantity: 100, avgPrice: 50, currentPrice: 55, totalInvested: 5000 },
+        }),
+        { turn: 39, cashRemaining: 5000, starBasePct: 200, finalTargetPct: -200 },
+      );
+      const result = await strategy.evaluateStock(ctx);
+
+      expect(result.signals.some((s) => s.metadata?.phase === 'v4-quarter-sell')).toBe(false);
+      expect(result.signals.some((s) => s.metadata?.phase === 'v4-final-sell')).toBe(false);
+      expect(result.skipReasons.some((r) => r.includes('쿼터매도 가격 비정상'))).toBe(true);
+      expect(result.skipReasons.some((r) => r.includes('최종매도 가격 비정상'))).toBe(true);
+    });
+
+    it('리버스 모드 매도가격(recentCloses 평균)이 0 이하이면 reverse-sell을 생성하지 않는다', async () => {
+      const ctx = withV4(
+        createContext({
+          position: { stockCode: 'TQQQ', quantity: 190, avgPrice: 50, currentPrice: 45, totalInvested: 9500 },
+        }),
+        {
+          turn: 39.5,
+          cashRemaining: 400,
+          mode: 'REVERSE',
+          // 손상된 상태 가정 — 정상 경로(updateRecentCloses)는 항상 양수만 누적하지만
+          // 방어적 가드가 실제로 동작하는지 확인하기 위해 음수 종가로 직접 구성한다.
+          recentCloses: [
+            { date: '2026-07-20', close: -10 },
+            { date: '2026-07-21', close: -5 },
+            { date: '2026-07-22', close: -3 },
+          ],
+        },
+      );
+      ctx.stockIndicators.prevClose = -1;
+      ctx.now = new Date('2026-07-23T00:00:00Z');
+
+      const result = await strategy.evaluateStock(ctx);
+
+      expect(result.signals.some((s) => s.metadata?.phase === 'v4-reverse-sell')).toBe(false);
+      expect(result.skipReasons.some((r) => r.includes('리버스 매도 가격 비정상'))).toBe(true);
+    });
+  });
+
   describe('REVERSE 모드 — 진입 첫날', () => {
     it('보유의 1/(N/2)를 MOC로 무조건 매도하고, 매수는 없다', async () => {
       const ctx = withV4(
