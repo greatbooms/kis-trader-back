@@ -1,5 +1,4 @@
 import type { Market, StockSearchResult } from '@/graphql/generated'
-import type { WatchStockUpdateInput } from '@/pages/types'
 
 // ── 관심종목 도메인 타입 ──
 
@@ -50,7 +49,6 @@ export interface WatchlistTableProps {
   watchStocks: WatchStockItem[]
   strategies: StrategyOption[]
   onOpenDetail: (stockId: string) => void
-  onEdit: (stock: WatchStockItem) => void
   onToggleActive: (stock: WatchStockItem) => Promise<void>
   onDelete: (stock: WatchStockItem) => Promise<void>
 }
@@ -59,7 +57,6 @@ export interface WatchStockRowProps {
   stock: WatchStockItem
   strategies: StrategyOption[]
   onOpenDetail: () => void
-  onEdit: () => void
   onToggleActive: () => Promise<void>
   onDelete: () => void
 }
@@ -67,13 +64,6 @@ export interface WatchStockRowProps {
 export interface AddWatchStockModalProps {
   strategies: StrategyOption[]
   onSave: (input: AddWatchStockInput) => Promise<void>
-  onClose: () => void
-}
-
-export interface EditWatchStockModalProps {
-  stock: WatchStockItem
-  strategies: StrategyOption[]
-  onSave: (input: WatchStockUpdateInput) => Promise<void>
   onClose: () => void
 }
 

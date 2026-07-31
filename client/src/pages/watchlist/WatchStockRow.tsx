@@ -1,18 +1,17 @@
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Trash2, Pencil, Power } from 'lucide-react'
+import { Trash2, Power } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
 import { parseStrategyParams, formatCycleValue } from './strategy-meta'
 import type { WatchStockRowProps } from './types'
 
-// ── 관심종목 한 행: 종목 정보 + 토글/편집/삭제 액션 ──
+// ── 관심종목 한 행: 종목 정보 + 토글/삭제 액션 (수정은 상세 페이지에서) ──
 
 export function WatchStockRow({
   stock,
   strategies,
   onOpenDetail,
-  onEdit,
   onToggleActive,
   onDelete,
 }: WatchStockRowProps) {
@@ -74,17 +73,6 @@ export function WatchStockRow({
         >
           <Power size={12} />
           {stock.isActive ? '활성' : '비활성'}
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 shrink-0"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit()
-          }}
-        >
-          <Pencil size={14} />
         </Button>
         <Button
           size="icon"
