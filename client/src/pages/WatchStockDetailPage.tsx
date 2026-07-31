@@ -93,6 +93,12 @@ export function WatchStockDetailPage() {
     }
   }, [stock?.strategyParams])
   const accumulatedQuota = Number(strategyParams?.accumulatedQuota || 0)
+  // viaParams 전략은 백엔드가 strategyParams.stopLossRate를 읽으므로, 있으면 그 값이 실제 적용값
+  const effectiveStopLossFraction =
+    (STRATEGY_META[stock?.strategyName ?? '']?.stopLossViaParams &&
+      typeof strategyParams?.stopLossRate === 'number')
+      ? (strategyParams.stopLossRate as number)
+      : stock?.stopLossRate ?? 0
 
   const [isEditing, setIsEditing] = useState(false)
   const [isActive, setIsActive] = useState(true)
@@ -138,13 +144,13 @@ export function WatchStockDetailPage() {
     if (!stock) return
     setIsActive(stock.isActive)
     setQuota(stock.quota ? String(stock.quota) : '')
-    setStopLossRate(String(Math.round(stock.stopLossRate * 100)))
+    setStopLossRate(String(Math.round(effectiveStopLossFraction * 100)))
     setMaxCycles(String(stock.maxCycles))
     setRsiPolicy(storedRsiPolicy as typeof rsiPolicy)
     setMaxDailyQuotaMultiple(storedMaxDailyQuota)
     setIsEditing(false)
     setError('')
-  }, [stock, storedRsiPolicy, storedMaxDailyQuota])
+  }, [stock, storedRsiPolicy, storedMaxDailyQuota, effectiveStopLossFraction])
 
   if (loading) {
     return <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">로딩중...</div>
@@ -157,7 +163,7 @@ export function WatchStockDetailPage() {
   const resetForm = () => {
     setIsActive(stock.isActive)
     setQuota(stock.quota ? String(stock.quota) : '')
-    setStopLossRate(String(Math.round(stock.stopLossRate * 100)))
+    setStopLossRate(String(Math.round(effectiveStopLossFraction * 100)))
     setMaxCycles(String(stock.maxCycles))
     setRsiPolicy(storedRsiPolicy as typeof rsiPolicy)
     setMaxDailyQuotaMultiple(storedMaxDailyQuota)
@@ -167,7 +173,7 @@ export function WatchStockDetailPage() {
   const isDirty =
     isActive !== stock.isActive ||
     quota !== (stock.quota ? String(stock.quota) : '') ||
-    Number(stopLossRate || 0) !== Math.round(stock.stopLossRate * 100) ||
+    Number(stopLossRate || 0) !== Math.round(effectiveStopLossFraction * 100) ||
     (supportsCycles && Number(maxCycles || 0) !== stock.maxCycles) ||
     (isInfiniteBuy && rsiPolicy !== storedRsiPolicy) ||
     (isInfiniteBuy && maxDailyQuotaMultiple !== storedMaxDailyQuota)
@@ -531,7 +537,7 @@ export function WatchStockDetailPage() {
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">손절률</CardTitle></CardHeader>
-          <CardContent className="text-xl font-semibold">-{(stock.stopLossRate * 100).toFixed(1)}%</CardContent>
+          <CardContent className="text-xl font-semibold">-{(effectiveStopLossFraction * 100).toFixed(1)}%</CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
