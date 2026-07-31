@@ -9,7 +9,6 @@ export function WatchlistTable({
   watchStocks,
   strategies,
   onOpenDetail,
-  onEdit,
   onToggleActive,
   onDelete,
 }: WatchlistTableProps) {
@@ -31,7 +30,6 @@ export function WatchlistTable({
                 stock={stock}
                 strategies={strategies}
                 onOpenDetail={() => onOpenDetail(stock.id)}
-                onEdit={() => onEdit(stock)}
                 onToggleActive={() => onToggleActive(stock)}
                 onDelete={() => onDelete(stock)}
               />

@@ -16,11 +16,16 @@ import {
   useTriggerWatchStockNowMutation,
   useUpdateWatchStockMutation,
   useGetAvailableStrategiesQuery,
+  useConvertWatchStockToInfiniteBuyV4Mutation,
 } from '@/graphql/generated'
+import type { ConvertWatchStockToInfiniteBuyV4Mutation } from '@/graphql/generated'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
+import { STRATEGY_META, DEFAULT_STRATEGY_META } from '@/pages/watchlist/strategy-meta'
+
+type V4Preview = ConvertWatchStockToInfiniteBuyV4Mutation['convertWatchStockToInfiniteBuyV4']
 
 function eventVariant(eventType: string): 'success' | 'danger' | 'warning' | 'info' | 'outline' {
   if (eventType === 'ORDER_FILLED') return 'success'
@@ -69,6 +74,9 @@ export function WatchStockDetailPage() {
   const [updateWatchStock, { loading: saving }] = useUpdateWatchStockMutation()
   const [triggerWatchStockNow, { loading: triggering }] = useTriggerWatchStockNowMutation()
   const [resetWatchStockCarry, { loading: resettingCarry }] = useResetWatchStockCarryMutation()
+  const [convertToV4, { loading: v4Loading }] = useConvertWatchStockToInfiniteBuyV4Mutation()
+  const [v4Preview, setV4Preview] = useState<V4Preview | null>(null)
+  const [v4Error, setV4Error] = useState('')
 
   const stock = data?.watchStock
   const strategies = strategiesData?.availableStrategies ?? []
@@ -95,6 +103,8 @@ export function WatchStockDetailPage() {
   const [maxDailyQuotaMultiple, setMaxDailyQuotaMultiple] = useState('3')
   const [error, setError] = useState('')
   const isInfiniteBuy = stock?.strategyName === 'infinite-buy'
+  const meta = STRATEGY_META[stock?.strategyName ?? ''] ?? DEFAULT_STRATEGY_META
+  const canConvertToV4 = isInfiniteBuy && stock?.market === 'OVERSEAS'
   const storedRsiPolicy = (strategyParams?.rsiPolicy as string) || 'hard-stop-70'
   const storedMaxDailyQuota = strategyParams?.maxDailyQuotaMultiple !== undefined
     ? String(strategyParams.maxDailyQuotaMultiple)
@@ -182,12 +192,19 @@ export function WatchStockDetailPage() {
 
     try {
       let strategyParamsJson: string | undefined
-      if (isInfiniteBuy) {
+      if (isInfiniteBuy || meta.stopLossViaParams) {
         const nextParams: Record<string, unknown> = { ...(strategyParams ?? {}) }
-        nextParams.rsiPolicy = rsiPolicy
-        const mdq = Number(maxDailyQuotaMultiple)
-        if (mdq > 0) nextParams.maxDailyQuotaMultiple = mdq
-        else delete nextParams.maxDailyQuotaMultiple
+        if (isInfiniteBuy) {
+          nextParams.rsiPolicy = rsiPolicy
+          const mdq = Number(maxDailyQuotaMultiple)
+          if (mdq > 0) nextParams.maxDailyQuotaMultiple = mdq
+          else delete nextParams.maxDailyQuotaMultiple
+        }
+        // momentum-breakout 등은 WatchStock.stopLossRate가 아닌 strategyParams.stopLossRate를 읽는다
+        if (meta.stopLossViaParams) {
+          if (stopLossRate && Number(stopLossRate) > 0) nextParams.stopLossRate = Number(stopLossRate) / 100
+          else delete nextParams.stopLossRate
+        }
         strategyParamsJson = JSON.stringify(nextParams)
       }
       await updateWatchStock({
@@ -264,6 +281,32 @@ export function WatchStockDetailPage() {
       ])
     } catch (e: unknown) {
       alert(getMutationErrorMessage(e, '이월 금액 초기화 중 오류가 발생했습니다'))
+    }
+  }
+
+  const handlePreviewV4 = async () => {
+    if (!stock) return
+    setV4Error('')
+    try {
+      const { data: result } = await convertToV4({ variables: { watchStockId: stock.id, dryRun: true } })
+      if (result) setV4Preview(result.convertWatchStockToInfiniteBuyV4)
+    } catch (e: unknown) {
+      setV4Error(getMutationErrorMessage(e, 'V4 전환 미리보기 중 오류가 발생했습니다'))
+    }
+  }
+
+  const handleConfirmV4 = async () => {
+    if (!stock) return
+    setV4Error('')
+    try {
+      await convertToV4({
+        variables: { watchStockId: stock.id, dryRun: false },
+        refetchQueries: ['GetWatchStocks'],
+      })
+      setV4Preview(null)
+      await refetch()
+    } catch (e: unknown) {
+      setV4Error(getMutationErrorMessage(e, 'V4 전환 중 오류가 발생했습니다'))
     }
   }
 
@@ -415,6 +458,65 @@ export function WatchStockDetailPage() {
                 />
               </div>
             </>
+          )}
+          {canConvertToV4 && (
+            <div className="md:col-span-2 xl:col-span-4 rounded-md border border-primary-200 bg-primary-50/50 dark:bg-primary-950/20 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">무한매수법 V4로 전환</p>
+                {!v4Preview && (
+                  <Button size="sm" variant="outline" onClick={handlePreviewV4} disabled={v4Loading}>
+                    {v4Loading ? '계산중...' : '전환 미리보기'}
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                기존 사이클/보유수량을 그대로 이어받아 V4 방식(별지점·소진 후 REVERSE)으로 전환합니다. DB 값은 시딩 계산 결과이며, 확정 전까지는 아무것도 바뀌지 않습니다.
+              </p>
+
+              {v4Preview && (
+                <div className="space-y-2 rounded-md bg-card border border-border p-3">
+                  <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">회차 (T)</div>
+                      <div className="font-medium">{v4Preview.turn.toFixed(2)} / {stock.maxCycles}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">잔금</div>
+                      <div className="font-medium">{formatCurrency(v4Preview.cashRemaining, stock.market, stock.exchangeCode)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">보유수량</div>
+                      <div className="font-medium">{formatNumber(v4Preview.lastKnownHoldQty)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">별% 기준</div>
+                      <div className="font-medium">{v4Preview.starBasePct}%</div>
+                    </div>
+                  </div>
+
+                  {v4Preview.warnings.length > 0 && (
+                    <div className="space-y-1">
+                      {v4Preview.warnings.map((warning) => (
+                        <Badge key={warning} variant="warning" className="block w-fit text-xs whitespace-normal text-left">
+                          {warning}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button size="sm" variant="outline" onClick={() => setV4Preview(null)} disabled={v4Loading}>
+                      취소
+                    </Button>
+                    <Button size="sm" onClick={handleConfirmV4} disabled={v4Loading}>
+                      {v4Loading ? '전환중...' : '전환 확정'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {v4Error && <p className="text-xs text-danger">{v4Error}</p>}
+            </div>
           )}
           {error && <p className="text-sm text-danger md:col-span-2 xl:col-span-4">{error}</p>}
         </CardContent>

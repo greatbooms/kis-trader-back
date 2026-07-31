@@ -6,5 +6,4 @@ export type {
   WatchlistTableProps,
   WatchStockRowProps,
   AddWatchStockModalProps,
-  EditWatchStockModalProps,
 } from './watchlist.types'

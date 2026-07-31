@@ -7,7 +7,7 @@
 ## 주요 파일 / 하위 폴더
 - `LoginPage.tsx` — `/login` (AuthGuard 외부, 유일한 공개 라우트)
 - `DashboardPage.tsx` — `/` 계정/포지션/시장 레짐 요약
-- `WatchlistPage.tsx` — `/watchlist` 관심종목 목록 + 추가/수정 폼
+- `WatchlistPage.tsx` — `/watchlist` 관심종목 목록 + 추가 폼 (수정은 상세 페이지에서)
 - `WatchStockDetailPage.tsx` — `/watchlist/:id` 관심종목 상세 (전략 설정, 차트, 거래 내역)
 - `PortfolioPage.tsx` — `/portfolio` 보유 포지션 + 일별 손익
 - `StrategyGuidePage.tsx` — `/strategy-guide` 전략 설명/가이드 (정적 + 메타 데이터)
@@ -19,7 +19,7 @@
   - `SimulationListSection.tsx`, `SimulationDetailSection.tsx` (entry)
   - `SimulationCapitalSummary.tsx`, `SimulationControls.tsx`, `SimulationEquityChart.tsx`, `SimulationMetricsCards.tsx`, `SimulationPositionsTable.tsx`, `SimulationTradesTable.tsx`
   - `simulation/types/simulation.types.ts` — 시뮬레이션 sub-component props
-- `watchlist/` — 관심종목 페이지 sub-component (`WatchlistFilters`, `WatchlistTable`, `WatchStockRow`, `AddWatchStockModal`, `EditWatchStockModal`, `strategy-meta.ts`)
+- `watchlist/` — 관심종목 페이지 sub-component (`WatchlistFilters`, `WatchlistTable`, `WatchStockRow`, `AddWatchStockModal`, `strategy-meta.ts`). 수정(편집)은 리스트가 아닌 `WatchStockDetailPage`에서만 이루어진다 (V4 전환 포함).
 - `portfolio/` — 포트폴리오 페이지 sub-component (`PortfolioFilters`, `AccountSummaryCard`, `PositionsCard`, `UnknownOrderReconciliationCard`, `UnknownOrderReconciliationDialog`, `TradesCard`, `PortfolioCommon`, `portfolio-helpers.ts`)
 - `screening/` — 스크리닝 페이지 sub-component (`DateListView`, `StockDetailView`, `RecommendationCard`, `AddToSimulationModal`, `ScreeningCommon`, `screening-helpers.ts`)
 - `types/` — 페이지 간 공유되는 props/입력 타입 (`dashboard.types.ts`, `add-watch-stock-form-*.type.ts`, `watch-stock-row-props.type.ts`, `market-{select,filter}-props.type.ts` 등)
