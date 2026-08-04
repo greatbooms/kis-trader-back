@@ -183,6 +183,7 @@ client/src/
 
 ### 9. GraphQL
 - **Query/Mutation 추가 시**: 클라이언트 `*.graphql` 파일에 operation 추가 → `npm run client:codegen` 으로 `generated.ts` 재생성
+- **서버 스키마(`src/schema.gql`) 변경 시**: 리졸버 추가/변경 후 `npm run client:codegen`을 돌리기 전에 `src/schema.gql`이 최신이어야 한다. 보통은 `start:dev`로 앱을 부팅하면 NestJS 코드-퍼스트가 자동 갱신하지만, 앱 전체 부팅은 cron/KIS 인증/Slack 연결 등 실제 부작용을 일으킬 수 있다. `npm run schema:generate`(`scripts/generate-graphql-schema.ts`)는 `GraphQLSchemaBuilderModule`로 리졸버 클래스의 데코레이터 메타데이터만 읽어 스키마를 재생성하는 오프라인 방법 — 어떤 서비스도 인스턴스화하지 않아 DB/KIS/Slack에 전혀 접근하지 않는다. 새 리졸버 모듈 추가 시 그 스크립트의 리졸버 배열도 함께 갱신할 것 (순서가 `AppModule` 등록 순서와 다르면 diff가 지저분해짐)
 - Resolver는 **trivial CRUD만 인라인**, 복잡한 로직은 Service로
 - N+1 주의: DataLoader 없이 배치 조회는 `prisma.model.findMany({ where: { id: { in: [...] } } })` 패턴
 

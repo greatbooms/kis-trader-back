@@ -24,6 +24,7 @@
     "client:dev": "set -a; source .env.dev; set +a; lsof -ti:${CLIENT_PORT:-5173} | xargs kill -9 2>/dev/null; cd client && CLIENT_PORT=$CLIENT_PORT PORT=$PORT yarn dev",
     "client:codegen": "cd client && yarn codegen",
     "build:all": "yarn client:build && yarn build",
+    "schema:generate": "ts-node scripts/generate-graphql-schema.ts",
     "backtest": "set -a; source .env.dev; set +a; ts-node -r dotenv/config src/backtest/runner/backtest-cli.ts dotenv_config_path=.env.dev",
     "backtest:prod": "set -a; source .env.prod; set +a; ts-node -r dotenv/config src/backtest/runner/backtest-cli.ts dotenv_config_path=.env.prod"
   },

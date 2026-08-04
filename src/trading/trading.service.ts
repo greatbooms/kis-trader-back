@@ -358,6 +358,22 @@ export class TradingService {
           },
         );
 
+        // 시그널이 있어도(예: SELL만 나가고 BUY는 잔고 부족으로 이월) skipReasons가 남을 수 있다.
+        // SIGNAL_CREATED만 남기면 그 스킵 사유가 로그에서 사라지므로 별도 SKIPPED로 남긴다.
+        // '관망:'/'오늘 이미 실행됨' 계열은 무로깅 규칙(§isSilentWaitSkip)을 그대로 따른다.
+        if (
+          skipReasons.length > 0
+          && !this.isSilentWaitSkip(skipReasons)
+          && !this.isRoutineAlreadyExecutedSkip(skipReasons)
+        ) {
+          await this.logWatchStockExecution(
+            ctx,
+            WatchStockExecutionEventType.SKIPPED,
+            `매수 스킵: ${this.buildSkipExecutionMessage(strategy.name, ctx, skipReasons, details)}`,
+            this.buildSkipExecutionDetails(ctx, skipReasons, details),
+          );
+        }
+
         const { executableSignals, blockedBuySignals, minProfitRate } =
           this.preventSameCycleOppositeOrders(signals);
         const allBuysBlocked =

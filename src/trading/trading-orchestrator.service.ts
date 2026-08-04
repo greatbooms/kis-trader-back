@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   CancellationAttemptStatus,
@@ -28,6 +28,7 @@ import {
   StockIndicators,
   PositionQuantitySnapshot,
   DailySummaryScope,
+  WatchStockExecutionPreviewResult,
 } from './types';
 import { SlackService } from '../notification/slack.service';
 import { TradingSlackCommandsService } from './trading-slack-commands.service';
@@ -293,6 +294,69 @@ export class TradingOrchestrator {
     return {
       success: true,
       message: latestLog?.message || '수동 전략 실행을 완료했습니다.',
+    };
+  }
+
+  /**
+   * "오늘 실행 미리보기" — 실제 전략 코드(evaluateStock)를 주문 제출 없이 호출해 결과만 반환한다.
+   * 미리보기 전용 계산식을 별도로 만들지 않음으로써 미리보기와 실제 실행이 갈라질 수 없게 한다.
+   * evaluateStock 자체는 Prisma/KIS/Slack에 접근하지 않는 순수 함수라(전략 파일 전수 확인됨)
+   * `TradingService.executePerStockStrategy`를 호출하지 않는 한 어떤 전략이든 부작용이 없다 —
+   * 주문 제출/실행 로그/strategyParams 영속화(v4StateUpdate 등)는 이 메서드에서 절대 하지 않는다.
+   */
+  async previewWatchStockExecution(watchStockId: string): Promise<WatchStockExecutionPreviewResult> {
+    const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
+    if (!watchStock) {
+      throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+    }
+    if (!watchStock.strategyName) {
+      throw new BadRequestException('전략이 설정되지 않은 관심종목입니다.');
+    }
+
+    const strategy = this.strategyRegistry.getStrategy(watchStock.strategyName);
+    if (!strategy) {
+      throw new BadRequestException(`알 수 없는 전략입니다: ${watchStock.strategyName}`);
+    }
+
+    const context = await this.buildManualExecutionContext(watchStock, strategy.name);
+    if (!context) {
+      throw new BadRequestException('미리보기용 종목 컨텍스트를 만들지 못했습니다.');
+    }
+
+    const evaluation = await strategy.evaluateStock(context);
+    const details = evaluation.details ?? {};
+    const star = details.star as
+      | { starPct: number; starPrice: number; buyLimitPrice: number; sellLimitPrice: number }
+      | undefined;
+
+    return {
+      context: {
+        currentPrice: context.price.currentPrice,
+        avgPrice: context.position?.avgPrice,
+        holdQty: context.position?.quantity ?? 0,
+        buyableAmount: context.buyableAmount,
+        turn: details.T,
+        maxCycles: context.watchStock.maxCycles,
+        cashRemaining: details.cashRemaining,
+        mode: details.mode,
+        dailyBuyBudget: details.dailyBuyBudget,
+        dailyBuyBudgetCapped: details.dailyBuyBudgetCapped,
+        starPct: star?.starPct,
+        starPrice: star?.starPrice,
+        buyLimitPrice: star?.buyLimitPrice,
+        sellLimitPrice: star?.sellLimitPrice,
+        reverseStarPrice: details.reverseStarPrice,
+      },
+      signals: evaluation.signals.map((signal) => ({
+        side: signal.side,
+        phase: signal.metadata?.phase,
+        quantity: signal.quantity,
+        price: signal.price,
+        orderDivision: signal.orderDivision,
+        fillModel: signal.metadata?.fillModel,
+        reason: signal.reason,
+      })),
+      skipReasons: evaluation.skipReasons,
     };
   }
 

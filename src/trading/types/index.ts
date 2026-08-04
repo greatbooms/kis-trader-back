@@ -50,3 +50,8 @@ export { SlackRecoveryExistingMatchPayload } from './slack-recovery-existing-mat
 export { SlackRecoveryFailureKind } from './slack-recovery-failure-kind.type';
 export { SlackRecoveryModalAction } from './slack-recovery-modal-action.type';
 export { SlackRecoveryTradePayload } from './slack-recovery-trade-payload.type';
+export {
+  WatchStockExecutionPreviewContext,
+  WatchStockExecutionPreviewSignal,
+  WatchStockExecutionPreviewResult,
+} from './watch-stock-execution-preview.type';

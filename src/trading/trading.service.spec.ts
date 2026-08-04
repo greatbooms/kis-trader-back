@@ -2095,6 +2095,160 @@ describe('TradingService', () => {
     });
   });
 
+  describe('시그널과 skipReasons가 함께 발생하는 경우 (once-daily 매수 스킵 로깅)', () => {
+    function buildInfiniteBuyContext(overrides: Record<string, any> = {}) {
+      return {
+        watchStock: {
+          id: 'ws-1',
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 10000,
+          cycle: 12.42,
+          maxCycles: 40,
+          stopLossRate: 0.3,
+          maxPortfolioRate: 1,
+          strategyParams: {},
+        },
+        position: {
+          stockCode: 'TQQQ',
+          quantity: 4,
+          avgPrice: 50,
+          currentPrice: 60,
+          totalInvested: 200,
+        },
+        price: { currentPrice: 60 } as any,
+        alreadyExecutedToday: false,
+        marketCondition: {} as any,
+        stockIndicators: {} as any,
+        buyableAmount: 250,
+        totalPortfolioValue: 0,
+        ...overrides,
+      };
+    }
+
+    it('SELL 시그널과 BUY 이월 스킵이 함께 발생하면 SIGNAL_CREATED와 별도로 SKIPPED 로그를 남긴다', async () => {
+      const sellSignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'SELL',
+        quantity: 2,
+        price: 60,
+        reason: 'Take profit 1',
+        orderDivision: '00',
+      };
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [sellSignal],
+          skipReasons: ['매수 수량 부족: 조정 할당금 250 < 기준가 300 (1주 매수 가능 기준가 250 이하)'],
+          details: {},
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+
+      await service.executePerStockStrategy(strategy as any, [buildInfiniteBuyContext() as any]);
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ eventType: 'SIGNAL_CREATED' }),
+      });
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'SKIPPED',
+          message: expect.stringContaining('매수 스킵:'),
+        }),
+      });
+      const skippedCall = mockPrisma.watchStockExecutionLog.create.mock.calls.find(
+        ([arg]: any) => arg.data.eventType === 'SKIPPED',
+      );
+      expect(skippedCall[0].data.message).toContain('오늘 이월');
+    });
+
+    it('skipReasons가 없으면 SKIPPED 로그를 남기지 않는다', async () => {
+      const buySignal = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 1,
+        price: 60,
+        reason: 'Buy1',
+        orderDivision: '00',
+      };
+      const strategy = {
+        name: 'infinite-buy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [buySignal],
+          skipReasons: [],
+          details: {},
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+
+      await service.executePerStockStrategy(strategy as any, [buildInfiniteBuyContext() as any]);
+
+      const skippedCall = mockPrisma.watchStockExecutionLog.create.mock.calls.find(
+        ([arg]: any) => arg.data.eventType === 'SKIPPED',
+      );
+      expect(skippedCall).toBeUndefined();
+    });
+
+    it('관망 사유는 시그널이 있어도 SKIPPED로 로깅하지 않는다 (silent wait 규칙 유지)', async () => {
+      const buySignal = {
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        side: 'BUY',
+        quantity: 1,
+        price: 71000,
+        reason: '변동성돌파',
+        orderDivision: '01',
+      };
+      const strategy = {
+        name: 'momentum-breakout',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [buySignal],
+          skipReasons: ['관망: 미체결 매도 주문 처리 대기'],
+          details: {},
+        }),
+      };
+      jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
+
+      await service.executePerStockStrategy(strategy as any, [
+        {
+          watchStock: {
+            id: 'ws-2',
+            market: 'DOMESTIC',
+            exchangeCode: 'KRX',
+            stockCode: '005930',
+            stockName: '삼성전자',
+            strategyName: 'momentum-breakout',
+            quota: 1000000,
+            cycle: 0,
+            maxCycles: 40,
+            stopLossRate: 0.3,
+            maxPortfolioRate: 0.15,
+            strategyParams: {},
+          },
+          price: { currentPrice: 71000 } as any,
+          alreadyExecutedToday: false,
+          marketCondition: {} as any,
+          stockIndicators: {} as any,
+          buyableAmount: 1000000,
+          totalPortfolioValue: 0,
+        } as any,
+      ]);
+
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.watchStockExecutionLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ eventType: 'SIGNAL_CREATED' }),
+      });
+    });
+  });
+
   describe('momentum-breakout 체결 후처리 (handleStrategySignalFill)', () => {
     const baseSignal = {
       market: 'DOMESTIC' as const,

@@ -12,6 +12,7 @@ import {
   WatchStockExecutionLogType,
   ManualTriggerResult,
   ConvertWatchStockToInfiniteBuyV4Result,
+  WatchStockExecutionPreviewResultType,
 } from './dto';
 
 registerEnumType(Market, { name: 'Market' });
@@ -80,6 +81,16 @@ export class WatchStockResolver {
       strategyName: log.strategyName || undefined,
       details: log.details ? JSON.stringify(log.details) : undefined,
     }));
+  }
+
+  @Query(() => WatchStockExecutionPreviewResultType, {
+    name: 'previewWatchStockExecution',
+    description: '전략 평가만 수행 — 주문 제출/실행 로그/strategyParams 영속화 없음',
+  })
+  async previewWatchStockExecution(
+    @Args('watchStockId', { type: () => ID }) watchStockId: string,
+  ): Promise<WatchStockExecutionPreviewResultType> {
+    return this.tradingOrchestrator.previewWatchStockExecution(watchStockId);
   }
 
   @Mutation(() => WatchStockType)
