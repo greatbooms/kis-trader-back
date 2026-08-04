@@ -24,6 +24,7 @@ import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import { STRATEGY_META, DEFAULT_STRATEGY_META } from '@/pages/watchlist/strategy-meta'
+import type { InfiniteBuyV4Status } from '@/pages/types'
 
 type V4Preview = ConvertWatchStockToInfiniteBuyV4Mutation['convertWatchStockToInfiniteBuyV4']
 
@@ -109,6 +110,8 @@ export function WatchStockDetailPage() {
   const [maxDailyQuotaMultiple, setMaxDailyQuotaMultiple] = useState('3')
   const [error, setError] = useState('')
   const isInfiniteBuy = stock?.strategyName === 'infinite-buy'
+  const isInfiniteBuyV4 = stock?.strategyName === 'infinite-buy-v4'
+  const v4Status = isInfiniteBuyV4 ? (strategyParams?.v4 as InfiniteBuyV4Status | undefined) : undefined
   const meta = STRATEGY_META[stock?.strategyName ?? ''] ?? DEFAULT_STRATEGY_META
   const canConvertToV4 = isInfiniteBuy && stock?.market === 'OVERSEAS'
   const storedRsiPolicy = (strategyParams?.rsiPolicy as string) || 'hard-stop-70'
@@ -173,7 +176,7 @@ export function WatchStockDetailPage() {
   const isDirty =
     isActive !== stock.isActive ||
     quota !== (stock.quota ? String(stock.quota) : '') ||
-    Number(stopLossRate || 0) !== Math.round(effectiveStopLossFraction * 100) ||
+    (!isInfiniteBuyV4 && Number(stopLossRate || 0) !== Math.round(effectiveStopLossFraction * 100)) ||
     (supportsCycles && Number(maxCycles || 0) !== stock.maxCycles) ||
     (isInfiniteBuy && rsiPolicy !== storedRsiPolicy) ||
     (isInfiniteBuy && maxDailyQuotaMultiple !== storedMaxDailyQuota)
@@ -184,7 +187,8 @@ export function WatchStockDetailPage() {
       return
     }
 
-    if (!stopLossRate || Number(stopLossRate) < 0 || Number(stopLossRate) >= 100) {
+    // V4는 손절이 없음(REVERSE 모드가 대체) — 필드 숨김과 함께 검증도 건너뜀
+    if (!isInfiniteBuyV4 && (!stopLossRate || Number(stopLossRate) < 0 || Number(stopLossRate) >= 100)) {
       setError('손절률은 0 이상 100 미만으로 입력해주세요')
       return
     }
@@ -219,7 +223,7 @@ export function WatchStockDetailPage() {
           input: {
             isActive,
             quota: Number(quota),
-            stopLossRate: Number(stopLossRate) / 100,
+            stopLossRate: isInfiniteBuyV4 ? undefined : Number(stopLossRate) / 100,
             maxCycles: supportsCycles ? Number(maxCycles) : undefined,
             strategyParams: strategyParamsJson,
           },
@@ -408,19 +412,28 @@ export function WatchStockDetailPage() {
               disabled={!isEditing}
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-foreground">손절률 (%)</label>
-            <Input
-              type="number"
-              min="0"
-              max="99.99"
-              step="0.1"
-              value={stopLossRate}
-              onChange={(e) => setStopLossRate(e.target.value)}
-              readOnly={!isEditing}
-              disabled={!isEditing}
-            />
-          </div>
+          {isInfiniteBuyV4 ? (
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-foreground">손절률</label>
+              <p className="text-sm text-muted-foreground pt-2">
+                손절 없음 — 원금 소진 시 REVERSE 모드가 리스크 해소 담당
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-foreground">손절률 (%)</label>
+              <Input
+                type="number"
+                min="0"
+                max="99.99"
+                step="0.1"
+                value={stopLossRate}
+                onChange={(e) => setStopLossRate(e.target.value)}
+                readOnly={!isEditing}
+                disabled={!isEditing}
+              />
+            </div>
+          )}
           {supportsCycles && (
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">최대 사이클</label>
@@ -537,19 +550,64 @@ export function WatchStockDetailPage() {
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm text-muted-foreground">손절률</CardTitle></CardHeader>
-          <CardContent className="text-xl font-semibold">-{(effectiveStopLossFraction * 100).toFixed(1)}%</CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
-          <CardContent className="space-y-1">
-            <div className="text-xl font-semibold">
-              {formatCycleValue(stock.cycle)} / {stock.maxCycles}
-            </div>
-            {stock.strategyName === 'infinite-buy' && stock.cycle != null && stock.cycle >= stock.maxCycles && (
-              <Badge variant="outline" className="text-xs">사이클 완주 · 청산 대기</Badge>
+          <CardContent>
+            {isInfiniteBuyV4 ? (
+              <p className="text-sm text-muted-foreground">
+                손절 없음 — 원금 소진 시 REVERSE 모드가 리스크 해소 담당
+              </p>
+            ) : (
+              <div className="text-xl font-semibold">-{(effectiveStopLossFraction * 100).toFixed(1)}%</div>
             )}
           </CardContent>
         </Card>
+        {isInfiniteBuyV4 && v4Status && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm text-muted-foreground">V4 상태</CardTitle>
+                <Badge variant={v4Status.mode === 'REVERSE' ? 'warning' : 'info'}>
+                  {v4Status.mode === 'REVERSE' ? 'REVERSE' : 'NORMAL'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">회차 (T)</div>
+                  <div className="font-medium">{(v4Status.turn ?? 0).toFixed(2)} / {stock.maxCycles}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">잔금</div>
+                  <div className="font-medium">
+                    {formatCurrency(v4Status.cashRemaining ?? 0, stock.market, stock.exchangeCode)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">보유수량</div>
+                  <div className="font-medium">{formatNumber(v4Status.lastKnownHoldQty ?? 0)}</div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {v4Status.mode === 'REVERSE'
+                  ? 'REVERSE: 원금이 소진되어(T > N-1) 리스크 해소 모드로 전환되었습니다. 매도로 T가 회복되면 NORMAL로 복귀합니다.'
+                  : 'NORMAL: 정상 분할매수 진행 중입니다. 원금(T)이 모두 소진되면 REVERSE로 전환되어 리스크를 해소합니다.'}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+        {!isInfiniteBuyV4 && (
+          <Card>
+            <CardHeader><CardTitle className="text-sm text-muted-foreground">사이클</CardTitle></CardHeader>
+            <CardContent className="space-y-1">
+              <div className="text-xl font-semibold">
+                {formatCycleValue(stock.cycle)} / {stock.maxCycles}
+              </div>
+              {stock.strategyName === 'infinite-buy' && stock.cycle != null && stock.cycle >= stock.maxCycles && (
+                <Badge variant="outline" className="text-xs">사이클 완주 · 청산 대기</Badge>
+              )}
+            </CardContent>
+          </Card>
+        )}
         {supportsCycles && (
           <Card>
             <CardHeader><CardTitle className="text-sm text-muted-foreground">이월금</CardTitle></CardHeader>
