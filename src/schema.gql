@@ -226,6 +226,60 @@ type ConvertWatchStockToInfiniteBuyV4Result {
   warnings: [String!]!
 }
 
+type WatchStockExecutionPreviewContextType {
+  currentPrice: Float!
+  avgPrice: Float
+  holdQty: Int!
+  buyableAmount: Float!
+
+  """무한매수 V4 회차 (T)"""
+  turn: Float
+
+  """최대 사이클 (N)"""
+  maxCycles: Int
+  cashRemaining: Float
+
+  """V4 모드: NORMAL | REVERSE"""
+  mode: String
+
+  """V4 일일 매수 시도액(D), 가용자금 clamp 전"""
+  dailyBuyBudget: Float
+
+  """V4 일일 매수 시도액(D), 가용자금 clamp 후"""
+  dailyBuyBudgetCapped: Float
+
+  """별% = starBasePct × (1 − 2T/N)"""
+  starPct: Float
+  starPrice: Float
+  buyLimitPrice: Float
+  sellLimitPrice: Float
+
+  """REVERSE 모드 리버스 별지점(최근 종가 평균)"""
+  reverseStarPrice: Float
+}
+
+type WatchStockExecutionPreviewSignalType {
+  side: Side!
+
+  """예: 'v4-first-buy', 'v4-quarter-sell', 'take-profit-1'"""
+  phase: String
+  quantity: Int!
+  price: Float
+
+  """KIS ord_dvsn 코드 (00=지정가, 34=LOC, 33=MOC)"""
+  orderDivision: String
+
+  """체결 조건: loc | moc | limit-touch"""
+  fillModel: String
+  reason: String!
+}
+
+type WatchStockExecutionPreviewResultType {
+  context: WatchStockExecutionPreviewContextType!
+  signals: [WatchStockExecutionPreviewSignalType!]!
+  skipReasons: [String!]!
+}
+
 type TradeRecordType {
   id: ID!
   market: Market!
@@ -604,6 +658,9 @@ type Query {
   watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
   watchStock(id: ID!): WatchStockType
   watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
+
+  """전략 평가만 수행 — 주문 제출/실행 로그/strategyParams 영속화 없음"""
+  previewWatchStockExecution(watchStockId: ID!): WatchStockExecutionPreviewResultType!
   trades(input: TradeFilterInput): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
   positions(input: PositionsFilterInput): [PositionType!]!

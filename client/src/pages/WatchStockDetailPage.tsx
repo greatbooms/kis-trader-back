@@ -17,8 +17,9 @@ import {
   useUpdateWatchStockMutation,
   useGetAvailableStrategiesQuery,
   useConvertWatchStockToInfiniteBuyV4Mutation,
+  usePreviewWatchStockExecutionLazyQuery,
 } from '@/graphql/generated'
-import type { ConvertWatchStockToInfiniteBuyV4Mutation } from '@/graphql/generated'
+import type { ConvertWatchStockToInfiniteBuyV4Mutation, PreviewWatchStockExecutionQuery } from '@/graphql/generated'
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
@@ -27,6 +28,32 @@ import { STRATEGY_META, DEFAULT_STRATEGY_META } from '@/pages/watchlist/strategy
 import type { InfiniteBuyV4Status } from '@/pages/types'
 
 type V4Preview = ConvertWatchStockToInfiniteBuyV4Mutation['convertWatchStockToInfiniteBuyV4']
+type ExecutionPreview = PreviewWatchStockExecutionQuery['previewWatchStockExecution']
+
+const V4_PHASE_LABELS: Record<string, string> = {
+  'v4-first-buy': '첫 매수',
+  'v4-avg-buy': '평단 매수',
+  'v4-star-buy': '별지점 매수',
+  'v4-ladder-buy': '사다리 매수',
+  'v4-quarter-sell': '쿼터매도',
+  'v4-final-sell': '최종매도',
+  'v4-reverse-sell': '리버스 매도',
+  'v4-reverse-buy': '리버스 매수',
+}
+
+function phaseLabel(phase?: string | null): string {
+  if (!phase) return '-'
+  return V4_PHASE_LABELS[phase] ?? phase
+}
+
+function fillConditionLabel(fillModel?: string | null, side?: string | null): string {
+  if (fillModel === 'loc') {
+    return side === 'SELL' ? 'LOC — 종가 ≥ 가격이면 체결' : 'LOC — 종가 ≤ 가격이면 체결'
+  }
+  if (fillModel === 'moc') return 'MOC — 장마감 시장가, 무조건 체결'
+  if (fillModel === 'limit-touch') return '지정가 — 장중 해당 가격 터치 시 체결'
+  return '-'
+}
 
 function eventVariant(eventType: string): 'success' | 'danger' | 'warning' | 'info' | 'outline' {
   if (eventType === 'ORDER_FILLED') return 'success'
@@ -77,6 +104,8 @@ export function WatchStockDetailPage() {
   const [resetWatchStockCarry, { loading: resettingCarry }] = useResetWatchStockCarryMutation()
   const [convertToV4, { loading: v4Loading }] = useConvertWatchStockToInfiniteBuyV4Mutation()
   const [v4Preview, setV4Preview] = useState<V4Preview | null>(null)
+  const [fetchExecutionPreview, { data: executionPreviewData, loading: executionPreviewLoading, error: executionPreviewError }] =
+    usePreviewWatchStockExecutionLazyQuery({ fetchPolicy: 'network-only' })
   const [v4Error, setV4Error] = useState('')
 
   const stock = data?.watchStock
@@ -318,6 +347,11 @@ export function WatchStockDetailPage() {
     } catch (e: unknown) {
       setV4Error(getMutationErrorMessage(e, 'V4 전환 중 오류가 발생했습니다'))
     }
+  }
+
+  const handlePreviewExecution = () => {
+    if (!stock) return
+    void fetchExecutionPreview({ variables: { watchStockId: stock.id } })
   }
 
   return (
@@ -629,6 +663,153 @@ export function WatchStockDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {isInfiniteBuyV4 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <CardTitle>오늘 실행 미리보기</CardTitle>
+              <Button size="sm" variant="outline" onClick={handlePreviewExecution} disabled={executionPreviewLoading}>
+                {executionPreviewLoading ? '조회중...' : '지금 평가하면?'}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              실제 전략 코드를 조회 시점 시세/가용자금 기준으로 평가만 합니다 — 주문 제출, 실행 로그, 전략 상태 저장이 없습니다 (브로커 잔고 동기화만 수행).
+            </p>
+            {executionPreviewError && (
+              <p className="text-sm text-danger">
+                {getMutationErrorMessage(executionPreviewError, '미리보기 조회 중 오류가 발생했습니다')}
+              </p>
+            )}
+            {executionPreviewData?.previewWatchStockExecution && (() => {
+              const preview: ExecutionPreview = executionPreviewData.previewWatchStockExecution
+              const { context, signals, skipReasons } = preview
+              const cappedByBuyable =
+                context.dailyBuyBudget != null
+                && context.dailyBuyBudgetCapped != null
+                && context.dailyBuyBudgetCapped < context.dailyBuyBudget
+
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">현재가</div>
+                      <div className="font-medium">
+                        {formatCurrency(context.currentPrice, stock.market, stock.exchangeCode)}
+                      </div>
+                    </div>
+                    {context.avgPrice != null && (
+                      <div>
+                        <div className="text-xs text-muted-foreground">평단가</div>
+                        <div className="font-medium">
+                          {formatCurrency(context.avgPrice, stock.market, stock.exchangeCode)}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-xs text-muted-foreground">가용자금</div>
+                      <div className="font-medium">
+                        {formatCurrency(context.buyableAmount, stock.market, stock.exchangeCode)}
+                      </div>
+                    </div>
+                    {context.dailyBuyBudget != null && (
+                      <div>
+                        <div className="text-xs text-muted-foreground">일일 매수 시도액 (D = 잔금÷남은회차)</div>
+                        <div className="font-medium">
+                          {formatCurrency(
+                            context.dailyBuyBudgetCapped ?? context.dailyBuyBudget,
+                            stock.market,
+                            stock.exchangeCode,
+                          )}
+                        </div>
+                        {cappedByBuyable && (
+                          <div className="text-xs text-warning">
+                            가용자금 제한 적용 (원래{' '}
+                            {formatCurrency(context.dailyBuyBudget, stock.market, stock.exchangeCode)})
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {(context.starPrice != null || context.reverseStarPrice != null) && (
+                    <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                      {context.starPrice != null && (
+                        <div>
+                          <div className="text-xs text-muted-foreground">
+                            별지점가{context.starPct != null ? ` (별% ${context.starPct.toFixed(2)}%)` : ''}
+                          </div>
+                          <div className="font-medium">
+                            {formatCurrency(context.starPrice, stock.market, stock.exchangeCode)}
+                          </div>
+                        </div>
+                      )}
+                      {context.reverseStarPrice != null && (
+                        <div>
+                          <div className="text-xs text-muted-foreground">리버스 별지점 (최근 종가 평균)</div>
+                          <div className="font-medium">
+                            {formatCurrency(context.reverseStarPrice, stock.market, stock.exchangeCode)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {signals.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>구분</TableHead>
+                          <TableHead>단계</TableHead>
+                          <TableHead className="text-right">수량</TableHead>
+                          <TableHead className="text-right">가격</TableHead>
+                          <TableHead>체결 조건</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {signals.map((signal, index) => (
+                          <TableRow key={index}>
+                            <TableCell>
+                              <Badge variant={signal.side === 'BUY' ? 'info' : 'danger'}>
+                                {signal.side === 'BUY' ? '매수' : '매도'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{phaseLabel(signal.phase)}</TableCell>
+                            <TableCell className="text-right">{formatNumber(signal.quantity)}</TableCell>
+                            <TableCell className="text-right">
+                              {signal.price != null
+                                ? formatCurrency(signal.price, stock.market, stock.exchangeCode)
+                                : '시장가'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {fillConditionLabel(signal.fillModel, signal.side)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">오늘 생성될 주문이 없습니다.</p>
+                  )}
+
+                  {skipReasons.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-foreground">스킵 사유</div>
+                      <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                        {skipReasons.map((reason, index) => (
+                          <li key={index}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

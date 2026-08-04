@@ -663,4 +663,151 @@ describe('TradingOrchestrator', () => {
 
     jest.useRealTimers();
   });
+
+  describe('previewWatchStockExecution', () => {
+    function buildV4WatchStockRow() {
+      return {
+        id: 'ws-1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        strategyName: 'infinite-buy-v4',
+        quota: 10000,
+        cycle: 0,
+        maxCycles: 40,
+        stopLossRate: 0,
+        maxPortfolioRate: 1,
+        strategyParams: { v4: { turn: 12.42, cashRemaining: 250, mode: 'NORMAL' } },
+      };
+    }
+
+    it('전략 평가 결과를 그대로 매핑해 반환하고 주문 제출/실행 로그는 전혀 남기지 않는다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
+      mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 250, maxQuantity: 4 });
+      mockPrisma.position.findMany.mockResolvedValueOnce([
+        { stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
+      ]);
+
+      const evaluateStock = jest.fn().mockResolvedValue({
+        signals: [
+          {
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            side: 'SELL',
+            quantity: 2,
+            price: 61.2,
+            reason: 'V4 v4-quarter-sell: 2주 @ 61.2',
+            orderDivision: '34',
+            metadata: { phase: 'v4-quarter-sell', fillModel: 'loc' },
+          },
+        ],
+        skipReasons: ['매수 수량 부족: 일일 매수 시도액 6.25으로 1주 매수 불가'],
+        details: {
+          T: 12.42,
+          mode: 'NORMAL',
+          cashRemaining: 250,
+          dailyBuyBudget: 6.25,
+          dailyBuyBudgetCapped: 6.25,
+          star: { starPct: 5.4, starPrice: 61.2, buyLimitPrice: 55.4, sellLimitPrice: 61.2 },
+        },
+      });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });
+
+      const result = await orchestrator.previewWatchStockExecution('ws-1');
+
+      expect(evaluateStock).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        context: {
+          currentPrice: 60,
+          avgPrice: 50,
+          holdQty: 8,
+          buyableAmount: 250,
+          turn: 12.42,
+          maxCycles: 40,
+          cashRemaining: 250,
+          mode: 'NORMAL',
+          dailyBuyBudget: 6.25,
+          dailyBuyBudgetCapped: 6.25,
+          starPct: 5.4,
+          starPrice: 61.2,
+          buyLimitPrice: 55.4,
+          sellLimitPrice: 61.2,
+          reverseStarPrice: undefined,
+        },
+        signals: [
+          {
+            side: 'SELL',
+            phase: 'v4-quarter-sell',
+            quantity: 2,
+            price: 61.2,
+            orderDivision: '34',
+            fillModel: 'loc',
+            reason: 'V4 v4-quarter-sell: 2주 @ 61.2',
+          },
+        ],
+        skipReasons: ['매수 수량 부족: 일일 매수 시도액 6.25으로 1주 매수 불가'],
+      });
+
+      expect(mockTradingService.executePerStockStrategy).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+    });
+
+    it('트레이딩이 비활성화된 환경(TRADING_ENABLED=false)에서도 미리보기는 동작한다', async () => {
+      mockConfigService.get.mockImplementation(
+        ((key: string) => (key === 'trading.enabled' ? false : undefined)) as typeof mockConfigService.get,
+      );
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      const evaluateStock = jest.fn().mockResolvedValue({ signals: [], skipReasons: ['오늘 이미 실행됨'] });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });
+      const orchestratorWithTradingDisabled = new TradingOrchestrator(
+        mockTradingService as any,
+        mockMarketAnalysis as any,
+        mockMarketRegimeService as any,
+        mockRiskManagement as any,
+        mockOrderSyncService as any,
+        mockStrategyRegistry as any,
+        mockMarketStateSync as any,
+        mockKisDomestic as any,
+        mockKisOverseas as any,
+        mockPrisma as any,
+        mockConfigService as any,
+        mockMarketDataCache as any,
+        mockSlackService as any,
+        mockSlackCommandsService as any,
+      );
+
+      const result = await orchestratorWithTradingDisabled.previewWatchStockExecution('ws-1');
+
+      expect(result.skipReasons).toEqual(['오늘 이미 실행됨']);
+      expect(mockTradingService.executePerStockStrategy).not.toHaveBeenCalled();
+    });
+
+    it('관심종목을 찾을 수 없으면 BadRequestException을 던진다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(null);
+
+      await expect(orchestrator.previewWatchStockExecution('missing')).rejects.toThrow(
+        '관심종목을 찾을 수 없습니다.',
+      );
+    });
+
+    it('전략이 설정되지 않은 관심종목이면 BadRequestException을 던진다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...buildV4WatchStockRow(), strategyName: null });
+
+      await expect(orchestrator.previewWatchStockExecution('ws-1')).rejects.toThrow(
+        '전략이 설정되지 않은 관심종목입니다.',
+      );
+    });
+
+    it('알 수 없는 전략이면 BadRequestException을 던진다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...buildV4WatchStockRow(), strategyName: 'ghost-strategy' });
+      mockStrategyRegistry.getStrategy.mockReturnValue(undefined);
+
+      await expect(orchestrator.previewWatchStockExecution('ws-1')).rejects.toThrow(
+        '알 수 없는 전략입니다: ghost-strategy',
+      );
+    });
+  });
 });

@@ -51,6 +51,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
   - `TradingAccountCashSyncService.refreshMarketCash` / `replaceCache` — 체결 후 시장별 예수금 갱신과 수동 전체 계좌 캐시 교체
   - `TradingOrderReconciliationService.reconcileOpenOrders` / `markOpenOrderCancelled` — 미체결 주문 정리 (order-sync/market-state-sync에서 호출)
   - `TradingOrchestrator.executeDomestic` / `executeOverseas` / `triggerWatchStockNow` / `runMarketRegimeDetection` / `isBusy` — cron이 호출하는 거래 루프 엔트리
+  - `TradingOrchestrator.previewWatchStockExecution` — "오늘 실행 미리보기". `strategy.evaluateStock()`를 주문 제출 없이 그대로 호출해 결과만 반환 (미리보기 전용 계산식 없음 — evaluateStock은 Prisma/KIS/Slack 미접근 순수 함수라 어떤 전략이든 안전). `executePerStockStrategy`를 호출하지 않으므로 주문 제출/실행 로그/strategyParams 영속화(v4StateUpdate 등)가 전혀 없음. `trading.enabled=false`에서도 동작(주문을 내지 않으므로 라이브 스위치와 무관)
   - `MarketStateSyncService.syncDomesticOpenOrders` / `syncOverseasOpenOrders` / `syncDomesticPortfolioState` / `syncOverseasPortfolioState` / `isMarketOpen` / `isExchangeHoliday` — 장중 broker 상태 동기화 및 시장 오픈 판단
   - `StrategyRegistryService.getStrategy(name)` — `screening`/`simulation`/`backtest`에서 같은 전략 인스턴스를 재사용
 - `TradingOrderReconciliationService`는 전략별 체결 후처리(carry 리셋 등)를 위해 `TradingService.handleStrategySignalFill`을 호출 — `TradingService` → `TradingOrderReconciliationService` 주입 금지 (순환 의존성)

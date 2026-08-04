@@ -6,7 +6,7 @@
 ## 주요 서비스 / 컴포넌트
 - `watch-stock.module.ts` — `WatchStockService` export. `TradingModule` import (resolver가 `TradingOrchestrator` 사용)
 - `watch-stock.service.ts` — `findAll`/`findOne`/`create`/`update`/`delete`, 실행 로그 CRUD (`findLatestExecutionLogs`, `findExecutionLogs`, `logExecution`), 사이클 계산(`findCurrentCycleMap` — 포지션 평균가 기반 동적 사이클 — infinite-buy 등 사이클 기반 전략용), 글로벌 상한 체크(`checkGlobalLimit` — 활성 30개), 이월 금액 리셋(`resetAccumulatedQuota`), **`convertToInfiniteBuyV4`** — 기존 `infinite-buy` 종목을 `infinite-buy-v4`로 전환(시딩 계산 + dryRun 미리보기), `@Cron`로 7일 지난 SKIPPED 로그 정리
-- `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`/`convertWatchStockToInfiniteBuyV4`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행
+- `watch-stock.resolver.ts` — query: `watchStocks`/`watchStock`/`watchStockExecutionLogs`/`previewWatchStockExecution`. mutation: `createWatchStock`/`updateWatchStock`/`deleteWatchStock`/`triggerWatchStockNow`/`resetWatchStockCarry`/`convertWatchStockToInfiniteBuyV4`. `triggerWatchStockNow`는 **`TradingOrchestrator.triggerWatchStockNow(id)`** 에 위임 — 즉시 전략 실행. `previewWatchStockExecution`은 **`TradingOrchestrator.previewWatchStockExecution(id)`** 에 위임 — "오늘 실행 미리보기"(주문 제출 없이 평가만)
 - `dto/` — `WatchStockType`, `CreateWatchStockInput`, `UpdateWatchStockInput`, `WatchStockExecutionLogType`, `WatchStocksFilterInput`, `ManualTriggerResult`, `ConvertWatchStockToInfiniteBuyV4Result` (모두 1타입 1파일로 분리됨)
 - `types/` — `ConvertWatchStockToV4Seed` (서비스 내부 반환 타입, dto의 GraphQL 타입과 필드 동일)
 
@@ -17,6 +17,7 @@
 ## 주의사항 / 비자명한 규칙
 - **글로벌 상한**: 활성 종목 총 30개 (`MAX_TOTAL_ACTIVE_WATCH_STOCKS`). create 시 `checkGlobalLimit` — 운영 안정성·KIS rate limit 고려한 hard cap
 - **수동 트리거 흐름**: `triggerWatchStockNow` resolver → `TradingOrchestrator.triggerWatchStockNow` → orchestrator 내부에서 단일 watchStock에 대해 전략 평가 + 주문. `WatchStockService`가 직접 trading 로직 실행하지 않음 (모듈 책임 분리)
+- **"오늘 실행 미리보기"(`previewWatchStockExecution`)는 순수 조회**: `TradingOrchestrator.previewWatchStockExecution`이 `strategy.evaluateStock()`를 직접 호출해 결과를 그대로 반환한다 — `TradingService.executePerStockStrategy`를 거치지 않으므로 주문 제출/실행 로그/strategyParams 영속화가 전혀 없다. `trading.enabled`/시장 개장 여부와 무관하게 항상 호출 가능(KIS 시세·매수가능금액 GET과 멱등적 포지션 동기화만 수행)
 - **이월 금액(`accumulatedQuota`)**: infinite-buy 전략에서 매수 안 된 일별 quota를 이월 누적. `resetWatchStockCarry` mutation으로 초기화 가능. 내부 로직은 `TradingOrderReconciliationService`/`TradingService.handleStrategySignalFill`이 갱신
 - **`cycle` 컬럼은 명목값**: 실제 표시 cycle은 `findCurrentCycleMap`이 계산 (사이클 기반 전략은 포지션 평균가에서 역산). resolver가 `currentCycles` map으로 override
 - **strategyParams는 JSON 컬럼**: resolver에서 `JSON.stringify` ↔ `JSON.parse`로 변환. 내부 타입은 `InfiniteBuyStrategyParams` 등 (전략별 정의는 `src/trading/types/`)

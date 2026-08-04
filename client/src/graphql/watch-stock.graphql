@@ -117,6 +117,38 @@ mutation ResetWatchStockCarry($id: ID!) {
   }
 }
 
+query PreviewWatchStockExecution($watchStockId: ID!) {
+  previewWatchStockExecution(watchStockId: $watchStockId) {
+    context {
+      currentPrice
+      avgPrice
+      holdQty
+      buyableAmount
+      turn
+      maxCycles
+      cashRemaining
+      mode
+      dailyBuyBudget
+      dailyBuyBudgetCapped
+      starPct
+      starPrice
+      buyLimitPrice
+      sellLimitPrice
+      reverseStarPrice
+    }
+    signals {
+      side
+      phase
+      quantity
+      price
+      orderDivision
+      fillModel
+      reason
+    }
+    skipReasons
+  }
+}
+
 mutation ConvertWatchStockToInfiniteBuyV4($watchStockId: ID!, $dryRun: Boolean) {
   convertWatchStockToInfiniteBuyV4(watchStockId: $watchStockId, dryRun: $dryRun) {
     watchStockId

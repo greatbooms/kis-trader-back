@@ -476,6 +476,8 @@ export type Query = {
   overseasQuote?: Maybe<StockPriceType>;
   overseasQuoteHistory: Array<QuoteHistoryPointType>;
   positions: Array<PositionType>;
+  /** 전략 평가만 수행 — 주문 제출/실행 로그/strategyParams 영속화 없음 */
+  previewWatchStockExecution: WatchStockExecutionPreviewResultType;
   quote?: Maybe<StockPriceType>;
   quoteHistory: Array<QuoteHistoryPointType>;
   screeningDateSummaries: Array<ScreeningDateSummary>;
@@ -513,6 +515,10 @@ export type QueryOverseasQuoteHistoryArgs = {
 
 export type QueryPositionsArgs = {
   input?: InputMaybe<PositionsFilterInput>;
+};
+
+export type QueryPreviewWatchStockExecutionArgs = {
+  watchStockId: Scalars["ID"]["input"];
 };
 
 export type QueryQuoteArgs = {
@@ -1030,6 +1036,53 @@ export type WatchStockExecutionLogType = {
   strategyName?: Maybe<Scalars["String"]["output"]>;
   tradeRecordId?: Maybe<Scalars["String"]["output"]>;
   watchStockId: Scalars["String"]["output"];
+};
+
+export type WatchStockExecutionPreviewContextType = {
+  __typename?: "WatchStockExecutionPreviewContextType";
+  avgPrice?: Maybe<Scalars["Float"]["output"]>;
+  buyLimitPrice?: Maybe<Scalars["Float"]["output"]>;
+  buyableAmount: Scalars["Float"]["output"];
+  cashRemaining?: Maybe<Scalars["Float"]["output"]>;
+  currentPrice: Scalars["Float"]["output"];
+  /** V4 일일 매수 시도액(D), 가용자금 clamp 전 */
+  dailyBuyBudget?: Maybe<Scalars["Float"]["output"]>;
+  /** V4 일일 매수 시도액(D), 가용자금 clamp 후 */
+  dailyBuyBudgetCapped?: Maybe<Scalars["Float"]["output"]>;
+  holdQty: Scalars["Int"]["output"];
+  /** 최대 사이클 (N) */
+  maxCycles?: Maybe<Scalars["Int"]["output"]>;
+  /** V4 모드: NORMAL | REVERSE */
+  mode?: Maybe<Scalars["String"]["output"]>;
+  /** REVERSE 모드 리버스 별지점(최근 종가 평균) */
+  reverseStarPrice?: Maybe<Scalars["Float"]["output"]>;
+  sellLimitPrice?: Maybe<Scalars["Float"]["output"]>;
+  /** 별% = starBasePct × (1 − 2T/N) */
+  starPct?: Maybe<Scalars["Float"]["output"]>;
+  starPrice?: Maybe<Scalars["Float"]["output"]>;
+  /** 무한매수 V4 회차 (T) */
+  turn?: Maybe<Scalars["Float"]["output"]>;
+};
+
+export type WatchStockExecutionPreviewResultType = {
+  __typename?: "WatchStockExecutionPreviewResultType";
+  context: WatchStockExecutionPreviewContextType;
+  signals: Array<WatchStockExecutionPreviewSignalType>;
+  skipReasons: Array<Scalars["String"]["output"]>;
+};
+
+export type WatchStockExecutionPreviewSignalType = {
+  __typename?: "WatchStockExecutionPreviewSignalType";
+  /** 체결 조건: loc | moc | limit-touch */
+  fillModel?: Maybe<Scalars["String"]["output"]>;
+  /** KIS ord_dvsn 코드 (00=지정가, 34=LOC, 33=MOC) */
+  orderDivision?: Maybe<Scalars["String"]["output"]>;
+  /** 예: 'v4-first-buy', 'v4-quarter-sell', 'take-profit-1' */
+  phase?: Maybe<Scalars["String"]["output"]>;
+  price?: Maybe<Scalars["Float"]["output"]>;
+  quantity: Scalars["Int"]["output"];
+  reason: Scalars["String"]["output"];
+  side: Side;
 };
 
 export type WatchStockType = {
@@ -2447,6 +2500,46 @@ export type ResetWatchStockCarryMutation = {
     __typename?: "ManualTriggerResult";
     success: boolean;
     message: string;
+  };
+};
+
+export type PreviewWatchStockExecutionQueryVariables = Exact<{
+  watchStockId: Scalars["ID"]["input"];
+}>;
+
+export type PreviewWatchStockExecutionQuery = {
+  __typename?: "Query";
+  previewWatchStockExecution: {
+    __typename?: "WatchStockExecutionPreviewResultType";
+    skipReasons: Array<string>;
+    context: {
+      __typename?: "WatchStockExecutionPreviewContextType";
+      currentPrice: number;
+      avgPrice?: number | null;
+      holdQty: number;
+      buyableAmount: number;
+      turn?: number | null;
+      maxCycles?: number | null;
+      cashRemaining?: number | null;
+      mode?: string | null;
+      dailyBuyBudget?: number | null;
+      dailyBuyBudgetCapped?: number | null;
+      starPct?: number | null;
+      starPrice?: number | null;
+      buyLimitPrice?: number | null;
+      sellLimitPrice?: number | null;
+      reverseStarPrice?: number | null;
+    };
+    signals: Array<{
+      __typename?: "WatchStockExecutionPreviewSignalType";
+      side: Side;
+      phase?: string | null;
+      quantity: number;
+      price?: number | null;
+      orderDivision?: string | null;
+      fillModel?: string | null;
+      reason: string;
+    }>;
   };
 };
 
@@ -6689,6 +6782,131 @@ export function useResetWatchStockCarryMutation(
 }
 export type ResetWatchStockCarryMutationHookResult = ReturnType<
   typeof useResetWatchStockCarryMutation
+>;
+export const PreviewWatchStockExecutionDocument = gql`
+  query PreviewWatchStockExecution($watchStockId: ID!) {
+    previewWatchStockExecution(watchStockId: $watchStockId) {
+      context {
+        currentPrice
+        avgPrice
+        holdQty
+        buyableAmount
+        turn
+        maxCycles
+        cashRemaining
+        mode
+        dailyBuyBudget
+        dailyBuyBudgetCapped
+        starPct
+        starPrice
+        buyLimitPrice
+        sellLimitPrice
+        reverseStarPrice
+      }
+      signals {
+        side
+        phase
+        quantity
+        price
+        orderDivision
+        fillModel
+        reason
+      }
+      skipReasons
+    }
+  }
+`;
+
+/**
+ * __usePreviewWatchStockExecutionQuery__
+ *
+ * To run a query within a React component, call `usePreviewWatchStockExecutionQuery` and pass it any options that fit your needs.
+ * When your component renders, `usePreviewWatchStockExecutionQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = usePreviewWatchStockExecutionQuery({
+ *   variables: {
+ *      watchStockId: // value for 'watchStockId'
+ *   },
+ * });
+ */
+export function usePreviewWatchStockExecutionQuery(
+  baseOptions: ApolloReactHooks.QueryHookOptions<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  > &
+    (
+      | { variables: PreviewWatchStockExecutionQueryVariables; skip?: boolean }
+      | { skip: boolean }
+    ),
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useQuery<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  >(PreviewWatchStockExecutionDocument, options);
+}
+export function usePreviewWatchStockExecutionLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useLazyQuery<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  >(PreviewWatchStockExecutionDocument, options);
+}
+// @ts-ignore
+export function usePreviewWatchStockExecutionSuspenseQuery(
+  baseOptions?: ApolloReactHooks.SuspenseQueryHookOptions<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  PreviewWatchStockExecutionQuery,
+  PreviewWatchStockExecutionQueryVariables
+>;
+export function usePreviewWatchStockExecutionSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        PreviewWatchStockExecutionQuery,
+        PreviewWatchStockExecutionQueryVariables
+      >,
+): ApolloReactHooks.UseSuspenseQueryResult<
+  PreviewWatchStockExecutionQuery | undefined,
+  PreviewWatchStockExecutionQueryVariables
+>;
+export function usePreviewWatchStockExecutionSuspenseQuery(
+  baseOptions?:
+    | ApolloReactHooks.SkipToken
+    | ApolloReactHooks.SuspenseQueryHookOptions<
+        PreviewWatchStockExecutionQuery,
+        PreviewWatchStockExecutionQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === ApolloReactHooks.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return ApolloReactHooks.useSuspenseQuery<
+    PreviewWatchStockExecutionQuery,
+    PreviewWatchStockExecutionQueryVariables
+  >(PreviewWatchStockExecutionDocument, options);
+}
+export type PreviewWatchStockExecutionQueryHookResult = ReturnType<
+  typeof usePreviewWatchStockExecutionQuery
+>;
+export type PreviewWatchStockExecutionLazyQueryHookResult = ReturnType<
+  typeof usePreviewWatchStockExecutionLazyQuery
+>;
+export type PreviewWatchStockExecutionSuspenseQueryHookResult = ReturnType<
+  typeof usePreviewWatchStockExecutionSuspenseQuery
 >;
 export const ConvertWatchStockToInfiniteBuyV4Document = gql`
   mutation ConvertWatchStockToInfiniteBuyV4(
