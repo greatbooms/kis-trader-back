@@ -445,6 +445,11 @@ export function WatchStockDetailPage() {
               readOnly={!isEditing}
               disabled={!isEditing}
             />
+            {isInfiniteBuyV4 && (
+              <p className="text-xs text-muted-foreground">
+                quota 변경 시 증감분이 V4 장부 잔금에 자동 반영됩니다. 증액분은 실제 예수금 입금이 뒷받침되어야 합니다.
+              </p>
+            )}
           </div>
           {isInfiniteBuyV4 ? (
             <div className="space-y-1.5">

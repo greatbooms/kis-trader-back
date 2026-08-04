@@ -412,6 +412,41 @@ export class WatchStockService {
     if (rebasedUpdate.cycle !== undefined) updateData.cycle = rebasedUpdate.cycle;
     if (rebasedUpdate.strategyParams !== undefined) updateData.strategyParams = rebasedUpdate.strategyParams;
 
+    const effectiveStrategyName = data.strategyName ?? current.strategyName;
+    const quotaDelta =
+      data.quota !== undefined ? this.roundQuota(Number(data.quota) - Number(current.quota ?? 0)) : 0;
+
+    if (effectiveStrategyName === 'infinite-buy-v4' && quotaDelta !== 0) {
+      return this.prisma.$transaction(async (tx) => {
+        const fresh = await tx.watchStock.findUnique({ where: { id }, select: { strategyParams: true } });
+        if (!fresh) {
+          throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+        }
+
+        const mergedParams = { ...this.toStrategyParams(fresh.strategyParams), ...(data.strategyParams ?? {}) };
+        const v4Params = mergedParams.v4 as InfiniteBuyV4Params | undefined;
+
+        if (!v4Params) {
+          this.logger.warn(`[${current.stockCode}] infinite-buy-v4 종목에 v4 장부가 없어 quota만 수정합니다.`);
+        } else {
+          const currentCashRemaining = v4Params.cashRemaining ?? 0;
+          const nextCashRemaining = this.roundQuota(currentCashRemaining + quotaDelta);
+          if (nextCashRemaining < 0) {
+            throw new BadRequestException(
+              `감액은 장부 잔금 범위 내에서만 가능합니다: 현재 잔금 ${currentCashRemaining.toLocaleString('en-US')}`,
+            );
+          }
+          mergedParams.v4 = { ...v4Params, cashRemaining: nextCashRemaining };
+          updateData.strategyParams = mergedParams;
+          this.logger.log(
+            `[${current.stockCode}] V4 quota 수정 → 장부 잔금 반영: ${currentCashRemaining} -> ${nextCashRemaining} (증감 ${quotaDelta >= 0 ? '+' : ''}${quotaDelta})`,
+          );
+        }
+
+        return tx.watchStock.update({ where: { id }, data: updateData });
+      });
+    }
+
     return this.prisma.watchStock.update({ where: { id }, data: updateData });
   }
 
