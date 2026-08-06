@@ -298,7 +298,11 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
       metadata: {
         phase,
         fillModel: 'loc',
-        v4AttemptAmount: roundToCent(clampedPrice * quantity),
+        // quantity는 항상 clamp 이전(D 기반) price로 산정되므로, T 회계 분모도 그 price
+        // 기준으로 유지한다 — clampedPrice로 계산하면 clamp가 발동한 날 실제 투입액이
+        // D보다 작아도 전량 체결 시 ΔT가 여전히 +1(전체 회차)로 잡혀 T가 실제 자금
+        // 투입 속도보다 빨리 진행된다.
+        v4AttemptAmount: roundToCent(price * quantity),
         ...(priceClamp ? { v4BuyPriceClamp: priceClamp } : {}),
       },
     };
@@ -309,11 +313,15 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
    * 주입한다 — T 회계(§3) 분모는 leg 자체(v4AttemptAmount)가 아니라 그날 매수 시도
    * 총액이어야 "당일 1회매수분 전량 체결 = +1" 규칙과 동치가 된다 (분할 시 leg별로
    * 독립 집계하면 전량 체결 시 ΔT가 leg 수만큼 배로 늘어나는 오류가 생긴다).
+   * leg별 v4AttemptAmount(= clamp 이전 price 기준)를 그대로 합산 — clampedPrice(신호
+   * 제출가)로 다시 계산하면 위 clamp-vs-T 회계 불일치가 재발한다.
    */
   private injectDayBuyAttemptTotal(signals: TradingSignal[], details: Record<string, any>): void {
     const buySignals = signals.filter((s) => s.side === 'BUY');
     if (buySignals.length === 0) return;
-    const total = roundToCent(buySignals.reduce((sum, s) => sum + (s.price ?? 0) * s.quantity, 0));
+    const total = roundToCent(
+      buySignals.reduce((sum, s) => sum + Number(s.metadata?.v4AttemptAmount ?? (s.price ?? 0) * s.quantity), 0),
+    );
     const priceClamps: Record<string, any>[] = [];
     for (const s of buySignals) {
       s.metadata = { ...s.metadata, v4DayBuyAttemptTotal: total };
