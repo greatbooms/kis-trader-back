@@ -107,6 +107,7 @@ export function WatchStockDetailPage() {
   const [fetchExecutionPreview, { data: executionPreviewData, loading: executionPreviewLoading, error: executionPreviewError }] =
     usePreviewWatchStockExecutionLazyQuery({ fetchPolicy: 'network-only' })
   const [v4Error, setV4Error] = useState('')
+  const [assumedQuota, setAssumedQuota] = useState('')
 
   const stock = data?.watchStock
   const strategies = strategiesData?.availableStrategies ?? []
@@ -351,7 +352,8 @@ export function WatchStockDetailPage() {
 
   const handlePreviewExecution = () => {
     if (!stock) return
-    void fetchExecutionPreview({ variables: { watchStockId: stock.id } })
+    const quotaOverride = assumedQuota.trim() !== '' && Number(assumedQuota) > 0 ? Number(assumedQuota) : undefined
+    void fetchExecutionPreview({ variables: { watchStockId: stock.id, quotaOverride } })
   }
 
   return (
@@ -445,6 +447,11 @@ export function WatchStockDetailPage() {
               readOnly={!isEditing}
               disabled={!isEditing}
             />
+            {isInfiniteBuyV4 && (
+              <p className="text-xs text-muted-foreground">
+                quota 변경 시 증감분이 V4 장부 잔금에 자동 반영됩니다. 증액분은 실제 예수금 입금이 뒷받침되어야 합니다.
+              </p>
+            )}
           </div>
           {isInfiniteBuyV4 ? (
             <div className="space-y-1.5">
@@ -669,14 +676,28 @@ export function WatchStockDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <CardTitle>오늘 실행 미리보기</CardTitle>
-              <Button size="sm" variant="outline" onClick={handlePreviewExecution} disabled={executionPreviewLoading}>
-                {executionPreviewLoading ? '조회중...' : '지금 평가하면?'}
-              </Button>
+              <div className="flex items-end gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">가정 원금 (선택)</label>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="예: 16000"
+                    value={assumedQuota}
+                    onChange={(e) => setAssumedQuota(e.target.value)}
+                    className="h-8 w-32"
+                  />
+                </div>
+                <Button size="sm" variant="outline" onClick={handlePreviewExecution} disabled={executionPreviewLoading}>
+                  {executionPreviewLoading ? '조회중...' : '지금 평가하면?'}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-xs text-muted-foreground">
               실제 전략 코드를 조회 시점 시세/가용자금 기준으로 평가만 합니다 — 주문 제출, 실행 로그, 전략 상태 저장이 없습니다 (브로커 잔고 동기화만 수행).
+              가정 원금을 입력하면 그 값으로 quota를 바꿨다고 가정해 계산합니다 (저장 안 됨 — 실제 매수는 예수금 범위 내로 잘립니다).
             </p>
             {executionPreviewError && (
               <p className="text-sm text-danger">
@@ -693,6 +714,11 @@ export function WatchStockDetailPage() {
 
               return (
                 <div className="space-y-4">
+                  {preview.appliedQuotaOverride != null && (
+                    <Badge variant="warning">
+                      가정 원금 {formatCurrency(preview.appliedQuotaOverride, stock.market, stock.exchangeCode)} 기준 (저장 안 됨)
+                    </Badge>
+                  )}
                   <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                     <div>
                       <div className="text-xs text-muted-foreground">현재가</div>

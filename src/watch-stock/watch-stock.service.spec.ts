@@ -315,6 +315,105 @@ describe('WatchStockService', () => {
       expect(callArgs.data.strategyParams).toBeUndefined();
       expect(mockPrisma.position.findUnique).not.toHaveBeenCalled();
     });
+
+    describe('V4 quota → 장부 잔금 동기화 (D10)', () => {
+      const v4WatchStock = {
+        id: '1',
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        strategyName: 'infinite-buy-v4',
+        quota: 500000,
+        maxCycles: 40,
+        strategyParams: {
+          v4: {
+            mode: 'NORMAL',
+            turn: 8,
+            cashRemaining: 400000,
+            cycleSeq: 0,
+            recentCloses: [],
+            lastKnownHoldQty: 30,
+          },
+        },
+      };
+
+      it('should add a quota increase to the v4 ledger cashRemaining inside a transaction', async () => {
+        mockPrisma.watchStock.findUnique
+          .mockResolvedValueOnce(v4WatchStock)
+          .mockResolvedValueOnce(v4WatchStock);
+        mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+        await service.update('1', { quota: 600000 });
+
+        expect(mockPrisma.$transaction).toHaveBeenCalled();
+        const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+        expect(Number(callArgs.data.quota)).toBe(600000);
+        expect(callArgs.data.strategyParams.v4.cashRemaining).toBe(500000);
+        expect(callArgs.data.strategyParams.v4.turn).toBe(8);
+      });
+
+      it('should allow a quota decrease within the ledger cashRemaining boundary', async () => {
+        mockPrisma.watchStock.findUnique
+          .mockResolvedValueOnce(v4WatchStock)
+          .mockResolvedValueOnce(v4WatchStock);
+        mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+        await service.update('1', { quota: 300000 });
+
+        const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+        expect(callArgs.data.strategyParams.v4.cashRemaining).toBe(200000);
+      });
+
+      it('should allow a quota decrease that brings ledger cashRemaining exactly to zero', async () => {
+        mockPrisma.watchStock.findUnique
+          .mockResolvedValueOnce(v4WatchStock)
+          .mockResolvedValueOnce(v4WatchStock);
+        mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+        await service.update('1', { quota: 100000 });
+
+        const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+        expect(callArgs.data.strategyParams.v4.cashRemaining).toBe(0);
+      });
+
+      it('should reject a quota decrease that would push ledger cashRemaining negative', async () => {
+        mockPrisma.watchStock.findUnique
+          .mockResolvedValueOnce(v4WatchStock)
+          .mockResolvedValueOnce(v4WatchStock);
+
+        await expect(service.update('1', { quota: 50000 })).rejects.toThrow(
+          '감액은 장부 잔금 범위 내에서만 가능합니다',
+        );
+        expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+      });
+
+      it('should not touch the ledger when quota is unchanged', async () => {
+        mockPrisma.watchStock.findUnique.mockResolvedValueOnce(v4WatchStock);
+        mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+
+        await service.update('1', { isActive: false });
+
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+        expect(callArgs.data).toEqual({ isActive: false });
+      });
+
+      it('should warn and skip ledger sync when a v4 stock has no v4 ledger yet', async () => {
+        const v4WithoutLedger = { ...v4WatchStock, strategyParams: {} };
+        mockPrisma.watchStock.findUnique
+          .mockResolvedValueOnce(v4WithoutLedger)
+          .mockResolvedValueOnce(v4WithoutLedger);
+        mockPrisma.watchStock.update.mockResolvedValue({ id: '1' });
+        const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+
+        await service.update('1', { quota: 600000 });
+
+        const callArgs = mockPrisma.watchStock.update.mock.calls[0][0];
+        expect(Number(callArgs.data.quota)).toBe(600000);
+        expect(callArgs.data.strategyParams).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('v4 장부가 없어'));
+      });
+    });
   });
 
   describe('delete', () => {

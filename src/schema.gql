@@ -278,6 +278,9 @@ type WatchStockExecutionPreviewResultType {
   context: WatchStockExecutionPreviewContextType!
   signals: [WatchStockExecutionPreviewSignalType!]!
   skipReasons: [String!]!
+
+  """가정 원금(quotaOverride)으로 계산했으면 그 값, 저장된 quota 기준이면 null"""
+  appliedQuotaOverride: Float
 }
 
 type TradeRecordType {
@@ -660,7 +663,7 @@ type Query {
   watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
 
   """전략 평가만 수행 — 주문 제출/실행 로그/strategyParams 영속화 없음"""
-  previewWatchStockExecution(watchStockId: ID!): WatchStockExecutionPreviewResultType!
+  previewWatchStockExecution(watchStockId: ID!, quotaOverride: Float): WatchStockExecutionPreviewResultType!
   trades(input: TradeFilterInput): [TradeRecordType!]!
   trade(id: ID!): TradeRecordType
   positions(input: PositionsFilterInput): [PositionType!]!

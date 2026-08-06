@@ -117,8 +117,8 @@ mutation ResetWatchStockCarry($id: ID!) {
   }
 }
 
-query PreviewWatchStockExecution($watchStockId: ID!) {
-  previewWatchStockExecution(watchStockId: $watchStockId) {
+query PreviewWatchStockExecution($watchStockId: ID!, $quotaOverride: Float) {
+  previewWatchStockExecution(watchStockId: $watchStockId, quotaOverride: $quotaOverride) {
     context {
       currentPrice
       avgPrice
@@ -146,6 +146,7 @@ query PreviewWatchStockExecution($watchStockId: ID!) {
       reason
     }
     skipReasons
+    appliedQuotaOverride
   }
 }
 

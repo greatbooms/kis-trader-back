@@ -809,5 +809,71 @@ describe('TradingOrchestrator', () => {
         '알 수 없는 전략입니다: ghost-strategy',
       );
     });
+
+    it('가정 원금(quotaOverride) 적용 시 quota와 장부 잔금을 증감분만큼 조정한 가상 사본으로 평가하고 DB는 안 건드린다', async () => {
+      // 저장값 quota 10000 / cashRemaining 250 → 가정 16000이면 delta +6000 → 가상 잔금 6250
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
+      mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 3000, maxQuantity: 50 });
+      mockPrisma.position.findMany.mockResolvedValueOnce([
+        { stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
+      ]);
+      const evaluateStock = jest.fn().mockResolvedValue({ signals: [], skipReasons: [], details: {} });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });
+
+      const result = await orchestrator.previewWatchStockExecution('ws-1', 16000);
+
+      const passedContext = evaluateStock.mock.calls[0][0];
+      expect(passedContext.watchStock.quota).toBe(16000);
+      expect(passedContext.watchStock.strategyParams.v4.cashRemaining).toBe(6250);
+      // 저장값은 그대로여야 함 (가상 사본만 조정)
+      expect(passedContext.watchStock.strategyParams.v4.turn).toBe(12.42);
+      expect(result.appliedQuotaOverride).toBe(16000);
+      expect(mockTradingService.executePerStockStrategy).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+    });
+
+    it('가정 원금이 너무 낮아 장부 잔금이 음수가 되면 거부한다', async () => {
+      // quota 10000 / cashRemaining 250 → 가정 9000이면 delta -1000 → 250-1000 = -750 < 0
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock: jest.fn() });
+
+      await expect(orchestrator.previewWatchStockExecution('ws-1', 9000)).rejects.toThrow(
+        '장부 잔금이 음수가 됩니다',
+      );
+    });
+
+    it('가정 원금이 장부 잔금 범위 내 감액이면 허용한다', async () => {
+      // cashRemaining 250 → 가정 9800이면 delta -200 → 잔금 50 (>= 0)
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
+      mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 3000, maxQuantity: 50 });
+      mockPrisma.position.findMany.mockResolvedValueOnce([]);
+      const evaluateStock = jest.fn().mockResolvedValue({ signals: [], skipReasons: [], details: {} });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });
+
+      const result = await orchestrator.previewWatchStockExecution('ws-1', 9800);
+
+      expect(evaluateStock.mock.calls[0][0].watchStock.strategyParams.v4.cashRemaining).toBe(50);
+      expect(result.appliedQuotaOverride).toBe(9800);
+    });
+
+    it('가정 원금은 infinite-buy-v4 종목만 지원한다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...buildV4WatchStockRow(), strategyName: 'infinite-buy' });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy', evaluateStock: jest.fn() });
+
+      await expect(orchestrator.previewWatchStockExecution('ws-1', 16000)).rejects.toThrow(
+        '가정 원금 미리보기는 무한매수 V4 종목만 지원합니다.',
+      );
+    });
+
+    it('가정 원금이 0 이하면 거부한다', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue(buildV4WatchStockRow());
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock: jest.fn() });
+
+      await expect(orchestrator.previewWatchStockExecution('ws-1', 0)).rejects.toThrow(
+        '가정 원금은 0보다 커야 합니다.',
+      );
+    });
   });
 });

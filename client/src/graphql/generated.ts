@@ -518,6 +518,7 @@ export type QueryPositionsArgs = {
 };
 
 export type QueryPreviewWatchStockExecutionArgs = {
+  quotaOverride?: InputMaybe<Scalars["Float"]["input"]>;
   watchStockId: Scalars["ID"]["input"];
 };
 
@@ -1066,6 +1067,8 @@ export type WatchStockExecutionPreviewContextType = {
 
 export type WatchStockExecutionPreviewResultType = {
   __typename?: "WatchStockExecutionPreviewResultType";
+  /** 가정 원금(quotaOverride)으로 계산했으면 그 값, 저장된 quota 기준이면 null */
+  appliedQuotaOverride?: Maybe<Scalars["Float"]["output"]>;
   context: WatchStockExecutionPreviewContextType;
   signals: Array<WatchStockExecutionPreviewSignalType>;
   skipReasons: Array<Scalars["String"]["output"]>;
@@ -2505,6 +2508,7 @@ export type ResetWatchStockCarryMutation = {
 
 export type PreviewWatchStockExecutionQueryVariables = Exact<{
   watchStockId: Scalars["ID"]["input"];
+  quotaOverride?: InputMaybe<Scalars["Float"]["input"]>;
 }>;
 
 export type PreviewWatchStockExecutionQuery = {
@@ -2512,6 +2516,7 @@ export type PreviewWatchStockExecutionQuery = {
   previewWatchStockExecution: {
     __typename?: "WatchStockExecutionPreviewResultType";
     skipReasons: Array<string>;
+    appliedQuotaOverride?: number | null;
     context: {
       __typename?: "WatchStockExecutionPreviewContextType";
       currentPrice: number;
@@ -6784,8 +6789,11 @@ export type ResetWatchStockCarryMutationHookResult = ReturnType<
   typeof useResetWatchStockCarryMutation
 >;
 export const PreviewWatchStockExecutionDocument = gql`
-  query PreviewWatchStockExecution($watchStockId: ID!) {
-    previewWatchStockExecution(watchStockId: $watchStockId) {
+  query PreviewWatchStockExecution($watchStockId: ID!, $quotaOverride: Float) {
+    previewWatchStockExecution(
+      watchStockId: $watchStockId
+      quotaOverride: $quotaOverride
+    ) {
       context {
         currentPrice
         avgPrice
@@ -6813,6 +6821,7 @@ export const PreviewWatchStockExecutionDocument = gql`
         reason
       }
       skipReasons
+      appliedQuotaOverride
     }
   }
 `;
@@ -6830,6 +6839,7 @@ export const PreviewWatchStockExecutionDocument = gql`
  * const { data, loading, error } = usePreviewWatchStockExecutionQuery({
  *   variables: {
  *      watchStockId: // value for 'watchStockId'
+ *      quotaOverride: // value for 'quotaOverride'
  *   },
  * });
  */
