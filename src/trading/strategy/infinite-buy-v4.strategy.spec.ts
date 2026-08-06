@@ -189,6 +189,81 @@ describe('InfiniteBuyV4Strategy', () => {
     });
   });
 
+  describe('BUY 가격 상한', () => {
+    it('SOXL production incident의 184.43 사다리 매수가를 현재가 +10%인 145.28로 제한한다', async () => {
+      const ctx = withV4(
+        createContext({
+          position: {
+            stockCode: 'SOXL',
+            quantity: 1,
+            avgPrice: 194.14,
+            currentPrice: 132.07,
+            totalInvested: 194.14,
+          },
+        }),
+        {
+          turn: 12.4248184,
+          cashRemaining: 6893.8,
+          starBasePct: 20,
+        },
+      );
+      ctx.watchStock.stockCode = 'SOXL';
+      ctx.watchStock.stockName = 'Direxion Daily Semiconductor Bull 3X Shares';
+      ctx.watchStock.quota = 10000;
+      ctx.watchStock.maxCycles = 40;
+      ctx.price.currentPrice = 132.07;
+
+      const result = await strategy.evaluateStock(ctx);
+
+      const ladderBuy = result.signals.find((s) => s.metadata?.phase === 'v4-ladder-buy');
+      expect(ladderBuy).toBeDefined();
+      expect(ladderBuy!.quantity).toBe(1);
+      expect(ladderBuy!.price).not.toBe(184.43);
+      expect(ladderBuy!.price).toBe(145.28); // round(132.07 × 1.10, 2)
+      expect(ladderBuy!.metadata?.v4BuyPriceClamp).toEqual({
+        originalPrice: 184.43,
+        clampedPrice: 145.28,
+        capPrice: 145.28,
+        maxBuyPremiumPct: 0.1,
+      });
+      expect(ladderBuy!.metadata?.v4AttemptAmount).toBe(145.28);
+      expect(result.details?.v4BuyPriceClamps).toEqual([
+        {
+          phase: 'v4-ladder-buy',
+          originalPrice: 184.43,
+          clampedPrice: 145.28,
+          capPrice: 145.28,
+          maxBuyPremiumPct: 0.1,
+        },
+      ]);
+    });
+
+    it('설정한 maxBuyPremiumPct를 적용하되 pre-clamp 수량은 재계산하지 않는다', async () => {
+      const ctx = withV4(
+        createContext({
+          position: { stockCode: 'TQQQ', quantity: 100, avgPrice: 50, currentPrice: 40, totalInvested: 5000 },
+        }),
+        { turn: 10, cashRemaining: 15000, maxBuyPremiumPct: 0.05 },
+      );
+      ctx.price.currentPrice = 40;
+
+      const result = await strategy.evaluateStock(ctx);
+
+      const avgBuy = result.signals.find((s) => s.metadata?.phase === 'v4-avg-buy');
+      expect(avgBuy).toMatchObject({ quantity: 5, price: 42 });
+      expect(avgBuy!.metadata?.v4AttemptAmount).toBe(210);
+      expect(result.details?.v4BuyPriceClamps).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          phase: 'v4-avg-buy',
+          originalPrice: 50,
+          clampedPrice: 42,
+          capPrice: 42,
+          maxBuyPremiumPct: 0.05,
+        }),
+      ]));
+    });
+  });
+
   describe('NORMAL 모드 — 전반전 (0 < T < N/2)', () => {
     it('D/2 평단 매수 + D/2 별지점 매수 + 쿼터매도/최종매도를 함께 생성한다', async () => {
       const ctx = withV4(
