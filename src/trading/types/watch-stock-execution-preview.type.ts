@@ -39,4 +39,6 @@ export interface WatchStockExecutionPreviewResult {
   context: WatchStockExecutionPreviewContext;
   signals: WatchStockExecutionPreviewSignal[];
   skipReasons: string[];
+  /** 가정 원금(quotaOverride)으로 계산했으면 그 값. 실제 저장된 quota 기준이면 undefined. */
+  appliedQuotaOverride?: number;
 }

@@ -84,4 +84,7 @@ export class WatchStockExecutionPreviewResultType {
 
   @Field(() => [String])
   skipReasons: string[];
+
+  @Field(() => Float, { nullable: true, description: '가정 원금(quotaOverride)으로 계산했으면 그 값, 저장된 quota 기준이면 null' })
+  appliedQuotaOverride?: number;
 }

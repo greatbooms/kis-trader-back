@@ -304,7 +304,10 @@ export class TradingOrchestrator {
    * `TradingService.executePerStockStrategy`를 호출하지 않는 한 어떤 전략이든 부작용이 없다 —
    * 주문 제출/실행 로그/strategyParams 영속화(v4StateUpdate 등)는 이 메서드에서 절대 하지 않는다.
    */
-  async previewWatchStockExecution(watchStockId: string): Promise<WatchStockExecutionPreviewResult> {
+  async previewWatchStockExecution(
+    watchStockId: string,
+    quotaOverride?: number,
+  ): Promise<WatchStockExecutionPreviewResult> {
     const watchStock = await this.prisma.watchStock.findUnique({ where: { id: watchStockId } });
     if (!watchStock) {
       throw new BadRequestException('관심종목을 찾을 수 없습니다.');
@@ -318,7 +321,36 @@ export class TradingOrchestrator {
       throw new BadRequestException(`알 수 없는 전략입니다: ${watchStock.strategyName}`);
     }
 
-    const context = await this.buildManualExecutionContext(watchStock, strategy.name);
+    // 가정 원금(what-if): quota를 override 값으로, v4 장부 잔금을 증감분만큼 조정한 가상 사본으로
+    // evaluateStock을 돌린다. DB에는 아무것도 쓰지 않는다 (D10 저장과 동일한 규칙으로 계산만).
+    let effectiveWatchStock = watchStock;
+    let appliedQuotaOverride: number | undefined;
+    if (quotaOverride !== undefined) {
+      if (watchStock.strategyName !== 'infinite-buy-v4') {
+        throw new BadRequestException('가정 원금 미리보기는 무한매수 V4 종목만 지원합니다.');
+      }
+      if (!Number.isFinite(quotaOverride) || quotaOverride <= 0) {
+        throw new BadRequestException('가정 원금은 0보다 커야 합니다.');
+      }
+      const currentQuota = watchStock.quota ? Number(watchStock.quota) : 0;
+      const params = (watchStock.strategyParams as Record<string, any>) ?? {};
+      const v4 = (params.v4 as Record<string, any>) ?? {};
+      const currentCash = Number.isFinite(v4.cashRemaining) ? Number(v4.cashRemaining) : currentQuota;
+      const nextCash = Math.round((currentCash + (quotaOverride - currentQuota)) * 100) / 100;
+      if (nextCash < 0) {
+        throw new BadRequestException(
+          `가정 원금이 너무 낮습니다 — 장부 잔금이 음수가 됩니다 (현재 잔금 ${currentCash.toLocaleString('en-US')})`,
+        );
+      }
+      effectiveWatchStock = {
+        ...watchStock,
+        quota: new Prisma.Decimal(quotaOverride),
+        strategyParams: { ...params, v4: { ...v4, cashRemaining: nextCash } } as Prisma.JsonValue,
+      };
+      appliedQuotaOverride = quotaOverride;
+    }
+
+    const context = await this.buildManualExecutionContext(effectiveWatchStock, strategy.name);
     if (!context) {
       throw new BadRequestException('미리보기용 종목 컨텍스트를 만들지 못했습니다.');
     }
@@ -357,6 +389,7 @@ export class TradingOrchestrator {
         reason: signal.reason,
       })),
       skipReasons: evaluation.skipReasons,
+      appliedQuotaOverride,
     };
   }
 

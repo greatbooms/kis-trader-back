@@ -3536,6 +3536,14 @@
             "description": "전략 평가만 수행 — 주문 제출/실행 로그/strategyParams 영속화 없음",
             "args": [
               {
+                "name": "quotaOverride",
+                "description": null,
+                "type": { "kind": "SCALAR", "name": "Float", "ofType": null },
+                "defaultValue": null,
+                "isDeprecated": false,
+                "deprecationReason": null
+              },
+              {
                 "name": "watchStockId",
                 "description": null,
                 "type": {
@@ -8166,6 +8174,14 @@
         "description": null,
         "isOneOf": null,
         "fields": [
+          {
+            "name": "appliedQuotaOverride",
+            "description": "가정 원금(quotaOverride)으로 계산했으면 그 값, 저장된 quota 기준이면 null",
+            "args": [],
+            "type": { "kind": "SCALAR", "name": "Float", "ofType": null },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
           {
             "name": "context",
             "description": null,

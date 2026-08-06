@@ -1,4 +1,4 @@
-import { Resolver, Query, Mutation, Args, ID, registerEnumType } from '@nestjs/graphql';
+import { Resolver, Query, Mutation, Args, ID, Float, registerEnumType } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { WatchStockService } from './watch-stock.service';
 import { GqlAuthGuard } from '../auth/auth.guard';
@@ -89,8 +89,9 @@ export class WatchStockResolver {
   })
   async previewWatchStockExecution(
     @Args('watchStockId', { type: () => ID }) watchStockId: string,
+    @Args('quotaOverride', { type: () => Float, nullable: true }) quotaOverride?: number,
   ): Promise<WatchStockExecutionPreviewResultType> {
-    return this.tradingOrchestrator.previewWatchStockExecution(watchStockId);
+    return this.tradingOrchestrator.previewWatchStockExecution(watchStockId, quotaOverride ?? undefined);
   }
 
   @Mutation(() => WatchStockType)
