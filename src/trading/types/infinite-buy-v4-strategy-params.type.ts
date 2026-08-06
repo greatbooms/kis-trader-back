@@ -19,6 +19,8 @@ export interface InfiniteBuyV4Params {
   finalTargetPct?: number;
   /** 첫 매수 LOC 마크업 비율. 기본 0.12 */
   firstBuyMarkupPct?: number;
+  /** 첫 매수를 제외한 BUY 지정가의 현재가 대비 최대 프리미엄. 기본 0.10 */
+  maxBuyPremiumPct?: number;
   /** 사다리 할인율 단계 (기준가 대비 비율). 기본 [0.05, 0.10, 0.15] */
   ladderStepsPct?: number[];
   /** 사이클 종료 시 잔금 전체를 새 원금으로 사용(복리, true 기본) / 원금 초과분 제외(단리, false) */

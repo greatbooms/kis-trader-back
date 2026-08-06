@@ -29,6 +29,7 @@ export const DEFAULT_STAR_BASE_PCT_BY_STOCK: Record<string, number> = {
   SOXL: 20,
 };
 const DEFAULT_FIRST_BUY_MARKUP_PCT = 0.12;
+const DEFAULT_MAX_BUY_PREMIUM_PCT = 0.1;
 const DEFAULT_LADDER_STEPS_PCT = [0.05, 0.1, 0.15];
 const MAX_RECENT_CLOSES = 5;
 const MIN_RECENT_CLOSES_FOR_REVERSE = 3;
@@ -45,6 +46,7 @@ interface ResolvedCoefficients {
   starBasePct: number;
   finalTargetPct: number;
   firstBuyMarkupPct: number;
+  maxBuyPremiumPct: number;
   ladderStepsPct: number[];
   compoundMode: boolean;
 }
@@ -212,7 +214,14 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     const built = mode === 'REVERSE'
       ? (justEnteredReverse
         ? this.buildReverseFirstDaySignals(ctx, N, holdQty, curPrice)
-        : this.buildReverseOngoingSignals(ctx, N, cashRemaining, holdQty, recentCloses))
+        : this.buildReverseOngoingSignals(
+          ctx,
+          N,
+          cashRemaining,
+          holdQty,
+          recentCloses,
+          coeff.maxBuyPremiumPct,
+        ))
       : this.buildNormalSignals(ctx, coeff, T, N, cashRemaining, avgPrice, holdQty, curPrice);
 
     skipReasons.push(...built.skipReasons);
@@ -241,6 +250,9 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
       firstBuyMarkupPct: Number.isFinite(v4.firstBuyMarkupPct)
         ? (v4.firstBuyMarkupPct as number)
         : DEFAULT_FIRST_BUY_MARKUP_PCT,
+      maxBuyPremiumPct: Number.isFinite(v4.maxBuyPremiumPct)
+        ? (v4.maxBuyPremiumPct as number)
+        : DEFAULT_MAX_BUY_PREMIUM_PCT,
       ladderStepsPct: Array.isArray(v4.ladderStepsPct) && v4.ladderStepsPct.length > 0
         ? v4.ladderStepsPct
         : DEFAULT_LADDER_STEPS_PCT,
@@ -258,18 +270,41 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     return [...recentCloses, { date: evalDate, close: prevClose as number }].slice(-MAX_RECENT_CLOSES);
   }
 
-  private buildBuySignal(ctx: StockStrategyContext, quantity: number, price: number, phase: string): TradingSignal {
+  private buildBuySignal(
+    ctx: StockStrategyContext,
+    quantity: number,
+    price: number,
+    phase: string,
+    maxBuyPremiumPct: number,
+  ): TradingSignal {
     const { watchStock } = ctx;
+    const capPrice = roundToCent(ctx.price.currentPrice * (1 + maxBuyPremiumPct));
+    // 첫 매수는 원본 V4의 "사실상 무조건 체결" 의도를 보존하고, 보유 중 생성되는 BUY만 상한 적용한다.
+    const clampedPrice = phase !== 'v4-first-buy' && ctx.price.currentPrice > 0
+      ? Math.min(price, capPrice)
+      : price;
+    const priceClamp = clampedPrice < price
+      ? { originalPrice: price, clampedPrice, capPrice, maxBuyPremiumPct }
+      : undefined;
     return {
       market: watchStock.market,
       exchangeCode: watchStock.exchangeCode,
       stockCode: watchStock.stockCode,
       side: 'BUY',
       quantity,
-      price,
-      reason: `V4 ${phase}: ${quantity}주 @ ${price}`,
+      price: clampedPrice,
+      reason: `V4 ${phase}: ${quantity}주 @ ${clampedPrice}`,
       orderDivision: LOC_ORDER_DIVISION,
-      metadata: { phase, fillModel: 'loc', v4AttemptAmount: roundToCent(price * quantity) },
+      metadata: {
+        phase,
+        fillModel: 'loc',
+        // quantity는 항상 clamp 이전(D 기반) price로 산정되므로, T 회계 분모도 그 price
+        // 기준으로 유지한다 — clampedPrice로 계산하면 clamp가 발동한 날 실제 투입액이
+        // D보다 작아도 전량 체결 시 ΔT가 여전히 +1(전체 회차)로 잡혀 T가 실제 자금
+        // 투입 속도보다 빨리 진행된다.
+        v4AttemptAmount: roundToCent(price * quantity),
+        ...(priceClamp ? { v4BuyPriceClamp: priceClamp } : {}),
+      },
     };
   }
 
@@ -278,14 +313,23 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
    * 주입한다 — T 회계(§3) 분모는 leg 자체(v4AttemptAmount)가 아니라 그날 매수 시도
    * 총액이어야 "당일 1회매수분 전량 체결 = +1" 규칙과 동치가 된다 (분할 시 leg별로
    * 독립 집계하면 전량 체결 시 ΔT가 leg 수만큼 배로 늘어나는 오류가 생긴다).
+   * leg별 v4AttemptAmount(= clamp 이전 price 기준)를 그대로 합산 — clampedPrice(신호
+   * 제출가)로 다시 계산하면 위 clamp-vs-T 회계 불일치가 재발한다.
    */
-  private injectDayBuyAttemptTotal(signals: TradingSignal[]): void {
+  private injectDayBuyAttemptTotal(signals: TradingSignal[], details: Record<string, any>): void {
     const buySignals = signals.filter((s) => s.side === 'BUY');
     if (buySignals.length === 0) return;
-    const total = roundToCent(buySignals.reduce((sum, s) => sum + (s.price ?? 0) * s.quantity, 0));
+    const total = roundToCent(
+      buySignals.reduce((sum, s) => sum + Number(s.metadata?.v4AttemptAmount ?? (s.price ?? 0) * s.quantity), 0),
+    );
+    const priceClamps: Record<string, any>[] = [];
     for (const s of buySignals) {
       s.metadata = { ...s.metadata, v4DayBuyAttemptTotal: total };
+      if (s.metadata.v4BuyPriceClamp) {
+        priceClamps.push({ phase: s.metadata.phase, ...s.metadata.v4BuyPriceClamp });
+      }
     }
+    if (priceClamps.length > 0) details.v4BuyPriceClamps = priceClamps;
   }
 
   private buildSellSignal(
@@ -327,9 +371,6 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     const hasPosition = holdQty > 0;
 
     const rawD = calculateDailyBuyBudget({ cashRemaining, N, T });
-    // ponytail: KIS 해외주문 허용 가격범위 clamp 미구현 — ctx에 가격밴드 데이터가 없음(§4.3).
-    // 실주문이 범위를 벗어나면 KisOverseasService가 거부하며 로그로 드러난다.
-    // 필요해지면 ctx에 priceBand를 추가하고 여기서 clamp.
     const D = Math.max(0, Math.min(rawD, ctx.buyableAmount));
     details.dailyBuyBudget = rawD;
     details.dailyBuyBudgetCapped = D;
@@ -349,7 +390,13 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
         const firstBuyPrice = roundToCent(curPrice * (1 + coeff.firstBuyMarkupPct));
         const firstBuyQty = Math.floor(D / firstBuyPrice);
         if (firstBuyQty > 0) {
-          signals.push(this.buildBuySignal(ctx, firstBuyQty, firstBuyPrice, 'v4-first-buy'));
+          signals.push(this.buildBuySignal(
+            ctx,
+            firstBuyQty,
+            firstBuyPrice,
+            'v4-first-buy',
+            coeff.maxBuyPremiumPct,
+          ));
           mainBudgetSpent += firstBuyQty * firstBuyPrice;
         }
         ladderBasePrice = firstBuyPrice;
@@ -358,13 +405,13 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
         const avgLegPrice = roundToCent(avgPrice);
         const avgLegQty = Math.floor(halfD / avgLegPrice);
         if (avgLegQty > 0) {
-          signals.push(this.buildBuySignal(ctx, avgLegQty, avgLegPrice, 'v4-avg-buy'));
+          signals.push(this.buildBuySignal(ctx, avgLegQty, avgLegPrice, 'v4-avg-buy', coeff.maxBuyPremiumPct));
           mainBudgetSpent += avgLegQty * avgLegPrice;
         }
         const starLegPrice = star!.buyLimitPrice;
         const starLegQty = starLegPrice > 0 ? Math.floor(halfD / starLegPrice) : 0;
         if (starLegQty > 0) {
-          signals.push(this.buildBuySignal(ctx, starLegQty, starLegPrice, 'v4-star-buy'));
+          signals.push(this.buildBuySignal(ctx, starLegQty, starLegPrice, 'v4-star-buy', coeff.maxBuyPremiumPct));
           mainBudgetSpent += starLegQty * starLegPrice;
         }
         ladderBasePrice = starLegPrice > 0 ? Math.min(avgLegPrice, starLegPrice) : avgLegPrice;
@@ -372,7 +419,7 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
         const starLegPrice = star!.buyLimitPrice;
         const starLegQty = starLegPrice > 0 ? Math.floor(D / starLegPrice) : 0;
         if (starLegQty > 0) {
-          signals.push(this.buildBuySignal(ctx, starLegQty, starLegPrice, 'v4-star-buy'));
+          signals.push(this.buildBuySignal(ctx, starLegQty, starLegPrice, 'v4-star-buy', coeff.maxBuyPremiumPct));
           mainBudgetSpent += starLegQty * starLegPrice;
         }
         ladderBasePrice = starLegPrice;
@@ -386,7 +433,13 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
           steps: coeff.ladderStepsPct,
         });
         for (const order of ladderOrders) {
-          signals.push(this.buildBuySignal(ctx, order.quantity, order.price, 'v4-ladder-buy'));
+          signals.push(this.buildBuySignal(
+            ctx,
+            order.quantity,
+            order.price,
+            'v4-ladder-buy',
+            coeff.maxBuyPremiumPct,
+          ));
         }
         details.ladderOrders = ladderOrders;
       }
@@ -429,7 +482,7 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
       }
     }
 
-    this.injectDayBuyAttemptTotal(signals);
+    this.injectDayBuyAttemptTotal(signals, details);
     return { signals, skipReasons, details };
   }
 
@@ -462,6 +515,7 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     cashRemaining: number,
     holdQty: number,
     recentCloses: InfiniteBuyV4RecentClose[],
+    maxBuyPremiumPct: number,
   ): BuildResult {
     const signals: TradingSignal[] = [];
     const skipReasons: string[] = [];
@@ -497,14 +551,20 @@ export class InfiniteBuyV4Strategy implements PerStockTradingStrategy {
     const reverseBuyPrice = roundToCent(reverseStarPrice - 0.01);
     const reverseBuyQty = reverseBuyPrice > 0 ? Math.floor(cappedBuyAmount / reverseBuyPrice) : 0;
     if (reverseBuyQty > 0) {
-      signals.push(this.buildBuySignal(ctx, reverseBuyQty, reverseBuyPrice, 'v4-reverse-buy'));
+      signals.push(this.buildBuySignal(
+        ctx,
+        reverseBuyQty,
+        reverseBuyPrice,
+        'v4-reverse-buy',
+        maxBuyPremiumPct,
+      ));
     }
 
     if (signals.length === 0) {
       skipReasons.push('리버스 모드: 매도/매수 수량 모두 0 (잔금 또는 보유수량 부족)');
     }
 
-    this.injectDayBuyAttemptTotal(signals);
+    this.injectDayBuyAttemptTotal(signals, details);
     return { signals, skipReasons, details };
   }
 }

@@ -322,9 +322,10 @@ export class KisOrderHistoryService {
   }
 
   private rejectedReason(row: Record<string, any>): string | undefined {
-    return [row.rjct_rson_name, row.rjct_rson]
-      .find((value) => typeof value === 'string' && value.trim().length > 0)
-      ?.trim();
+    const name = typeof row.rjct_rson_name === 'string' ? row.rjct_rson_name.trim() : '';
+    const code = typeof row.rjct_rson === 'string' ? row.rjct_rson.trim() : '';
+    if (name && code) return `${name} (rjct_rson=${code})`;
+    return name || code || undefined;
   }
 
   private assertValidKisCalendarDate(value: string): void {

@@ -200,6 +200,57 @@ describe('KisOrderHistoryService', () => {
   });
 
   it.each([
+    [
+      'both name and code',
+      { rjct_rson_name: 'KIS: Too Ag', rjct_rson: 'ORDER_PRICE_TOO_AGGRESSIVE' },
+      'KIS: Too Ag (rjct_rson=ORDER_PRICE_TOO_AGGRESSIVE)',
+      'REJECTED',
+    ],
+    ['only name', { rjct_rson_name: '주문 거부' }, '주문 거부', 'REJECTED'],
+    ['only code', { rjct_rson: 'PRICE_BAND' }, 'PRICE_BAND', 'REJECTED'],
+    ['neither', {}, undefined, 'UNKNOWN'],
+  ])('preserves rejection reason when %s is present', async (
+    _case,
+    rejectionFields,
+    expectedReason,
+    expectedState,
+  ) => {
+    const service = new KisOrderHistoryService(
+      mockKisBase as unknown as KisBaseService,
+      buildConfigService('prod'),
+      pagination,
+    );
+    mockKisBase.getWithMetadata.mockResolvedValue({
+      data: {
+        output: [{
+          odno: '3100',
+          pdno: 'SOXL',
+          sll_buy_dvsn_cd: '02',
+          ft_ord_qty: '1',
+          ft_ccld_qty: '0',
+          nccs_qty: '1',
+          ovrs_excg_cd: 'NASD',
+          dmst_ord_dt: '20260805',
+          thco_ord_tmd: '120000',
+          ...rejectionFields,
+        }],
+        ctx_area_fk200: '',
+        ctx_area_nk200: '',
+      },
+      trCont: 'D',
+    });
+
+    const [result] = await service.getOrderExecutions(
+      'OVERSEAS',
+      '20260805',
+      '20260805',
+    );
+
+    expect(result.rejectedReason).toBe(expectedReason);
+    expect(result.rejectionState).toBe(expectedState);
+  });
+
+  it.each([
     ['20260230', '20260714'],
     ['20260714', '20260732'],
   ])('rejects an invalid overseas KST calendar range (%s - %s)', async (
