@@ -10,6 +10,7 @@ import { TradingBrokerOrderSubmissionService } from './trading-broker-order-subm
 import { TradingLiveSwitchService } from './trading-live-switch.service';
 import { TradingOrderCancellationService } from './trading-order-cancellation.service';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
+import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { TradingSellApprovalNotificationService } from './trading-sell-approval-notification.service';
 import { TradingSellApprovalWorkflowService } from './trading-sell-approval-workflow.service';
@@ -43,6 +44,14 @@ describe('TradingModule', () => {
     ]));
     expect(exports).not.toContain(TradingBrokerOrderSubmissionService);
     expect(exports).not.toContain(TradingSellApprovalNotificationService);
+  });
+
+  it('registers the automatic order failure notifier as a local provider', () => {
+    const providers = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, TradingModule) || [];
+    const exports = Reflect.getMetadata(MODULE_METADATA.EXPORTS, TradingModule) || [];
+
+    expect(providers).toContain(TradingOrderFailureNotificationService);
+    expect(exports).not.toContain(TradingOrderFailureNotificationService);
   });
 
   it('keeps NotificationModule independent and exports only SlackService', () => {

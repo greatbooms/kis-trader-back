@@ -97,29 +97,29 @@ export class TradingScheduler implements OnModuleInit {
     this.logger.log('Trading overseas-us cron registered: every 1min 22:00-06:59 KST (DST aware)');
 
     // 해외 미체결 주문 동기화: 매 15초
-    const asiaOrderSyncJob = this.createRecoveryGuardedJob('*/15 * 9-16 * * 1-5', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
+    const asiaOrderSyncJob = this.createRecoveryGuardedJob('10,25,40,55 * 9-16 * * 1-5', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-asia-order-sync', asiaOrderSyncJob);
     asiaOrderSyncJob.start();
 
-    const usNightOrderSyncJob = this.createRecoveryGuardedJob('*/15 * 22-23 * * 1-5', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
+    const usNightOrderSyncJob = this.createRecoveryGuardedJob('10,25,40,55 * 22-23 * * 1-5', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-us-night-order-sync', usNightOrderSyncJob);
     usNightOrderSyncJob.start();
 
-    const usMorningOrderSyncJob = this.createRecoveryGuardedJob('*/15 * 0-6 * * 2-6', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
+    const usMorningOrderSyncJob = this.createRecoveryGuardedJob('10,25,40,55 * 0-6 * * 2-6', () => this.marketStateSync.syncOverseasOpenOrders(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-order-sync', usMorningOrderSyncJob);
     usMorningOrderSyncJob.start();
     this.logger.log('Trading overseas order sync cron registered: every 15s during overseas sessions');
 
     // 해외 포트폴리오 동기화: 매 10분
-    const asiaPortfolioSyncJob = this.createRecoveryGuardedJob('*/10 9-16 * * 1-5', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
+    const asiaPortfolioSyncJob = this.createRecoveryGuardedJob('20 */10 9-16 * * 1-5', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-asia-portfolio-sync', asiaPortfolioSyncJob);
     asiaPortfolioSyncJob.start();
 
-    const usNightPortfolioSyncJob = this.createRecoveryGuardedJob('*/10 22-23 * * 1-5', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
+    const usNightPortfolioSyncJob = this.createRecoveryGuardedJob('20 */10 22-23 * * 1-5', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-us-night-portfolio-sync', usNightPortfolioSyncJob);
     usNightPortfolioSyncJob.start();
 
-    const usMorningPortfolioSyncJob = this.createRecoveryGuardedJob('*/10 0-6 * * 2-6', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
+    const usMorningPortfolioSyncJob = this.createRecoveryGuardedJob('20 */10 0-6 * * 2-6', () => this.marketStateSync.syncOverseasPortfolioState(orchestratorBusy));
     this.schedulerRegistry.addCronJob('trading-overseas-us-morning-portfolio-sync', usMorningPortfolioSyncJob);
     usMorningPortfolioSyncJob.start();
     this.logger.log('Trading overseas portfolio sync cron registered: every 10min during overseas sessions');

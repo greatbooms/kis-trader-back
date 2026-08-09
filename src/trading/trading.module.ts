@@ -42,6 +42,7 @@ import { TradingBrokerOrderRecoveryResolver } from './trading-broker-order-recov
 import { TradingBrokerRecoverySlackAlertService } from './trading-broker-recovery-slack-alert.service';
 import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingSellApprovalNotificationService } from './trading-sell-approval-notification.service';
+import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
 @Module({
@@ -53,6 +54,7 @@ import { TradingAccountCashSyncService } from './trading-account-cash-sync.servi
     TradingSellApprovalService,
     TradingSellApprovalWorkflowService,
     TradingSellApprovalNotificationService,
+    TradingOrderFailureNotificationService,
     TradingAccountCashSyncService,
     TradingOrderReconciliationService,
     OrderSyncService,

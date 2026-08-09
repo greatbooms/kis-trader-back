@@ -33,7 +33,7 @@ export class KisBaseService {
     private configService: ConfigService,
   ) {
     const env = this.configService.get<string>('kis.env');
-    this.rateLimitMs = env === 'prod' ? 67 : 300; // prod: 15 req/s
+    this.rateLimitMs = env === 'prod' ? 100 : 300;
   }
 
   private rateLimit(): Promise<void> {
@@ -95,7 +95,6 @@ export class KisBaseService {
     params: Record<string, string>,
     additionalHeaders?: Record<string, string>,
   ): Promise<KisResponseWithMetadata<KisApiResponse<T>>> {
-    await this.rateLimit();
     const url = `${this.kisAuthService.getBaseUrl()}${path}`;
     const headers = await this.buildHeaders(trId, additionalHeaders);
 
@@ -110,6 +109,7 @@ export class KisBaseService {
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
+        await this.rateLimit();
         const response = await axios.get(url, config);
         this.checkError(response.data, path, trId);
         const trCont = this.readTrCont(response.headers);
@@ -142,7 +142,6 @@ export class KisBaseService {
     let url: string;
     let config: AxiosRequestConfig;
     try {
-      await this.rateLimit();
       url = `${this.kisAuthService.getBaseUrl()}${path}`;
       const headers = await this.buildHeaders(trId, additionalHeaders);
 
@@ -159,6 +158,7 @@ export class KisBaseService {
       throw new KisMutationError('BUSINESS_REJECTION', message);
     }
 
+    await this.rateLimit();
     let response;
     try {
       response = await axios.post(url, body, config);
