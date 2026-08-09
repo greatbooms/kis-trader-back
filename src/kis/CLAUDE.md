@@ -24,7 +24,8 @@
 
 ## 주의사항 / 비자명한 규칙
 - **Rate limit는 `kis-base.service.ts`가 일괄 관리**: 직렬화된 Promise 큐. 호출자에서 별도 throttle 추가 금지 (이중 지연)
-  - prod: 67ms (~15 req/s) / paper: 300ms (~3 req/s)
+  - **실전 요청 간격**: prod의 실제 axios 시작은 공용 FIFO에서 최소 100ms 간격, paper는 300ms 간격. 인증 헤더/token 준비가 끝난 뒤 gate를 통과하며 GET retry도 매 시도마다 gate를 다시 거친다.
+- **주문 순서 보존**: GET/POST 우선순위 큐를 두지 않는다. 주문 필수 조회 → broker context/live switch 검증 → 단일 POST → reconciliation 순서를 유지한다.
 - **변경 POST는 단 한 번만 전송**: 주문/취소 POST는 네트워크 오류나 5xx에도 자동 재시도하지 않는다. 명시적인 KIS 거절 또는 주문 HTTP 호출 전 결정적 설정 실패는 `REJECTED`, 전송 오류·HTTP 오류·응답 모순/손상은 `UNKNOWN`으로 분류한다. 사전 설정 실패 메시지는 원인을 포함하지 않고 정제하며 POST는 0회여야 한다.
 - 프로세스 재시작 시 남은 `SUBMITTING`도 KIS POST를 다시 호출하지 않는다. 시작 인계가 `SUBMISSION_UNKNOWN`/취소 `UNKNOWN`으로 보존하고 이후 복구는 완전한 주문 이력 GET만 사용한다.
 - **주문 접수 검증**: `ACCEPTED`는 `rt_cd=0`, 공백이 아닌 `ODNO`, 호출 시작 시각과 10분 이내인 유효한 브로커시각이 모두 필요하다. 6자리 시각은 KST 기준 D-1/D/D+1 중 가장 가까운 날짜를 선택하고, 14자리는 명시 날짜를 검증한다.

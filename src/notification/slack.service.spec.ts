@@ -1,9 +1,25 @@
 import { SlackService } from './slack.service';
+import { OrderFailureAlertContext } from './types/order-failure-alert-context.type';
 
 describe('SlackService', () => {
   let service: SlackService;
   let postMessage: jest.Mock;
   let updateMessage: jest.Mock;
+  const failureContext: OrderFailureAlertContext = {
+    market: 'OVERSEAS',
+    exchangeCode: 'NASD',
+    stockCode: 'TQQQ',
+    stockName: 'PROSHARES QQQ 3X',
+    side: 'BUY',
+    quantity: 2,
+    orderType: 'LIMIT',
+    price: 74.43,
+    strategyName: 'infinite-buy',
+    reason: 'Buy1: T=29.3',
+    stage: 'SUBMISSION',
+    brokerMessage: 'EGW00201 - 초당 거래건수를 초과하였습니다.',
+    occurredAt: new Date('2026-08-07T06:30:00.879Z'),
+  };
 
   beforeEach(() => {
     const configService = {
@@ -230,5 +246,75 @@ describe('SlackService', () => {
     expect(text).toContain('broker-safe-order');
     expect(JSON.stringify(payload)).not.toContain('account');
     expect(JSON.stringify(payload)).not.toContain('credential');
+  });
+
+  it('자동 주문 실패 알림은 재시도 금지와 안전한 주문 정보만 표시한다', async () => {
+    await service.sendOrderFailureAlert(failureContext);
+
+    const payload = postMessage.mock.calls[0][0];
+    const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('자동 주문 실패');
+    expect(serialized).toContain('TQQQ');
+    expect(serialized).toContain('BUY');
+    expect(serialized).toContain('2주');
+    expect(serialized).toContain('74.43');
+    expect(serialized).toContain('EGW00201');
+    expect(serialized).toContain('자동 재시도 없음');
+    expect(serialized).toContain('*주문번호:* 없음');
+    expect(serialized).not.toContain('accountHash');
+    expect(serialized).not.toContain('access-token');
+  });
+
+  it('자동 주문 실패 알림은 free-text 사유와 브로커 메시지의 민감값을 가린다', async () => {
+    const accountHash = 'a'.repeat(64);
+
+    await service.sendOrderFailureAlert({
+      ...failureContext,
+      reason: 'Bearer bearer-secret access-token=access-token-secret account=1234567890',
+      brokerMessage: `EGW00201 - 초당 거래건수를 초과하였습니다. api-key: api-key-secret app_secret=app-secret-value hash=${accountHash}`,
+    });
+
+    const serialized = JSON.stringify(postMessage.mock.calls[0][0]);
+    expect(serialized).toContain('EGW00201 - 초당 거래건수를 초과하였습니다.');
+    expect(serialized).toContain('Bearer [REDACTED]');
+    expect(serialized).toContain('access-token=[REDACTED]');
+    expect(serialized).toContain('api-key:[REDACTED]');
+    expect(serialized).toContain('app_secret=[REDACTED]');
+    expect(serialized).not.toContain('bearer-secret');
+    expect(serialized).not.toContain('access-token-secret');
+    expect(serialized).not.toContain('api-key-secret');
+    expect(serialized).not.toContain('app-secret-value');
+    expect(serialized).not.toContain('1234567890');
+    expect(serialized).not.toContain(accountHash);
+  });
+
+  it('KIS appkey/appsecret과 JSON 형식의 비밀값을 가린다', async () => {
+    await service.sendOrderFailureAlert({
+      ...failureContext,
+      reason: 'appkey=KIS_APP_KEY_SECRET appsecret:KIS_APP_SECRET_SECRET',
+      brokerMessage: '{"appkey":"JSON_KEY_SECRET","appsecret":"JSON_SECRET_SECRET"}',
+    });
+
+    const serialized = JSON.stringify(postMessage.mock.calls[0][0]);
+    expect(serialized).toContain('appkey=[REDACTED]');
+    expect(serialized).toContain('appsecret:[REDACTED]');
+    expect(serialized).not.toContain('KIS_APP_KEY_SECRET');
+    expect(serialized).not.toContain('KIS_APP_SECRET_SECRET');
+    expect(serialized).not.toContain('JSON_KEY_SECRET');
+    expect(serialized).not.toContain('JSON_SECRET_SECRET');
+  });
+
+  it('does not post an order failure alert while Slack is disconnected', async () => {
+    jest.spyOn(service as any, 'ensureConnected').mockResolvedValue(false);
+
+    await service.sendOrderFailureAlert(failureContext);
+
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('absorbs an order failure alert send error', async () => {
+    postMessage.mockRejectedValueOnce(new Error('slack down'));
+
+    await expect(service.sendOrderFailureAlert(failureContext)).resolves.toBeUndefined();
   });
 });

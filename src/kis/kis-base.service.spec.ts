@@ -179,9 +179,16 @@ describe('KisBaseService', () => {
   });
 
   it('keeps bounded retries for GET', async () => {
+    const starts: number[] = [];
     mockedAxios.get
-      .mockRejectedValueOnce(Object.assign(new Error('reset'), { code: 'ECONNRESET' }))
-      .mockResolvedValueOnce({ data: { rt_cd: '0', output: [] }, headers: {} });
+      .mockImplementationOnce(async () => {
+        starts.push(Date.now());
+        throw Object.assign(new Error('reset'), { code: 'ECONNRESET' });
+      })
+      .mockImplementationOnce(async () => {
+        starts.push(Date.now());
+        return { data: { rt_cd: '0', output: [] }, headers: {} } as never;
+      });
 
     const resultPromise = service.get('/history', 'TTTC0081R', {});
     await jest.runAllTimersAsync();
@@ -189,6 +196,76 @@ describe('KisBaseService', () => {
 
     expect(result).toEqual({ rt_cd: '0', output: [] });
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(600);
+  });
+
+  it('spaces actual prod HTTP starts by 100ms after shared token setup completes', async () => {
+    let releaseToken!: (token: string) => void;
+    const tokenReady = new Promise<string>((resolve) => {
+      releaseToken = resolve;
+    });
+    mockAuthService.getAccessToken.mockReturnValue(tokenReady);
+
+    const starts: number[] = [];
+    mockedAxios.get.mockImplementation(async () => {
+      starts.push(Date.now());
+      return { data: { rt_cd: '0', output: [] }, headers: {} } as never;
+    });
+
+    const first = service.get('/price-a', 'TR-A', {});
+    const second = service.get('/price-b', 'TR-B', {});
+    releaseToken('access-token');
+
+    await jest.advanceTimersByTimeAsync(99);
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(99);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+
+    await Promise.all([first, second]);
+    expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(100);
+  });
+
+  it('preserves FIFO order across GET and POST', async () => {
+    const starts: string[] = [];
+    mockedAxios.get.mockImplementation(async () => {
+      starts.push('GET');
+      return { data: { rt_cd: '0', output: [] }, headers: {} } as never;
+    });
+    mockedAxios.post.mockImplementation(async () => {
+      starts.push('POST');
+      return { data: { rt_cd: '0', output: {} } } as never;
+    });
+
+    const getPromise = service.get('/price', 'TR-GET', {});
+    const postPromise = service.post('/order', 'TR-POST', {});
+    await jest.runAllTimersAsync();
+    await Promise.all([getPromise, postPromise]);
+
+    expect(starts).toEqual(['GET', 'POST']);
+  });
+
+  it('keeps paper HTTP starts 300ms apart', async () => {
+    const paperService = new KisBaseService(
+      mockAuthService as unknown as KisAuthService,
+      { get: jest.fn().mockReturnValue('paper') } as unknown as ConfigService,
+    );
+    const starts: number[] = [];
+    mockedAxios.get.mockImplementation(async () => {
+      starts.push(Date.now());
+      return { data: { rt_cd: '0', output: [] }, headers: {} } as never;
+    });
+
+    const first = paperService.get('/paper-a', 'TR-A', {});
+    const second = paperService.get('/paper-b', 'TR-B', {});
+    await jest.advanceTimersByTimeAsync(599);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await Promise.all([first, second]);
+
+    expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(300);
   });
 
   it('returns GET response metadata without changing the response body', async () => {

@@ -13,6 +13,7 @@ import { TradingBrokerContextService } from './trading-broker-context.service';
 import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingBrokerOrderRecoveryService } from './trading-broker-order-recovery.service';
 import { TradingLiveSwitchService } from './trading-live-switch.service';
+import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
 import { TradingOrderGuardService } from './trading-order-guard.service';
 import { TradingPositionRefreshService } from './trading-position-refresh.service';
 import { BrokerContext, StockStrategyContext, TradingSignal } from './types';
@@ -29,6 +30,7 @@ export class TradingOrderExecutionService {
     private readonly orderGuard: TradingOrderGuardService,
     private readonly positionRefresh: TradingPositionRefreshService,
     private readonly recoveryService: TradingBrokerOrderRecoveryService,
+    private readonly failureNotifier: TradingOrderFailureNotificationService,
   ) {}
 
   async execute(
@@ -180,7 +182,7 @@ export class TradingOrderExecutionService {
     }
 
     if (result.outcome === 'REJECTED') {
-      await this.prisma.tradeRecord.updateMany({
+      const failed = await this.prisma.tradeRecord.updateMany({
         where: {
           id: record.id,
           status: OrderStatus.SUBMITTING,
@@ -192,6 +194,9 @@ export class TradingOrderExecutionService {
         },
       });
       await this.logOrderOutcome(record.id, signal, ctx, result);
+      if (failed.count > 0) {
+        await this.failureNotifier.notify(record.id, 'SUBMISSION');
+      }
       return false;
     }
 

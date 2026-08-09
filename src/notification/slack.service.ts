@@ -4,6 +4,7 @@ import { App, LogLevel } from '@slack/bolt';
 import { KnownBlock } from '@slack/types';
 import { EXCHANGE_CURRENCY } from '../kis/types/kis-config.types';
 import { BrokerOrderPersistenceWarning } from './types/broker-order-persistence-warning.type';
+import { OrderFailureAlertContext } from './types/order-failure-alert-context.type';
 import { SellApprovalMessageStatus } from './types/sell-approval-message-status.type';
 import {
   PositionInfo,
@@ -211,6 +212,24 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     return this.connect();
   }
 
+  private redactOrderFailureAlertText(value?: string): string {
+    if (!value) return '없음';
+
+    return value
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/gi, 'Bearer [REDACTED]')
+      .replace(
+        /(["'])(access[-_ ]?token|api[-_ ]?key|app[-_ ]?(?:key|secret))\1\s*([:=])\s*(["'])[^"']*\4/gi,
+        '$1$2$1$3$4[REDACTED]$4',
+      )
+      .replace(
+        /\b(access[-_ ]?token|api[-_ ]?key|app[-_ ]?(?:key|secret))\s*([:=])\s*\S+/gi,
+        '$1$2[REDACTED]',
+      )
+      .replace(/\b[a-f0-9]{64}\b/gi, '[REDACTED]')
+      .replace(/\b\d{8,16}\b/g, '[REDACTED]')
+      .replace(/\b\d{2,4}(?:-\d{2,4}){2,4}\b/g, '[REDACTED]');
+  }
+
   // --- Alert methods ---
 
   async sendTradeAlert(ctx: TradeAlertContext): Promise<void> {
@@ -257,6 +276,42 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (error) {
       this.logger.error(`Failed to send broker order persistence warning: ${error.message}`);
+      this.handleSendError(error);
+    }
+  }
+
+  async sendOrderFailureAlert(context: OrderFailureAlertContext): Promise<void> {
+    if (!await this.ensureConnected()) return;
+
+    try {
+      const occurredAtKst = new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+        hour12: false,
+      }).format(context.occurredAt);
+      const lines = [
+        `*종목:* ${context.stockName} (${context.exchangeCode}:${context.stockCode})`,
+        `*주문:* ${context.side} ${context.quantity}주 / ${context.orderType} / ${context.price}`,
+        `*전략:* ${context.strategyName}`,
+        `*사유:* ${this.redactOrderFailureAlertText(context.reason)}`,
+        `*실패 단계:* ${context.stage}`,
+        `*주문번호:* ${context.orderNo || '없음'}`,
+        `*브로커 메시지:* ${this.redactOrderFailureAlertText(context.brokerMessage)}`,
+        '*조치:* 자동 재시도 없음',
+        `*발생 시각:* ${occurredAtKst} KST`,
+      ].join('\n');
+
+      await this.app!.client.chat.postMessage({
+        channel: this.channel,
+        blocks: [{
+          type: 'section',
+          text: { type: 'mrkdwn', text: `:rotating_light: *자동 주문 실패*\n${lines}` },
+        }],
+        text: `자동 주문 실패 | ${context.exchangeCode}:${context.stockCode} ${context.side}`,
+      });
+    } catch (error) {
+      this.logger.warn(`Failed to send automatic order failure alert: ${error.message}`);
       this.handleSendError(error);
     }
   }

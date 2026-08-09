@@ -112,6 +112,42 @@ describe('TradingScheduler', () => {
     startSpy.mockRestore();
   });
 
+  it('stagger overseas background jobs away from the trading tick', async () => {
+    const startSpy = jest.spyOn(CronJob.prototype, 'start').mockImplementation(() => undefined as any);
+    const enabledConfigService = {
+      get: jest.fn((key: string) => key === 'trading.enabled' ? true : undefined),
+    };
+    scheduler = new TradingScheduler(
+      mockOrchestrator as any,
+      mockMarketStateSync as any,
+      mockRecoveryService as any,
+      enabledConfigService as any,
+      mockSchedulerRegistry as any,
+    );
+
+    await scheduler.onModuleInit();
+    const jobs = new Map<string, CronJob>(
+      mockSchedulerRegistry.addCronJob.mock.calls.map(([name, job]) => [name, job]),
+    );
+
+    expect((jobs.get('trading-overseas-asia') as any).cronTime.source)
+      .toBe('*/1 9-16 * * 1-5');
+    expect((jobs.get('trading-overseas-asia-order-sync') as any).cronTime.source)
+      .toBe('10,25,40,55 * 9-16 * * 1-5');
+    expect((jobs.get('trading-overseas-asia-portfolio-sync') as any).cronTime.source)
+      .toBe('20 */10 9-16 * * 1-5');
+    expect((jobs.get('trading-overseas-us-night-order-sync') as any).cronTime.source)
+      .toBe('10,25,40,55 * 22-23 * * 1-5');
+    expect((jobs.get('trading-overseas-us-morning-order-sync') as any).cronTime.source)
+      .toBe('10,25,40,55 * 0-6 * * 2-6');
+    expect((jobs.get('trading-overseas-us-night-portfolio-sync') as any).cronTime.source)
+      .toBe('20 */10 22-23 * * 1-5');
+    expect((jobs.get('trading-overseas-us-morning-portfolio-sync') as any).cronTime.source)
+      .toBe('20 */10 0-6 * * 2-6');
+
+    startSpy.mockRestore();
+  });
+
   it('does not execute a registered trading callback before cold-start recovery is ready', async () => {
     const startSpy = jest.spyOn(CronJob.prototype, 'start').mockImplementation(() => undefined as any);
     let releaseRecovery: ((value: {

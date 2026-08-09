@@ -59,6 +59,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 - **체결 후 예수금 동기화**: `OrderSyncService`는 reconciliation에서 새 체결이 확인된 경우에만 `TradingAccountCashSyncService.refreshMarketCash`를 시장당 한 번 호출한다. KIS/캐시 실패는 체결 확정을 되돌리지 않으며, 캐시 병합은 `account_status_cache` advisory transaction lock 아래 반대 시장 항목을 보존한다.
 - `TradingOrchestrator` → `TradingService`, `MarketStateSyncService` 주입. 반대로 `MarketStateSyncService`는 `TradingOrchestrator`를 참조하지 않음 (순환 의존성 회피)
 - **Slack 호출 게이트웨이**: 체결 알림은 `TradingOrderReconciliationService` 내부의 `reconcileOpenOrders`가 자체 호출(`notifyTradeFill` private). 승인 요청 전송은 `TradingSellApprovalService`, 승인 결과 원본 메시지 갱신은 `TradingSellApprovalNotificationService`, 불명 주문 알림/복구 표현은 `TradingBrokerRecoverySlackAlertService`/`TradingSlackRecoveryPresentationService`가 담당한다. strategy와 승인 workflow가 직접 `SlackService`를 호출하는 것은 금지한다.
+- **자동 주문 실패 Slack**: `TradingOrderFailureNotificationService`만 automatic strategy `FAILED`를 Slack 컨텍스트로 변환한다. submission/reconciliation CAS winner가 DB 확정 뒤 호출하며 UNKNOWN·CANCELLED·manual·승인 SELL은 기존 흐름을 유지한다.
 - **Slack adapter 소유권**: `TradingSlackCommandsService`, Slack 복구 authorization/presentation/actions/alert 서비스, `TradingSellApprovalWorkflowService`는 `TradingModule`의 local provider이며 export하지 않는다. `TradingModule -> NotificationModule` 단방향만 허용하고 `NotificationModule`은 Trading을 역참조하지 않는다.
 - **시작 인계 barrier**: `TradingScheduler.onModuleInit`은 `TradingBrokerOrderRecoveryService.takeOverStartupState()`를 한 번 실행한다. timestamp가 있는 제출 `SUBMITTING`은 `SUBMISSION_UNKNOWN`, 없는 제출은 감사 로그와 함께 `CANCELLED`, 취소 `SUBMITTING`은 `UNKNOWN`으로 전환하며 KIS POST는 호출하지 않는다. 모든 cron callback은 이 Promise를 기다리고 인계 실패 시 계속 차단된다. Slack에는 개별 row가 아니라 현재 unresolved 총건수만 한 번 best-effort로 알린다.
 - **`trading.enabled=false`** 이면 시작 인계는 수행하되 모든 trading cron 등록을 건너뜀 (개발/모의 환경 안전망). 인증된 Slack/웹 복구는 계속 사용할 수 있다. 직접 mutation으로 호출되는 경로(예: `manualSell`)는 별도 가드
@@ -66,6 +67,7 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
   - 국내: 매 1분 09:00-14:59 + 15:00-15:29 (장 마감 부분 분리). 미체결 주문 동기화 매 10초. 포트폴리오 동기화 매 10분
   - 해외 시간대별 비슷한 패턴 (미국 22-23 + 다음날 00-06, 아시아 09-16). 미체결 주문 동기화 매 15초, 포트폴리오 매 10분
   - 시장 레짐 감지: KR/AsiaEarly 08:50, AsiaLate 10:20, US 22:20·23:20
+- **해외 cron 초 분산**: 거래는 0초, 주문 동기화는 10/25/40/55초, 포트폴리오 동기화는 10분 주기의 20초에 시작한다. `orchestratorBusy` 가드는 그대로 유지한다.
 - **수정주가 일관성**: `MarketAnalysisService.fetchDailyPrices`로 시세 호출 시 KIS 수정주가 옵션 강제 (백테스트와 동일)
 - **In-memory 상태**:
   - `TradingOrchestrator.isDomesticRunning`/`isOverseasRunning` — 루프 중복 실행 방지 mutex

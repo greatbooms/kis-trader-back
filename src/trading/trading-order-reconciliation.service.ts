@@ -17,6 +17,7 @@ import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { OrderReconciliationResult, PositionQuantitySnapshot, TradingSignal } from './types';
 import { TradingService } from './trading.service';
 import { TradingBrokerContextService } from './trading-broker-context.service';
+import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
 
 @Injectable()
 export class TradingOrderReconciliationService {
@@ -26,6 +27,7 @@ export class TradingOrderReconciliationService {
     private prisma: PrismaService,
     private tradingService: TradingService,
     private readonly brokerContext: TradingBrokerContextService,
+    private readonly failureNotifier: TradingOrderFailureNotificationService,
     @Optional() private slackService?: SlackService,
   ) {}
 
@@ -91,7 +93,10 @@ export class TradingOrderReconciliationService {
       }
 
       if (brokerOrder) {
-        const totalExecutedQty = Math.min(record.quantity, brokerOrder.filledQuantity);
+        const totalExecutedQty = Math.max(
+          executedQty,
+          Math.min(record.quantity, brokerOrder.filledQuantity),
+        );
         const filledNowQty = Math.max(0, totalExecutedQty - executedQty);
         const nextStatus = this.getBrokerOrderStatus(record.quantity, totalExecutedQty, brokerOrder);
         const isTerminalPartial = nextStatus === OrderStatus.PARTIAL
@@ -122,18 +127,27 @@ export class TradingOrderReconciliationService {
           });
           if (changed.count === 0) continue;
 
-          if (filledNowQty > 0) {
-            hasNewFill = true;
-            const qtyBeforeFill = record.side === Side.BUY
-              ? Math.max(0, currentPositionQty - filledNowQty)
-              : currentPositionQty + filledNowQty;
-            await this.applyReconciledStrategyFill(record.id, nextStatus, qtyBeforeFill, filledNowQty);
-          } else if (nextStatus === OrderStatus.FAILED || nextStatus === OrderStatus.CANCELLED) {
-            // 체결 없이 실패/취소 확정 — 전략에 실패 통지 (이월금 복구 등)
-            await this.applyReconciledStrategyFailure(record.id, nextStatus);
-          }
+          try {
+            if (filledNowQty > 0) {
+              hasNewFill = true;
+              const qtyBeforeFill = record.side === Side.BUY
+                ? Math.max(0, currentPositionQty - filledNowQty)
+                : currentPositionQty + filledNowQty;
+              await this.applyReconciledStrategyFill(record.id, nextStatus, qtyBeforeFill, filledNowQty);
+            } else if (
+              (nextStatus === OrderStatus.FAILED || nextStatus === OrderStatus.CANCELLED)
+              && totalExecutedQty === 0
+            ) {
+              // 체결 없이 실패/취소 확정 — 전략에 실패 통지 (이월금 복구 등)
+              await this.applyReconciledStrategyFailure(record.id, nextStatus);
+            }
 
-          await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
+            await this.logReconciledOrder(record.id, nextStatus, totalExecutedQty);
+          } finally {
+            if (nextStatus === OrderStatus.FAILED && totalExecutedQty === 0) {
+              await this.failureNotifier.notify(record.id, 'RECONCILIATION');
+            }
+          }
           await this.notifyTradeFill(record.id, nextStatus, filledNowQty);
         }
         continue;

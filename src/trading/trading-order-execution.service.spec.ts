@@ -7,6 +7,7 @@ describe('TradingOrderExecutionService', () => {
   const submissionGateway = (domestic: unknown = {}, overseas: unknown = {}) => (
     new TradingBrokerOrderSubmissionService(domestic as never, overseas as never)
   );
+  const noopFailureNotifier = () => ({ notify: jest.fn().mockResolvedValue(undefined) });
 
   afterEach(() => {
     jest.useRealTimers();
@@ -59,6 +60,7 @@ describe('TradingOrderExecutionService', () => {
       guard as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -113,6 +115,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -180,6 +183,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -240,6 +244,7 @@ describe('TradingOrderExecutionService', () => {
       guard as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(
@@ -329,6 +334,7 @@ describe('TradingOrderExecutionService', () => {
       guard as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(
@@ -413,6 +419,7 @@ describe('TradingOrderExecutionService', () => {
       }),
       orderSell: jest.fn(),
     };
+    const failureNotifier = { notify: jest.fn().mockResolvedValue(undefined) };
     const service = new TradingOrderExecutionService(
       prisma as never,
       submissionGateway(domestic) as never,
@@ -429,6 +436,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      failureNotifier as never,
     );
 
     await expect(
@@ -480,6 +488,74 @@ describe('TradingOrderExecutionService', () => {
         }),
       }),
     });
+    expect(failureNotifier.notify).toHaveBeenCalledTimes(1);
+    expect(failureNotifier.notify).toHaveBeenCalledWith('trade-rejected', 'SUBMISSION');
+  });
+
+  it('does not request a rejection alert when the FAILED transition loses its CAS', async () => {
+    const tx = {
+      tradeRecord: { create: jest.fn().mockResolvedValue({ id: 'trade-rejected' }) },
+    };
+    const prisma = {
+      tradeRecord: {
+        updateMany: jest.fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 0 }),
+      },
+      watchStockExecutionLog: {
+        create: jest.fn().mockResolvedValue({ id: 'rejected-audit' }),
+      },
+    };
+    const domestic = {
+      orderBuy: jest.fn().mockResolvedValue({
+        outcome: 'REJECTED',
+        success: false,
+        message: '주문 거부',
+      }),
+      orderSell: jest.fn(),
+    };
+    const failureNotifier = { notify: jest.fn().mockResolvedValue(undefined) };
+    const service = new TradingOrderExecutionService(
+      prisma as never,
+      submissionGateway(domestic) as never,
+      { isEnabled: jest.fn().mockReturnValue(true) } as never,
+      {
+        getCurrentContext: jest.fn().mockReturnValue({
+          environment: 'PAPER',
+          accountHash: 'account-hash',
+          maskedAccount: '****1234-01',
+        }),
+      } as never,
+      {
+        admit: jest.fn().mockImplementation(async (_key, createWithTx) => createWithTx(tx)),
+      } as never,
+      { refresh: jest.fn().mockResolvedValue([]) } as never,
+      { markSubmissionUnknown: jest.fn() } as never,
+      failureNotifier as never,
+    );
+    const rejectedSignal = {
+      market: 'DOMESTIC' as const,
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      side: 'BUY' as const,
+      quantity: 1,
+      reason: 'ordinary buy',
+    };
+    const rejectedContext = {
+      watchStock: {
+        id: 'ws-rejected',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        stockName: 'Samsung',
+        strategyName: 'daily-dca',
+      },
+    } as never;
+
+    await expect(service.execute(rejectedSignal, 'daily-dca', rejectedContext)).resolves.toBe(false);
+
+    expect(domestic.orderBuy).toHaveBeenCalledTimes(1);
+    expect(failureNotifier.notify).not.toHaveBeenCalled();
   });
 
   it('keeps an accepted state authoritative when the outcome audit write fails', async () => {
@@ -528,6 +604,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       recovery as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -600,6 +677,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       recovery as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -668,6 +746,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       recovery as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(
@@ -752,6 +831,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       recovery as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
@@ -816,6 +896,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       recovery as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(
@@ -872,6 +953,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
     const ctx = {
       watchStock: {
@@ -964,6 +1046,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       { refresh: jest.fn().mockResolvedValue([]) } as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await service.execute(
@@ -1044,6 +1127,7 @@ describe('TradingOrderExecutionService', () => {
       } as never,
       positionRefresh as never,
       { markSubmissionUnknown: jest.fn() } as never,
+      noopFailureNotifier() as never,
     );
 
     await expect(service.execute(
