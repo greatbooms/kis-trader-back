@@ -841,10 +841,12 @@ describe('TradingOrchestrator', () => {
     jest.useRealTimers();
   });
 
-  it('does not send close daily summary when latest market state sync fails and releases the claim', async () => {
+  it('releases the daily-summary claim when strict sync finds no active brokers', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
     mockSlackService.isEnabled.mockReturnValue(true);
-    mockMarketStateSync.syncMarketPortfolioOnly.mockRejectedValueOnce(new Error('KIS timeout'));
+    mockMarketStateSync.syncMarketPortfolioOnly.mockRejectedValueOnce(
+      new Error('No active brokers available for strict portfolio sync'),
+    );
 
     await orchestrator.sendDomesticDailySummary();
 

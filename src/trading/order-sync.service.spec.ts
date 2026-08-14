@@ -187,6 +187,14 @@ describe('OrderSyncService', () => {
     );
   });
 
+  it('rejects strict order sync when no brokers are active', async () => {
+    mockRegistry.getActive.mockReturnValueOnce([]);
+
+    await expect(
+      service.syncMarketOrders('DOMESTIC', [], { force: true, failOnAnyError: true }),
+    ).rejects.toThrow('No active brokers available for strict order sync');
+  });
+
   it('restricts an orchestrator-targeted sync and unfilled read to one broker', async () => {
     const toss = {
       broker: Broker.TOSS,

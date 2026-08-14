@@ -120,6 +120,9 @@ export class MarketStateSyncService {
     options: PortfolioSyncOptions = {},
   ): Promise<void> {
     const ports = this.registry.getActive();
+    if (options.failOnAnyError && ports.length === 0) {
+      throw new Error('No active brokers available for strict portfolio sync');
+    }
     const failures: unknown[] = [];
 
     for (const port of ports) {

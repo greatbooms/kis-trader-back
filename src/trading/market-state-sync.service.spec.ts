@@ -288,6 +288,14 @@ describe('MarketStateSyncService holiday checks', () => {
     );
   });
 
+  it('rejects strict portfolio sync when no brokers are active', async () => {
+    (service as any).registry = { getActive: jest.fn().mockReturnValue([]) };
+
+    await expect(
+      service.syncMarketPortfolioOnly('DOMESTIC', { failOnAnyError: true }),
+    ).rejects.toThrow('No active brokers available for strict portfolio sync');
+  });
+
   it('retains broker identity when passing DB positions to order reconciliation', async () => {
     const kis = { broker: Broker.KIS, getBalance: jest.fn().mockResolvedValue([]) };
     const orderSync = { syncMarketOrders: jest.fn().mockResolvedValue(undefined) };

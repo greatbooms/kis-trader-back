@@ -38,6 +38,9 @@ export class OrderSyncService {
     const ports = this.registry.getActive().filter(
       (port) => !options.broker || port.broker === options.broker,
     );
+    if (options.failOnAnyError && ports.length === 0) {
+      throw new Error('No active brokers available for strict order sync');
+    }
     const propagateFailure = Boolean(options.broker) || ports.length === 1;
     const errors: unknown[] = [];
     for (const port of ports) {
