@@ -1,4 +1,5 @@
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
+import { Broker } from '@prisma/client';
 import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
 import { ConservativeStrategy } from './conservative.strategy';
@@ -15,6 +16,7 @@ import { StockPriceResult } from '../../kis/types/kis-api.types';
 function createBaseContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
   const defaultWatchStock: WatchStockConfig = {
     id: 'ws-1',
+    broker: Broker.KIS,
     market: 'DOMESTIC',
     exchangeCode: 'KRX',
     stockCode: '005930',
@@ -218,6 +220,7 @@ describe('Edge Cases - GridMeanReversionStrategy', () => {
     const ctx = createBaseContext({
       watchStock: {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -249,6 +252,7 @@ describe('Edge Cases - GridMeanReversionStrategy', () => {
     const ctx = createBaseContext({
       watchStock: {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -309,6 +313,7 @@ describe('Edge Cases - MomentumBreakoutStrategy', () => {
     const ctx = createBaseContext({
       watchStock: {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',

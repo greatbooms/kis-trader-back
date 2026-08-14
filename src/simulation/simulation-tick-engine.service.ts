@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Market, Prisma, Side, SimulationStatus, SimulationTradeStatus } from '@prisma/client';
+import { Broker, Market, Prisma, Side, SimulationStatus, SimulationTradeStatus } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { StrategyRegistryService } from '../trading/strategy/strategy-registry.service';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
@@ -182,6 +182,7 @@ export class SimulationTickEngine {
 
       const watchStockConfig: WatchStockConfig = {
         id: session.id,
+        broker: Broker.KIS,
         market: session.market as 'DOMESTIC' | 'OVERSEAS',
         exchangeCode,
         stockCode: session.stockCode,

@@ -8,11 +8,8 @@ ALTER TABLE "watch_stocks" ADD COLUMN "broker" "Broker" NOT NULL DEFAULT 'KIS';
 ALTER TABLE "risk_snapshots" ADD COLUMN "broker" "Broker" NOT NULL DEFAULT 'KIS';
 ALTER TABLE "strategy_allocations" ADD COLUMN "broker" "Broker" NOT NULL DEFAULT 'KIS';
 
--- DropIndex
-DROP INDEX "positions_market_exchange_code_stock_code_key";
-DROP INDEX "watch_stocks_market_exchange_code_stock_code_key";
-DROP INDEX "risk_snapshots_market_snapshot_date_key";
-DROP INDEX "strategy_allocations_market_strategy_name_key";
+-- Expand/contract: retain legacy unique indexes for rollback compatibility with
+-- the pre-broker binary. Drop them in a Phase 2 migration when TOSS rows are introduced.
 
 -- CreateIndex
 CREATE UNIQUE INDEX "positions_broker_market_exchange_code_stock_code_key" ON "positions"("broker", "market", "exchange_code", "stock_code");

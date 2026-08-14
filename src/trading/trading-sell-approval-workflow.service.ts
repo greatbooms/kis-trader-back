@@ -432,7 +432,7 @@ export class TradingSellApprovalWorkflowService {
     try {
       orderResult = await this.orderSubmission.submit({
         ...signal,
-        broker: approval.tradeRecord.broker ?? Broker.KIS,
+        broker: approval.tradeRecord.broker,
         market: approval.market,
         exchangeCode: approval.exchangeCode,
         stockCode: approval.stockCode,

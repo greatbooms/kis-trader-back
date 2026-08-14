@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { Market, OrderStatus, OrderType, Side } from '@prisma/client';
+import { Broker, Market, OrderStatus, OrderType, Side } from '@prisma/client';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
 
 describe('TradingOrderExecutionService', () => {
@@ -372,6 +372,7 @@ describe('TradingOrderExecutionService', () => {
         {
           watchStock: {
             id: 'ws-accepted',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -473,6 +474,7 @@ describe('TradingOrderExecutionService', () => {
         {
           watchStock: {
             id: 'ws-rejected',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -564,6 +566,7 @@ describe('TradingOrderExecutionService', () => {
     const rejectedContext = {
       watchStock: {
         id: 'ws-rejected',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -637,6 +640,7 @@ describe('TradingOrderExecutionService', () => {
     }, 'daily-dca', {
       watchStock: {
         id: 'ws-audit-failure',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -710,6 +714,7 @@ describe('TradingOrderExecutionService', () => {
     }, 'daily-dca', {
       watchStock: {
         id: 'ws-admission-log-failure',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -783,6 +788,7 @@ describe('TradingOrderExecutionService', () => {
         {
           watchStock: {
             id: 'ws-unknown',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -978,6 +984,7 @@ describe('TradingOrderExecutionService', () => {
     const ctx = {
       watchStock: {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -1084,6 +1091,7 @@ describe('TradingOrderExecutionService', () => {
       {
         watchStock: {
           id: 'ws-second-target',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -1165,6 +1173,7 @@ describe('TradingOrderExecutionService', () => {
       {
         watchStock: {
           id: 'ws-second-target-failure',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',

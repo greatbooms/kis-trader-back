@@ -284,7 +284,7 @@ export class TradingService {
       try {
         const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
         for (const signal of signals) {
-          signal.broker = ctx.watchStock.broker ?? Broker.KIS;
+          signal.broker = ctx.watchStock.broker;
         }
         const terminalQuotaReached = this.isTerminalQuotaExhaustedSkip(skipReasons);
 
@@ -961,7 +961,7 @@ export class TradingService {
     watchStock:
       | {
           id: string;
-          broker?: Broker;
+          broker: Broker;
           market: Market;
           exchangeCode: string;
           stockCode: string;
@@ -1014,7 +1014,7 @@ export class TradingService {
     const tMetadata = tValue !== undefined ? { tValue } : {};
 
     const followUpSignal: TradingSignal = {
-      broker: watchStock.broker ?? Broker.KIS,
+      broker: watchStock.broker,
       market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: watchStock.exchangeCode,
       stockCode: watchStock.stockCode,
@@ -1036,7 +1036,7 @@ export class TradingService {
     const ctx: StockStrategyContext = {
       watchStock: {
         id: watchStock.id,
-        broker: watchStock.broker ?? Broker.KIS,
+        broker: watchStock.broker,
         market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
         exchangeCode: watchStock.exchangeCode,
         stockCode: watchStock.stockCode,

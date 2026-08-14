@@ -1,4 +1,5 @@
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
+import { Broker } from '@prisma/client';
 import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
 import { ConservativeStrategy } from './conservative.strategy';
@@ -20,6 +21,7 @@ import { StockPriceResult } from '../../kis/types/kis-api.types';
 function createBaseContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
   const defaultWatchStock: WatchStockConfig = {
     id: 'ws-1',
+    broker: Broker.KIS,
     market: 'DOMESTIC',
     exchangeCode: 'KRX',
     stockCode: '005930',
@@ -199,6 +201,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx1 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -232,6 +235,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx2 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -269,6 +273,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx3 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -305,6 +310,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx4 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -345,6 +351,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
 
     const momentumWatchStock = {
       id: 'ws-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC' as const,
       exchangeCode: 'KRX',
       stockCode: '005930',
@@ -484,6 +491,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx1 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -514,6 +522,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx2 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -551,6 +560,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx1 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -581,6 +591,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx2 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -618,6 +629,7 @@ describe('Strategy Scenarios - Multi-turn Simulation', () => {
       const ctx3 = createBaseContext({
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',

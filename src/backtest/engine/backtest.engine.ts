@@ -8,7 +8,7 @@ import {
   MarketCondition,
   InfiniteBuyV4Mode,
 } from '../../trading/types';
-import { Market } from '@prisma/client';
+import { Broker, Market } from '@prisma/client';
 import { OHLCV, computeIndicators } from '../data/indicator-calculator';
 import { BacktestTrade } from './metrics';
 import { applyV4Fill, V4LedgerState } from '../../trading/strategy/infinite-buy-v4-ledger.util';
@@ -218,6 +218,7 @@ export async function runBacktest(
     // 3. 전략 컨텍스트 구성
     const watchStock: WatchStockConfig = {
       id: `bt-${config.stockCode}`,
+      broker: Broker.KIS,
       market: config.market,
       exchangeCode: config.exchangeCode,
       stockCode: config.stockCode,

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Broker } from '@prisma/client';
 import { TradingService } from './trading.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
@@ -9,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { MarketAnalysisService } from './market-analysis.service';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
 import { TradingBrokerContextService } from './trading-broker-context.service';
+import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingOrderGuardService } from './trading-order-guard.service';
 
 describe('TradingService', () => {
@@ -130,6 +132,55 @@ describe('TradingService', () => {
   });
 
   describe('executePerStockStrategy', () => {
+    it('does not reach a broker port when the context broker is missing', async () => {
+      const port = { submitOrder: jest.fn().mockResolvedValue({}) };
+      const registry = { get: jest.fn().mockReturnValue(port) };
+      const gateway = new TradingBrokerOrderSubmissionService(registry as never);
+      mockOrderExecutionService.execute.mockImplementationOnce(async (signal) => {
+        await gateway.submit(signal);
+        return true;
+      });
+      const strategy = {
+        name: 'test-strategy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [{
+            market: 'DOMESTIC',
+            exchangeCode: 'KRX',
+            stockCode: '005930',
+            side: 'BUY',
+            quantity: 1,
+            price: 70_000,
+            reason: 'test buy',
+          }],
+          skipReasons: [],
+        }),
+      };
+      const context = {
+        watchStock: {
+          id: 'ws-missing-broker',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: '삼성전자',
+          cycle: 0,
+          maxCycles: 1,
+          stopLossRate: 0.1,
+          maxPortfolioRate: 1,
+        },
+        price: { currentPrice: 70_000 },
+        alreadyExecutedToday: false,
+        marketCondition: {},
+        stockIndicators: {},
+        buyableAmount: 70_000,
+        totalPortfolioValue: 70_000,
+      } as any;
+
+      await service.executePerStockStrategy(strategy as any, [context]);
+
+      expect(registry.get).not.toHaveBeenCalled();
+      expect(port.submitOrder).not.toHaveBeenCalled();
+    });
+
     it('should send one insufficient funds alert when actual buyable cash is lower than planned quota', async () => {
       const strategy = {
         name: 'infinite-buy',
@@ -149,6 +200,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -217,6 +269,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -298,6 +351,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -380,6 +434,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -500,6 +555,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-soxl',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'AMEX',
             stockCode: 'SOXL',
@@ -609,6 +665,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -702,6 +759,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-tqqq',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -787,6 +845,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-soxl',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'AMEX',
             stockCode: 'SOXL',
@@ -892,6 +951,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -953,6 +1013,7 @@ describe('TradingService', () => {
     const baseContext = {
       watchStock: {
         id: 'ws-approval',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -1551,6 +1612,7 @@ describe('TradingService', () => {
       return {
         watchStock: {
           id: 'ws-v4',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -2008,6 +2070,7 @@ describe('TradingService', () => {
       await service.executePerStockStrategy(strategy as any, [{
         watchStock: {
           id: 'ws-v4',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -2039,6 +2102,7 @@ describe('TradingService', () => {
       return {
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -2100,6 +2164,7 @@ describe('TradingService', () => {
       return {
         watchStock: {
           id: 'ws-1',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -2221,6 +2286,7 @@ describe('TradingService', () => {
         {
           watchStock: {
             id: 'ws-2',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',

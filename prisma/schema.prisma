@@ -62,6 +62,7 @@ model Position {
   totalInvested Decimal  @default(0) @map("total_invested") @db.Decimal(16, 4)
   updatedAt     DateTime @updatedAt @map("updated_at")
 
+  @@unique([market, exchangeCode, stockCode])
   @@unique([broker, market, exchangeCode, stockCode])
   @@map("positions")
 }
@@ -85,6 +86,7 @@ model WatchStock {
   strategyParams   Json?                    @map("strategy_params")
   executionLogs    WatchStockExecutionLog[]
 
+  @@unique([market, exchangeCode, stockCode])
   @@unique([broker, market, exchangeCode, stockCode])
   @@map("watch_stocks")
 }
@@ -125,6 +127,7 @@ model RiskSnapshot {
   investedRate   Decimal  @map("invested_rate") @db.Decimal(8, 6)
   createdAt      DateTime @default(now()) @map("created_at")
 
+  @@unique([market, snapshotDate])
   @@unique([broker, market, snapshotDate])
   @@map("risk_snapshots")
 }
@@ -139,6 +142,7 @@ model StrategyAllocation {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
+  @@unique([market, strategyName])
   @@unique([broker, market, strategyName])
   @@map("strategy_allocations")
 }

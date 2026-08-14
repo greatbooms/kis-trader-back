@@ -742,7 +742,7 @@ export class TradingOrchestrator {
     if (market === 'DOMESTIC') {
       try {
         const buyable = await this.registry
-          .get(ws.broker ?? Broker.KIS)
+          .get(ws.broker)
           .getDomesticBuyableAmount();
         buyableAmount = buyable.cashAvailable;
         buyableMeta = {
@@ -754,7 +754,7 @@ export class TradingOrchestrator {
     } else {
       try {
         const buyable = await this.registry
-          .get(ws.broker ?? Broker.KIS)
+          .get(ws.broker)
           .getOverseasBuyableAmount(
             ws.exchangeCode, ws.stockCode, price.currentPrice,
           );
@@ -822,7 +822,7 @@ export class TradingOrchestrator {
 
     const watchStockConfig: WatchStockConfig = {
       id: ws.id,
-      broker: ws.broker ?? Broker.KIS,
+      broker: ws.broker,
       market,
       exchangeCode: ws.exchangeCode,
       stockCode: ws.stockCode,
@@ -938,7 +938,7 @@ export class TradingOrchestrator {
   private async buildManualExecutionContext(
     ws: {
       id: string;
-      broker?: Broker;
+      broker: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -990,7 +990,7 @@ export class TradingOrchestrator {
     let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
       const buyable = await this.registry
-        .get(ws.broker ?? Broker.KIS)
+        .get(ws.broker)
         .getDomesticBuyableAmount();
       buyableAmount = buyable.cashAvailable;
       buyableMeta = {
@@ -998,7 +998,7 @@ export class TradingOrchestrator {
       };
     } else {
       const buyable = await this.registry
-        .get(ws.broker ?? Broker.KIS)
+        .get(ws.broker)
         .getOverseasBuyableAmount(
         ws.exchangeCode,
         ws.stockCode,
@@ -1070,7 +1070,7 @@ export class TradingOrchestrator {
     return {
       watchStock: {
         id: ws.id,
-        broker: ws.broker ?? Broker.KIS,
+        broker: ws.broker,
         market,
         exchangeCode: ws.exchangeCode,
         stockCode: ws.stockCode,

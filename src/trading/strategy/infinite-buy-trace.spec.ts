@@ -10,6 +10,7 @@
  *   dipRate: ATR% 기반 50%, 범위 0.5%~1.5%, 기본 1%
  */
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
+import { Broker } from '@prisma/client';
 import {
   StockStrategyContext,
   WatchStockConfig,
@@ -23,6 +24,7 @@ describe('무한매수법 — 실전 데이터 추적', () => {
 
   const watchStock: WatchStockConfig = {
     id: 'ws-tqqq',
+    broker: Broker.KIS,
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',

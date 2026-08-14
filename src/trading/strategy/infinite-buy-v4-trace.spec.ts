@@ -17,6 +17,7 @@
  * REVERSE로 전환되는지"가 검증 대상이다.
  */
 import { InfiniteBuyV4Strategy } from './infinite-buy-v4.strategy';
+import { Broker } from '@prisma/client';
 import {
   applyBuyFillToT,
   applySellFillToT,
@@ -39,6 +40,7 @@ describe('InfiniteBuyV4 — 전체 사이클 트레이스', () => {
 
   const watchStockBase: Omit<WatchStockConfig, 'strategyParams'> = {
     id: 'ws-v4-trace',
+    broker: Broker.KIS,
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',

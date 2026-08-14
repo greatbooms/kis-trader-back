@@ -1,4 +1,5 @@
 import { suggestStrategies } from './strategy-matcher';
+import { Broker } from '@prisma/client';
 import {
   PerStockTradingStrategy,
   StockStrategyContext,
@@ -22,6 +23,7 @@ function createContext(): StockStrategyContext {
   return {
     watchStock: {
       id: 'screening:KRX:005930',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

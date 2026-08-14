@@ -1,4 +1,5 @@
 import { ConservativeStrategy } from './conservative.strategy';
+import { Broker } from '@prisma/client';
 import {
   StockStrategyContext,
   WatchStockConfig,
@@ -20,6 +21,7 @@ describe('ConservativeStrategy', () => {
   ): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

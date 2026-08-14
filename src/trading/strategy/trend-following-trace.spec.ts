@@ -1,4 +1,5 @@
 import { TrendFollowingStrategy } from './trend-following.strategy';
+import { Broker } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicators } from '../types';
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
@@ -13,6 +14,7 @@ describe('TrendFollowingStrategy — Realistic Trace', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-tf-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

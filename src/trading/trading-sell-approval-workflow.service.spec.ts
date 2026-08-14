@@ -1,5 +1,6 @@
 import {
   ApprovalStatus,
+  Broker,
   Market,
   OrderStatus,
   WatchStockExecutionEventType,
@@ -59,6 +60,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       expiresAt: new Date('2026-07-13T01:09:00.000Z'),
       tradeRecord: {
         id: 'trade-post-claim',
+        broker: Broker.KIS,
         market,
         exchangeCode,
         stockCode,
@@ -221,6 +223,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       },
       tradeRecord: {
         id: 'trade-1',
+        broker: Broker.KIS,
         market: Market.DOMESTIC,
         exchangeCode: 'KRX',
         stockCode: '005930',

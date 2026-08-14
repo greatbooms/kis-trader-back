@@ -1,4 +1,5 @@
 import { TradingSellApprovalService } from './trading-sell-approval.service';
+import { Broker } from '@prisma/client';
 import { TradingSignal } from './types';
 
 describe('TradingSellApprovalService', () => {
@@ -753,6 +754,7 @@ describe('TradingSellApprovalService', () => {
         {
           watchStock: {
             id: 'watch-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -1110,6 +1112,7 @@ describe('TradingSellApprovalService', () => {
         {
           watchStock: {
             id: 'watch-undelivered',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',

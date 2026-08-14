@@ -1,4 +1,5 @@
 import { InfiniteBuyStrategy } from './infinite-buy.strategy';
+import { Broker } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicators } from '../types';
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
@@ -12,6 +13,7 @@ describe('InfiniteBuyStrategy', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',
@@ -369,6 +371,7 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         watchStock: {
           id: 'ws-tqqq',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -411,6 +414,7 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         watchStock: {
           id: 'ws-tqqq',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -570,6 +574,7 @@ describe('InfiniteBuyStrategy', () => {
       const ctx = createContext({
         watchStock: {
           id: 'ws-tqqq',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
