@@ -5,8 +5,7 @@ import {
   OrderStatus,
   TradeRecord,
 } from '@prisma/client';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { UnfilledOrder } from '../kis/types/kis-api.types';
 import { OVERSEAS_ORDER_TR_IDS } from '../kis/types/kis-config.types';
 import { OrderResult } from '../kis/types';
@@ -22,8 +21,7 @@ export class TradingOrderCancellationService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private readonly liveSwitch: TradingLiveSwitchService,
     private readonly brokerContext: TradingBrokerContextService,
     private readonly recoveryService: TradingBrokerOrderRecoveryService,
@@ -114,7 +112,14 @@ export class TradingOrderCancellationService {
 
     let result: OrderResult;
     try {
-      result = await this.submit(market, normalizedOrder);
+      result = await this.registry.get(claimedRecord.broker).cancelOrder({
+        market: claimedRecord.market,
+        exchangeCode: normalizedOrder.exchangeCode || '',
+        orderNo: normalizedOrder.orderNo,
+        stockCode: normalizedOrder.stockCode,
+        qty: normalizedOrder.quantity,
+        price: normalizedOrder.price,
+      });
     } catch (error) {
       const message = this.errorMessage(error);
       this.logger.warn(`[${normalizedOrder.stockCode}] Cancellation outcome is unknown: ${message}`);
@@ -216,21 +221,6 @@ export class TradingOrderCancellationService {
       stockCode: order.stockCode.trim().toUpperCase(),
       exchangeCode: market === 'DOMESTIC' ? 'KRX' : suppliedExchange,
     };
-  }
-
-  private submit(
-    market: 'DOMESTIC' | 'OVERSEAS',
-    order: UnfilledOrder,
-  ): Promise<OrderResult> {
-    return market === 'DOMESTIC'
-      ? this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity)
-      : this.kisOverseas.cancelOrder(
-        order.exchangeCode || '',
-        order.orderNo,
-        order.stockCode,
-        order.quantity,
-        order.price,
-      );
   }
 
   private errorMessage(error: unknown): string {

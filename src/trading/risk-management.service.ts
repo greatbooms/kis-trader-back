@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { RiskState } from './types';
-import { Market, Prisma } from '@prisma/client';
+import { Broker, Market, Prisma } from '@prisma/client';
 
 @Injectable()
 export class RiskManagementService {
@@ -108,7 +108,8 @@ export class RiskManagementService {
     try {
       await this.prisma.riskSnapshot.upsert({
         where: {
-          market_snapshotDate: {
+          broker_market_snapshotDate: {
+            broker: Broker.KIS,
             market: market as Market,
             snapshotDate: today,
           },

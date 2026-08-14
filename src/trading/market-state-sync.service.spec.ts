@@ -31,6 +31,7 @@ describe('MarketStateSyncService holiday checks', () => {
       mockKisDomestic as any,
       mockKisOverseas as any,
       {} as any,
+      {} as any,
       mockConfigService as any,
       {} as any,
     );

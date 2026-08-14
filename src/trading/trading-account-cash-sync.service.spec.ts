@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
@@ -15,12 +14,11 @@ describe('TradingAccountCashSyncService', () => {
     $queryRaw: jest.fn(),
     $transaction: jest.fn(),
   };
-  const mockKisDomestic = {
-    getBuyableAmount: jest.fn(),
+  const mockPort = {
+    getDomesticBuyableAmount: jest.fn(),
+    getOverseasAccountSnapshot: jest.fn(),
   };
-  const mockKisOverseas = {
-    getAccountSnapshot: jest.fn(),
-  };
+  const mockRegistry = { get: jest.fn().mockReturnValue(mockPort) };
 
   beforeEach(async () => {
     mockPrisma.$transaction.mockImplementation(async (work) => work(mockPrisma));
@@ -28,8 +26,7 @@ describe('TradingAccountCashSyncService', () => {
       providers: [
         TradingAccountCashSyncService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: KisDomesticService, useValue: mockKisDomestic },
-        { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: BrokerPortRegistry, useValue: mockRegistry },
       ],
     }).compile();
 
@@ -48,7 +45,7 @@ describe('TradingAccountCashSyncService', () => {
       amount: 900,
       withdrawableAmount: 850,
     };
-    mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 1_500_000 });
+    mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 1_500_000 });
     mockPrisma.appSetting.findUnique.mockResolvedValue({
       value: {
         cashBalances: [
@@ -80,7 +77,7 @@ describe('TradingAccountCashSyncService', () => {
       currencyCode: 'KRW',
       amount: 1_000_000,
     };
-    mockKisOverseas.getAccountSnapshot.mockResolvedValue({
+    mockPort.getOverseasAccountSnapshot.mockResolvedValue({
       balance: [],
       cashBalances: [
         {
@@ -124,7 +121,7 @@ describe('TradingAccountCashSyncService', () => {
   });
 
   it('creates a cache when no previous account cache exists', async () => {
-    mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 500_000 });
+    mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 500_000 });
     mockPrisma.appSetting.findUnique.mockResolvedValue(null);
 
     await service.refreshMarketCash('DOMESTIC');

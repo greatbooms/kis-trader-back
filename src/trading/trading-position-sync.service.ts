@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Market, Prisma } from '@prisma/client';
+import { Broker, Market, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { BalanceItem } from '../kis/types/kis-api.types';
 
@@ -20,7 +20,8 @@ export class TradingPositionSyncService {
 
       await this.prisma.position.upsert({
         where: {
-          market_exchangeCode_stockCode: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.KIS,
             market: market as Market,
             exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
             stockCode: item.stockCode,

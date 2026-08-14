@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { OrderStatus } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
@@ -42,6 +43,38 @@ describe('TradeRecordManualOrderService', () => {
     getUnfilledOrders: jest.fn(),
     getOrderExecutions: jest.fn(),
   };
+  const mockPort = {
+    submitOrder: jest.fn((signal) => signal.market === 'DOMESTIC'
+      ? mockKisDomestic.orderSell(
+        signal.stockCode,
+        signal.quantity,
+        signal.price,
+        signal.orderDivision,
+      )
+      : mockKisOverseas.orderSell(
+        signal.exchangeCode,
+        signal.stockCode,
+        signal.quantity,
+        signal.price,
+        signal.orderDivision,
+      )),
+    getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
+      ? mockKisDomestic.getOrderExecutions(startDate, endDate)
+      : mockKisOverseas.getOrderExecutions(startDate, endDate)),
+    getUnfilledOrders: jest.fn((market) => market === 'DOMESTIC'
+      ? mockKisDomestic.getUnfilledOrders()
+      : mockKisOverseas.getUnfilledOrders()),
+    cancelOrder: jest.fn((request) => request.market === 'DOMESTIC'
+      ? mockKisDomestic.cancelOrder(request.orderNo, request.stockCode, request.qty)
+      : mockKisOverseas.cancelOrder(
+        request.exchangeCode,
+        request.orderNo,
+        request.stockCode,
+        request.qty,
+        request.price,
+      )),
+  };
+  const mockRegistry = { get: jest.fn().mockReturnValue(mockPort) };
 
   const mockLiveSwitch = {
     isEnabled: jest.fn().mockReturnValue(true),
@@ -84,6 +117,7 @@ describe('TradeRecordManualOrderService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: BrokerPortRegistry, useValue: mockRegistry },
         { provide: TradingLiveSwitchService, useValue: mockLiveSwitch },
         { provide: TradingBrokerContextService, useValue: mockBrokerContext },
         { provide: TradingOrderGuardService, useValue: mockOrderGuard },

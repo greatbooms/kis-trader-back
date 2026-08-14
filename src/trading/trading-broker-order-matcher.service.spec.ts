@@ -10,11 +10,21 @@ describe('TradingBrokerOrderMatcherService', () => {
   const overseas = {
     getOrderExecutions: jest.fn(),
   };
+  const port = {
+    getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
+      ? domestic.getOrderExecutions(startDate, endDate)
+      : overseas.getOrderExecutions(startDate, endDate)),
+  };
+  const registry = { get: jest.fn() };
 
   let service: TradingBrokerOrderMatcherService;
 
   beforeEach(() => {
     jest.resetAllMocks();
+    port.getOrderExecutions.mockImplementation((market, startDate, endDate) => market === 'DOMESTIC'
+      ? domestic.getOrderExecutions(startDate, endDate)
+      : overseas.getOrderExecutions(startDate, endDate));
+    registry.get.mockReturnValue(port);
     brokerContext.getCurrentContext.mockReturnValue({
       environment: 'PROD',
       accountHash: 'current-hash',
@@ -22,13 +32,13 @@ describe('TradingBrokerOrderMatcherService', () => {
     });
     service = new TradingBrokerOrderMatcherService(
       brokerContext as never,
-      domestic as never,
-      overseas as never,
+      registry as never,
     );
   });
 
   const request = (overrides: Record<string, unknown> = {}) => ({
     tradeRecordId: 'trade-unknown',
+    broker: 'KIS',
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',

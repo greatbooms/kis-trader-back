@@ -1,51 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
-import { OrderResult } from '../kis/types';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
+import { OrderResult } from '../common/types';
 import { TradingSignal } from './types';
 
 @Injectable()
 export class TradingBrokerOrderSubmissionService {
   private readonly logger = new Logger(TradingBrokerOrderSubmissionService.name);
 
-  constructor(
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
-  ) {}
+  constructor(private readonly registry: BrokerPortRegistry) {}
 
   async submit(signal: TradingSignal): Promise<OrderResult> {
+    if (!signal.broker) {
+      throw new Error(`[${signal.stockCode}] Broker is required for order submission`);
+    }
     try {
-      if (signal.market === 'DOMESTIC') {
-        return signal.side === 'BUY'
-          ? await this.kisDomestic.orderBuy(
-            signal.stockCode,
-            signal.quantity,
-            signal.price,
-            signal.orderDivision,
-          )
-          : await this.kisDomestic.orderSell(
-            signal.stockCode,
-            signal.quantity,
-            signal.price,
-            signal.orderDivision,
-          );
-      }
-
-      return signal.side === 'BUY'
-        ? await this.kisOverseas.orderBuy(
-          signal.exchangeCode,
-          signal.stockCode,
-          signal.quantity,
-          signal.price || 0,
-          signal.orderDivision,
-        )
-        : await this.kisOverseas.orderSell(
-          signal.exchangeCode,
-          signal.stockCode,
-          signal.quantity,
-          signal.price || 0,
-          signal.orderDivision,
-        );
+      return await this.registry.get(signal.broker).submitOrder(signal);
     } catch (error) {
       this.logger.warn(
         `[${signal.stockCode}] Broker order submission failed: ${this.errorMessage(error)}`,

@@ -25,6 +25,7 @@ import { BrokerOrderStartupRecoverySummary } from './types/broker-order-startup-
 
 const RECOVERY_ITEM_SELECT = {
   id: true,
+  broker: true,
   market: true,
   exchangeCode: true,
   stockCode: true,
@@ -185,6 +186,7 @@ export class TradingBrokerOrderRecoveryService {
 
     const matchRequest = {
       tradeRecordId,
+      broker: record.broker,
       market: record.market,
       exchangeCode: record.exchangeCode,
       stockCode: record.stockCode,

@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Market } from '@prisma/client';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { BrokerOrderStatus } from '../kis/types/kis-api.types';
 import { TradingBrokerContextService } from './trading-broker-context.service';
 import { BrokerOrderMatchRequest } from './types/broker-order-match-request.type';
@@ -16,8 +15,7 @@ export class TradingBrokerOrderMatcherService {
 
   constructor(
     private readonly brokerContextService: TradingBrokerContextService,
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
   ) {}
 
   async findSubmissionCandidates(
@@ -39,9 +37,9 @@ export class TradingBrokerOrderMatcherService {
 
     let orders: BrokerOrderStatus[];
     try {
-      orders = request.market === Market.DOMESTIC
-        ? await this.kisDomestic.getOrderExecutions(startDate, endDate)
-        : await this.kisOverseas.getOrderExecutions(startDate, endDate);
+      orders = await this.registry
+        .get(request.broker)
+        .getOrderExecutions(request.market, startDate, endDate);
     } catch (error) {
       this.logger.warn(
         `[RECOVERY ${request.tradeRecordId}] Complete KIS order-history read failed: ${this.errorMessage(error)}`,

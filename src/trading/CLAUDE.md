@@ -44,6 +44,8 @@ KIS API 기반 실전 자동매매. 전략 신호 평가, 주문 제출, 포지�
 - `MarketDataModule` (Global) — `MarketDataCacheService` (재무/공시/매크로 시그널)
 
 ## 주의사항
+- 주문·취소·체결·미체결·잔고·주문가능금액은 `BrokerPortRegistry`를 경유한다. 시장 시세·일봉·휴장일은 D3 경계에 따라 KIS 서비스를 직접 사용한다.
+- 자동 주문 신호는 `WatchStock.broker`를 태깅하며, broker 없는 주문 제출은 fail-closed한다.
 - 공개 API는 각 서비스별로 분리됨 — 호출부는 책임에 맞는 서비스를 직접 주입해서 사용해야 함
   - `TradingService.executePerStockStrategy` / `handleStrategySignalFill` — 신호 평가/일반 주문 위임/전략 fill 후처리 진입점
   - `TradingSellApprovalWorkflowService.approve` / `reject` — SELL 승인 결정 및 승인 주문 제출의 유일한 진입점

@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
-import { Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Broker, Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { InfiniteBuyStrategyParams, InfiniteBuyV4Params } from '../trading/types';
 import { DEFAULT_STAR_BASE_PCT_BY_STOCK } from '../trading/strategy/infinite-buy-v4.strategy';
 import { ConvertWatchStockToV4Seed } from './types';
@@ -284,7 +284,8 @@ export class WatchStockService {
 
     const position = await this.prisma.position.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: Broker.KIS,
           market: current.market,
           exchangeCode: current.exchangeCode,
           stockCode: current.stockCode,
@@ -522,7 +523,8 @@ export class WatchStockService {
 
     const position = await this.prisma.position.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: Broker.KIS,
           market: watchStock.market,
           exchangeCode: watchStock.exchangeCode,
           stockCode: watchStock.stockCode,

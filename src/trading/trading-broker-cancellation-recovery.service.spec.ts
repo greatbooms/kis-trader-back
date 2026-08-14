@@ -9,6 +9,7 @@ import { TradingBrokerCancellationRecoveryService } from './trading-broker-cance
 describe('TradingBrokerCancellationRecoveryService', () => {
   const record = (overrides: Record<string, unknown> = {}) => ({
     id: 'trade-cancel-unknown',
+    broker: 'KIS',
     market: 'DOMESTIC',
     exchangeCode: 'KRX',
     stockCode: '005930',
@@ -134,11 +135,20 @@ describe('TradingBrokerCancellationRecoveryService', () => {
           maskedAccount: '****1234-01',
         }),
     };
+    const registry = {
+      get: jest.fn().mockReturnValue({
+        getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
+          ? domestic.getOrderExecutions(startDate, endDate)
+          : overseas.getOrderExecutions(startDate, endDate)),
+        getUnfilledOrders: jest.fn((market) => market === 'DOMESTIC'
+          ? domestic.getUnfilledOrders()
+          : overseas.getUnfilledOrders()),
+      }),
+    };
     const service = new TradingBrokerCancellationRecoveryService(
       prisma as never,
       brokerContext as never,
-      domestic as never,
-      overseas as never,
+      registry as never,
     );
     return { service, prisma, tx, domestic, overseas, brokerContext, storedRecord };
   }

@@ -49,6 +49,13 @@ describe('TradingOrchestrator', () => {
     getPrice: jest.fn(),
     getBuyableAmount: jest.fn(),
   };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue({
+      getDomesticBuyableAmount: jest.fn(() => mockKisDomestic.getBuyableAmount()),
+      getOverseasBuyableAmount: jest.fn((exchangeCode, stockCode, price) =>
+        mockKisOverseas.getBuyableAmount(exchangeCode, stockCode, price)),
+    }),
+  };
 
   const mockPrisma = {
     position: {
@@ -195,6 +202,7 @@ describe('TradingOrchestrator', () => {
       mockMarketStateSync as any,
       mockKisDomestic as any,
       mockKisOverseas as any,
+      mockRegistry as any,
       mockPrisma as any,
       mockConfigService as any,
       mockMarketDataCache as any,
@@ -772,6 +780,7 @@ describe('TradingOrchestrator', () => {
         mockMarketStateSync as any,
         mockKisDomestic as any,
         mockKisOverseas as any,
+        mockRegistry as any,
         mockPrisma as any,
         mockConfigService as any,
         mockMarketDataCache as any,

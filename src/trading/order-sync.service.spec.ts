@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { OrderSyncService } from './order-sync.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
@@ -27,6 +26,16 @@ describe('OrderSyncService', () => {
     getOrderExecutions: jest.fn(),
     getUnfilledOrders: jest.fn(),
   };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue({
+      getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
+        ? mockKisDomestic.getOrderExecutions(startDate, endDate)
+        : mockKisOverseas.getOrderExecutions(startDate, endDate)),
+      getUnfilledOrders: jest.fn((market) => market === 'DOMESTIC'
+        ? mockKisDomestic.getUnfilledOrders()
+        : mockKisOverseas.getUnfilledOrders()),
+    }),
+  };
 
   const mockPrisma = {
     tradeRecord: {
@@ -50,8 +59,7 @@ describe('OrderSyncService', () => {
         OrderSyncService,
         { provide: TradingOrderReconciliationService, useValue: mockOrderReconciliationService },
         { provide: TradingAccountCashSyncService, useValue: mockAccountCashSync },
-        { provide: KisDomesticService, useValue: mockKisDomestic },
-        { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: BrokerPortRegistry, useValue: mockRegistry },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ConfigService, useValue: mockConfigService },
       ],

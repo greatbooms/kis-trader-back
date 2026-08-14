@@ -323,6 +323,7 @@ export class TradingBrokerOrderResolutionService {
   private toMatchRequest(record: BrokerOrderRecoveryRecord): BrokerOrderMatchRequest {
     return {
       tradeRecordId: record.id,
+      broker: record.broker,
       market: record.market,
       exchangeCode: record.exchangeCode,
       stockCode: record.stockCode,

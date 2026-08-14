@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerEnvironment,
   CancellationAttemptStatus,
   Market,
@@ -10,6 +11,7 @@ import {
 
 export interface BrokerOrderRecoveryRecord {
   id: string;
+  broker: Broker;
   market: Market;
   exchangeCode: string;
   stockCode: string;

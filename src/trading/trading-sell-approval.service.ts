@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ApprovalStatus,
+  Broker,
   Market,
   OrderStatus,
   OrderType,
@@ -286,7 +287,8 @@ export class TradingSellApprovalService {
   ): Promise<void> {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: Broker.KIS,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,

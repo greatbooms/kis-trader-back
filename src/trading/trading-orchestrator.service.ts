@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  Broker,
   CancellationAttemptStatus,
   Market,
   OrderStatus,
@@ -8,6 +9,7 @@ import {
   Side,
   WatchStockExecutionEventType,
 } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { TradingService } from './trading.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { MarketRegimeService } from './market-regime.service';
@@ -77,6 +79,7 @@ export class TradingOrchestrator {
     private marketStateSync: MarketStateSyncService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private prisma: PrismaService,
     private configService: ConfigService,
     private marketDataCache: MarketDataCacheService,
@@ -559,12 +562,12 @@ export class TradingOrchestrator {
     let cashAvailable = 0;
     try {
       if (market === 'DOMESTIC') {
-        const buyable = await this.kisDomestic.getBuyableAmount();
+        const buyable = await this.registry.get(Broker.KIS).getDomesticBuyableAmount();
         cashAvailable = buyable.cashAvailable;
       } else {
         const firstStock = watchStocks[0];
         if (firstStock) {
-          const buyable = await this.kisOverseas.getBuyableAmount(
+          const buyable = await this.registry.get(Broker.KIS).getOverseasBuyableAmount(
             firstStock.exchangeCode,
             firstStock.stockCode,
             1,
@@ -738,7 +741,9 @@ export class TradingOrchestrator {
     let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
       try {
-        const buyable = await this.kisDomestic.getBuyableAmount();
+        const buyable = await this.registry
+          .get(ws.broker ?? Broker.KIS)
+          .getDomesticBuyableAmount();
         buyableAmount = buyable.cashAvailable;
         buyableMeta = {
           source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
@@ -748,9 +753,11 @@ export class TradingOrchestrator {
       }
     } else {
       try {
-        const buyable = await this.kisOverseas.getBuyableAmount(
-          ws.exchangeCode, ws.stockCode, price.currentPrice,
-        );
+        const buyable = await this.registry
+          .get(ws.broker ?? Broker.KIS)
+          .getOverseasBuyableAmount(
+            ws.exchangeCode, ws.stockCode, price.currentPrice,
+          );
         buyableAmount = buyable.foreignCurrencyAvailable;
         buyableMeta = {
           source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
@@ -815,6 +822,7 @@ export class TradingOrchestrator {
 
     const watchStockConfig: WatchStockConfig = {
       id: ws.id,
+      broker: ws.broker ?? Broker.KIS,
       market,
       exchangeCode: ws.exchangeCode,
       stockCode: ws.stockCode,
@@ -930,6 +938,7 @@ export class TradingOrchestrator {
   private async buildManualExecutionContext(
     ws: {
       id: string;
+      broker?: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -980,13 +989,17 @@ export class TradingOrchestrator {
     let buyableAmount = 0;
     let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
-      const buyable = await this.kisDomestic.getBuyableAmount();
+      const buyable = await this.registry
+        .get(ws.broker ?? Broker.KIS)
+        .getDomesticBuyableAmount();
       buyableAmount = buyable.cashAvailable;
       buyableMeta = {
         source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
       };
     } else {
-      const buyable = await this.kisOverseas.getBuyableAmount(
+      const buyable = await this.registry
+        .get(ws.broker ?? Broker.KIS)
+        .getOverseasBuyableAmount(
         ws.exchangeCode,
         ws.stockCode,
         price.currentPrice,
@@ -1057,6 +1070,7 @@ export class TradingOrchestrator {
     return {
       watchStock: {
         id: ws.id,
+        broker: ws.broker ?? Broker.KIS,
         market,
         exchangeCode: ws.exchangeCode,
         stockCode: ws.stockCode,

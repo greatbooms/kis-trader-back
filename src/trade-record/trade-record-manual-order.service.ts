@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  Broker,
   BrokerEnvironment,
   CancellationAttemptStatus,
   Market,
@@ -8,6 +9,7 @@ import {
   Prisma,
   TradeRecord,
 } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
@@ -28,6 +30,7 @@ export class TradeRecordManualOrderService {
     private prisma: PrismaService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private readonly liveSwitch: TradingLiveSwitchService,
     private readonly brokerContext: TradingBrokerContextService,
     private readonly orderGuard: TradingOrderGuardService,
@@ -212,20 +215,17 @@ export class TradeRecordManualOrderService {
 
     let result;
     try {
-      result = canonicalKey.market === 'DOMESTIC'
-        ? await this.kisDomestic.orderSell(
-          canonicalKey.stockCode,
-          executableQty,
-          roundPrice,
-          '00',
-        )
-        : await this.kisOverseas.orderSell(
-          canonicalKey.exchangeCode,
-          canonicalKey.stockCode,
-          executableQty,
-          roundPrice,
-          '00',
-        );
+      result = await this.registry.get(Broker.KIS).submitOrder({
+        broker: Broker.KIS,
+        market: canonicalKey.market,
+        exchangeCode: canonicalKey.exchangeCode,
+        stockCode: canonicalKey.stockCode,
+        side: 'SELL',
+        quantity: executableQty,
+        price: roundPrice,
+        orderDivision: '00',
+        reason: '수동 매도',
+      });
     } catch (error) {
       const message = this.errorMessage(error);
       this.logger.warn(`[${canonicalKey.stockCode}] Manual sell outcome is unknown: ${message}`);
@@ -461,12 +461,9 @@ export class TradeRecordManualOrderService {
     let unfilledOrders: UnfilledOrder[];
     try {
       const orderDate = claimedRecord.brokerOrderDate as string;
-      executions = claimedRecord.market === Market.DOMESTIC
-        ? await this.kisDomestic.getOrderExecutions(orderDate, orderDate)
-        : await this.kisOverseas.getOrderExecutions(orderDate, orderDate);
-      unfilledOrders = claimedRecord.market === Market.DOMESTIC
-        ? await this.kisDomestic.getUnfilledOrders()
-        : await this.kisOverseas.getUnfilledOrders();
+      const port = this.registry.get(claimedRecord.broker);
+      executions = await port.getOrderExecutions(claimedRecord.market, orderDate, orderDate);
+      unfilledOrders = await port.getUnfilledOrders(claimedRecord.market);
     } catch (error) {
       const message = this.errorMessage(error);
       this.logger.warn(
@@ -532,21 +529,14 @@ export class TradeRecordManualOrderService {
 
     let result;
     try {
-      if (claimedRecord.market === Market.DOMESTIC) {
-        result = await this.kisDomestic.cancelOrder(
-          orderNo,
-          claimedRecord.stockCode,
-          remainingQty,
-        );
-      } else {
-        result = await this.kisOverseas.cancelOrder(
-          claimedRecord.exchangeCode,
-          orderNo,
-          claimedRecord.stockCode,
-          remainingQty,
-          Number(claimedRecord.price),
-        );
-      }
+      result = await this.registry.get(claimedRecord.broker).cancelOrder({
+        market: claimedRecord.market,
+        exchangeCode: claimedRecord.exchangeCode,
+        orderNo,
+        stockCode: claimedRecord.stockCode,
+        qty: remainingQty,
+        price: Number(claimedRecord.price),
+      });
     } catch (error) {
       const message = this.errorMessage(error);
       this.logger.warn(`[${claimedRecord.stockCode}] Cancellation outcome is unknown: ${message}`);

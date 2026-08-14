@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Market, OrderStatus } from '@prisma/client';
+import { Broker, Market, OrderStatus } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
@@ -35,6 +36,7 @@ export class MarketStateSyncService {
     private orderSyncService: OrderSyncService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private prisma: PrismaService,
     private configService: ConfigService,
     private readonly orderCancellationService: TradingOrderCancellationService,
@@ -114,9 +116,8 @@ export class MarketStateSyncService {
   }
 
   async syncMarketPortfolioOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    const balance = market === 'DOMESTIC'
-      ? await this.kisDomestic.getBalance()
-      : await this.kisOverseas.getBalance();
+    // Phase 3: active broker 루프로 확장
+    const balance = await this.registry.get(Broker.KIS).getBalance(market as Market);
 
     await this.positionSyncService.syncPositions(market, balance);
   }

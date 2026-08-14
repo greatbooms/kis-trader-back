@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
-import { Market, Side, Prisma } from '@prisma/client';
+import { Broker, Market, Side, Prisma } from '@prisma/client';
 import { BalanceItem, StockPriceResult } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
 import { DailyPrice } from '../kis/types/kis-api.types';
@@ -18,6 +19,7 @@ export class TradeRecordService {
     private prisma: PrismaService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private marketAnalysis: MarketAnalysisService,
     private readonly accountCashSync: TradingAccountCashSyncService,
   ) {}
@@ -178,11 +180,12 @@ export class TradeRecordService {
     let hasSuccess = false;
 
     this.logger.debug('Refreshing account state');
+    const port = this.registry.get(Broker.KIS);
 
     try {
-      const domesticBalance = await this.kisDomestic.getBalance();
+      const domesticBalance = await port.getBalance(Market.DOMESTIC);
       await this.syncPositions('DOMESTIC', domesticBalance);
-      const domesticCash = await this.kisDomestic.getBuyableAmount();
+      const domesticCash = await port.getDomesticBuyableAmount();
       cashBalances.push({
         market: Market.DOMESTIC,
         currencyCode: 'KRW',
@@ -198,7 +201,7 @@ export class TradeRecordService {
     }
 
     try {
-      const overseasSnapshot = await this.kisOverseas.getAccountSnapshot();
+      const overseasSnapshot = await port.getOverseasAccountSnapshot();
       await this.syncPositions('OVERSEAS', overseasSnapshot.balance);
       const overseasCashBalances = overseasSnapshot.cashBalances;
       cashBalances.push(
@@ -293,7 +296,8 @@ export class TradeRecordService {
 
       await this.prisma.position.upsert({
         where: {
-          market_exchangeCode_stockCode: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.KIS,
             market: market as Market,
             exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
             stockCode: item.stockCode,

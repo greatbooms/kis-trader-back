@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Broker, Prisma } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { AccountCashBalance, AccountStatusCache } from '../common/types';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 
 const ACCOUNT_STATUS_CACHE_KEY = 'account_status_cache';
@@ -13,8 +12,7 @@ export class TradingAccountCashSyncService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
   ) {}
 
   async refreshMarketCash(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
@@ -31,7 +29,7 @@ export class TradingAccountCashSyncService {
   }
 
   private async getDomesticCashBalances(): Promise<AccountCashBalance[]> {
-    const domesticCash = await this.kisDomestic.getBuyableAmount();
+    const domesticCash = await this.registry.get(Broker.KIS).getDomesticBuyableAmount();
     return [{
       market: 'DOMESTIC',
       currencyCode: 'KRW',
@@ -43,7 +41,7 @@ export class TradingAccountCashSyncService {
   }
 
   private async getOverseasCashBalances(): Promise<AccountCashBalance[]> {
-    const snapshot = await this.kisOverseas.getAccountSnapshot();
+    const snapshot = await this.registry.get(Broker.KIS).getOverseasAccountSnapshot();
     return snapshot.cashBalances.map((item) => ({
       market: 'OVERSEAS',
       currencyCode: item.currencyCode,

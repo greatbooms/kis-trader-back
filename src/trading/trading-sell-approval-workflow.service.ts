@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApprovalStatus,
+  Broker,
   Market,
   OrderStatus,
   Prisma,
@@ -431,6 +432,7 @@ export class TradingSellApprovalWorkflowService {
     try {
       orderResult = await this.orderSubmission.submit({
         ...signal,
+        broker: approval.tradeRecord.broker ?? Broker.KIS,
         market: approval.market,
         exchangeCode: approval.exchangeCode,
         stockCode: approval.stockCode,
@@ -715,7 +717,8 @@ export class TradingSellApprovalWorkflowService {
     try {
       const watchStock = await this.prisma.watchStock.findUnique({
         where: {
-          market_exchangeCode_stockCode: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.KIS,
             market: record.market,
             exchangeCode: record.exchangeCode,
             stockCode: record.stockCode,

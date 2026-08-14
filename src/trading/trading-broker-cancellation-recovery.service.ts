@@ -6,8 +6,7 @@ import {
   OrderStatus,
   TradeRecord,
 } from '@prisma/client';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PrismaService } from '../prisma.service';
 import { TradingBrokerContextService } from './trading-broker-context.service';
@@ -26,8 +25,7 @@ export class TradingBrokerCancellationRecoveryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly brokerContextService: TradingBrokerContextService,
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
   ) {}
 
   async inspectCancellation(
@@ -208,12 +206,9 @@ export class TradingBrokerCancellationRecoveryService {
   private async readCompleteBrokerState(record: TradeRecord): Promise<BrokerCancellationRead> {
     const orderDate = record.brokerOrderDate as string;
     try {
-      const executions = record.market === Market.DOMESTIC
-        ? await this.kisDomestic.getOrderExecutions(orderDate, orderDate)
-        : await this.kisOverseas.getOrderExecutions(orderDate, orderDate);
-      const unfilledOrders = record.market === Market.DOMESTIC
-        ? await this.kisDomestic.getUnfilledOrders()
-        : await this.kisOverseas.getUnfilledOrders();
+      const port = this.registry.get(record.broker);
+      const executions = await port.getOrderExecutions(record.market, orderDate, orderDate);
+      const unfilledOrders = await port.getUnfilledOrders(record.market);
       return { executions, unfilledOrders };
     } catch (error) {
       this.logger.warn(

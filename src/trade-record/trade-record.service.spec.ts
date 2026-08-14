@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { TradeRecordService } from './trade-record.service';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
@@ -51,6 +52,15 @@ describe('TradeRecordService', () => {
     getUnfilledOrders: jest.fn(),
     getOrderExecutions: jest.fn(),
   };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue({
+      getBalance: jest.fn((market) => market === 'DOMESTIC'
+        ? mockKisDomestic.getBalance()
+        : mockKisOverseas.getBalance()),
+      getDomesticBuyableAmount: jest.fn(() => mockKisDomestic.getBuyableAmount()),
+      getOverseasAccountSnapshot: jest.fn(() => mockKisOverseas.getAccountSnapshot()),
+    }),
+  };
 
   const mockConfigService = {
     get: jest.fn((key: string) => {
@@ -82,6 +92,7 @@ describe('TradeRecordService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: BrokerPortRegistry, useValue: mockRegistry },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
         { provide: TradingAccountCashSyncService, useValue: mockAccountCashSync },

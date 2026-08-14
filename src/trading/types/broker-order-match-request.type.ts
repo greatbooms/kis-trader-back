@@ -1,7 +1,8 @@
-import { BrokerEnvironment, Market, Side } from '@prisma/client';
+import { Broker, BrokerEnvironment, Market, Side } from '@prisma/client';
 
 export interface BrokerOrderMatchRequest {
   tradeRecordId: string;
+  broker: Broker;
   market: Market;
   exchangeCode: string;
   stockCode: string;

@@ -1,12 +1,32 @@
 import { Logger } from '@nestjs/common';
 import { Market, OrderStatus, OrderType, Side } from '@prisma/client';
-import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
 
 describe('TradingOrderExecutionService', () => {
-  const submissionGateway = (domestic: unknown = {}, overseas: unknown = {}) => (
-    new TradingBrokerOrderSubmissionService(domestic as never, overseas as never)
-  );
+  const submissionGateway = (domestic: any = {}, overseas: any = {}) => ({
+    submit: jest.fn((signal) => {
+      if (signal.market === Market.DOMESTIC) {
+        return signal.side === Side.BUY
+          ? domestic.orderBuy(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
+          : domestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
+      }
+      return signal.side === Side.BUY
+        ? overseas.orderBuy(
+          signal.exchangeCode,
+          signal.stockCode,
+          signal.quantity,
+          signal.price || 0,
+          signal.orderDivision,
+        )
+        : overseas.orderSell(
+          signal.exchangeCode,
+          signal.stockCode,
+          signal.quantity,
+          signal.price || 0,
+          signal.orderDivision,
+        );
+    }),
+  });
   const noopFailureNotifier = () => ({ notify: jest.fn().mockResolvedValue(undefined) });
 
   afterEach(() => {

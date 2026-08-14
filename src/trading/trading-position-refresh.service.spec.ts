@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { BalanceItem } from '../kis/types/kis-api.types';
 import { TradingPositionRefreshService } from './trading-position-refresh.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
@@ -9,16 +8,15 @@ import { TradingPositionSyncService } from './trading-position-sync.service';
 describe('TradingPositionRefreshService', () => {
   let service: TradingPositionRefreshService;
 
-  const kisDomestic = { getBalance: jest.fn() };
-  const kisOverseas = { getBalance: jest.fn() };
+  const port = { getBalance: jest.fn() };
+  const registry = { get: jest.fn().mockReturnValue(port) };
   const positionSync = { syncPositions: jest.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TradingPositionRefreshService,
-        { provide: KisDomesticService, useValue: kisDomestic },
-        { provide: KisOverseasService, useValue: kisOverseas },
+        { provide: BrokerPortRegistry, useValue: registry },
         { provide: TradingPositionSyncService, useValue: positionSync },
       ],
     }).compile();
@@ -43,26 +41,24 @@ describe('TradingPositionRefreshService', () => {
         profitRate: 1.43,
       },
     ];
-    kisDomestic.getBalance.mockResolvedValue(snapshot);
+    port.getBalance.mockResolvedValue(snapshot);
     positionSync.syncPositions.mockResolvedValue(undefined);
 
     const result = await service.refresh('DOMESTIC');
 
-    expect(kisDomestic.getBalance).toHaveBeenCalledTimes(1);
-    expect(kisOverseas.getBalance).not.toHaveBeenCalled();
+    expect(port.getBalance).toHaveBeenCalledWith('DOMESTIC');
     expect(positionSync.syncPositions).toHaveBeenCalledWith('DOMESTIC', snapshot);
     expect(result).toBe(snapshot);
   });
 
   it('treats an empty overseas snapshot as a successful no-holdings result', async () => {
     const snapshot: BalanceItem[] = [];
-    kisOverseas.getBalance.mockResolvedValue(snapshot);
+    port.getBalance.mockResolvedValue(snapshot);
     positionSync.syncPositions.mockResolvedValue(undefined);
 
     const result = await service.refresh('OVERSEAS');
 
-    expect(kisOverseas.getBalance).toHaveBeenCalledTimes(1);
-    expect(kisDomestic.getBalance).not.toHaveBeenCalled();
+    expect(port.getBalance).toHaveBeenCalledWith('OVERSEAS');
     expect(positionSync.syncPositions).toHaveBeenCalledWith('OVERSEAS', snapshot);
     expect(result).toBe(snapshot);
   });
@@ -70,7 +66,7 @@ describe('TradingPositionRefreshService', () => {
   it('warns, rethrows, and does not synchronize when KIS balance lookup fails', async () => {
     const failure = new Error('balance unavailable');
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    kisDomestic.getBalance.mockRejectedValue(failure);
+    port.getBalance.mockRejectedValue(failure);
 
     await expect(service.refresh('DOMESTIC')).rejects.toBe(failure);
 

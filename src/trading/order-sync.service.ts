@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Market } from '@prisma/client';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { Broker, Market } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PrismaService } from '../prisma.service';
 import { OrderSyncOptions, OrderSyncWindow, PositionQuantitySnapshot } from './types';
@@ -17,8 +16,7 @@ export class OrderSyncService {
 
   constructor(
     private orderReconciliationService: TradingOrderReconciliationService,
-    private kisDomestic: KisDomesticService,
-    private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private prisma: PrismaService,
     private configService: ConfigService,
     private readonly accountCashSync: TradingAccountCashSyncService,
@@ -68,10 +66,8 @@ export class OrderSyncService {
     startDate: string,
     endDate: string,
   ): Promise<BrokerOrderStatus[]> {
-    if (market === 'DOMESTIC') {
-      return this.kisDomestic.getOrderExecutions(startDate, endDate);
-    }
-    return this.kisOverseas.getOrderExecutions(startDate, endDate);
+    // Phase 3: active broker 루프로 확장
+    return this.registry.get(Broker.KIS).getOrderExecutions(market as Market, startDate, endDate);
   }
 
   private async mapUnfilledOrders(
@@ -79,7 +75,7 @@ export class OrderSyncService {
     brokerOrders: BrokerOrderStatus[],
   ): Promise<UnfilledOrder[]> {
     if (market === 'DOMESTIC') {
-      return this.kisDomestic.getUnfilledOrders();
+      return this.registry.get(Broker.KIS).getUnfilledOrders(Market.DOMESTIC);
     }
 
     if (this.isPaper) {
@@ -96,7 +92,7 @@ export class OrderSyncService {
         }));
     }
 
-    return this.kisOverseas.getUnfilledOrders();
+    return this.registry.get(Broker.KIS).getUnfilledOrders(Market.OVERSEAS);
   }
 
   private async getOpenOrderWindow(

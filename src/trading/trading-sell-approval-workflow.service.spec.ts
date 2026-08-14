@@ -5,7 +5,6 @@ import {
   WatchStockExecutionEventType,
 } from '@prisma/client';
 import { Logger } from '@nestjs/common';
-import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
 import { TradingSellApprovalNotificationService } from './trading-sell-approval-notification.service';
 import { TradingSellApprovalWorkflowService } from './trading-sell-approval-workflow.service';
 
@@ -15,9 +14,17 @@ describe('TradingSellApprovalWorkflowService', () => {
   const matchingBrokerContext = () => ({
     matchesCurrentContext: jest.fn().mockReturnValue(true),
   });
-  const submissionGateway = (domestic: unknown = {}, overseas: unknown = {}) => (
-    new TradingBrokerOrderSubmissionService(domestic as never, overseas as never)
-  );
+  const submissionGateway = (domestic: any = {}, overseas: any = {}) => ({
+    submit: jest.fn((signal) => signal.market === Market.DOMESTIC
+      ? domestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
+      : overseas.orderSell(
+        signal.exchangeCode,
+        signal.stockCode,
+        signal.quantity,
+        signal.price || 0,
+        signal.orderDivision,
+      )),
+  });
   const approvalNotification = (prisma: unknown, slack?: unknown) => (
     new TradingSellApprovalNotificationService(prisma as never, slack as never)
   );

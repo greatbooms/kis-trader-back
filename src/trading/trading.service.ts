@@ -12,7 +12,7 @@ import {
   MomentumBreakoutStrategyParams,
   GridMeanReversionStrategyParams,
 } from './types';
-import { Market, OrderType, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Broker, Market, OrderType, OrderStatus, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { TradingSellApprovalService } from './trading-sell-approval.service';
@@ -283,6 +283,9 @@ export class TradingService {
     for (const ctx of contexts) {
       try {
         const { signals, skipReasons, details } = await strategy.evaluateStock(ctx);
+        for (const signal of signals) {
+          signal.broker = ctx.watchStock.broker ?? Broker.KIS;
+        }
         const terminalQuotaReached = this.isTerminalQuotaExhaustedSkip(skipReasons);
 
         if (strategy.name === 'infinite-buy-v4' && details?.v4StateUpdate) {
@@ -958,6 +961,7 @@ export class TradingService {
     watchStock:
       | {
           id: string;
+          broker?: Broker;
           market: Market;
           exchangeCode: string;
           stockCode: string;
@@ -1010,6 +1014,7 @@ export class TradingService {
     const tMetadata = tValue !== undefined ? { tValue } : {};
 
     const followUpSignal: TradingSignal = {
+      broker: watchStock.broker ?? Broker.KIS,
       market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: watchStock.exchangeCode,
       stockCode: watchStock.stockCode,
@@ -1031,6 +1036,7 @@ export class TradingService {
     const ctx: StockStrategyContext = {
       watchStock: {
         id: watchStock.id,
+        broker: watchStock.broker ?? Broker.KIS,
         market: watchStock.market as 'DOMESTIC' | 'OVERSEAS',
         exchangeCode: watchStock.exchangeCode,
         stockCode: watchStock.stockCode,

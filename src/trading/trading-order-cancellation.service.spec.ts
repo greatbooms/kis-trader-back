@@ -1,6 +1,20 @@
 import { TradingOrderCancellationService } from './trading-order-cancellation.service';
 
 describe('TradingOrderCancellationService', () => {
+  const registry = (domestic: any, overseas: any) => ({
+    get: jest.fn().mockReturnValue({
+      cancelOrder: jest.fn((request) => request.market === 'DOMESTIC'
+        ? domestic.cancelOrder(request.orderNo, request.stockCode, request.qty)
+        : overseas.cancelOrder(
+          request.exchangeCode,
+          request.orderNo,
+          request.stockCode,
+          request.qty,
+          request.price,
+        )),
+    }),
+  });
+
   const currentBrokerContext = () => ({
     getCurrentContext: jest.fn().mockReturnValue({
       environment: 'PROD',
@@ -12,6 +26,7 @@ describe('TradingOrderCancellationService', () => {
 
   const tradeRecord = (overrides: Record<string, unknown> = {}) => ({
     id: 'trade-1',
+    broker: 'KIS',
     brokerEnvironment: 'PROD',
     brokerAccountHash: 'current-account-hash',
     market: 'DOMESTIC',
@@ -49,8 +64,7 @@ describe('TradingOrderCancellationService', () => {
     const recovery = { claimCancellation: jest.fn() };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      overseas as never,
+      registry(domestic, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -87,8 +101,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      {} as never,
-      overseas as never,
+      registry({}, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -154,8 +167,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -201,8 +213,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -233,8 +244,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -297,8 +307,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -343,8 +352,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       liveSwitch as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -395,8 +403,7 @@ describe('TradingOrderCancellationService', () => {
     brokerContext.matchesCurrentContext.mockReturnValue(false);
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
@@ -450,8 +457,7 @@ describe('TradingOrderCancellationService', () => {
     });
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
@@ -496,8 +502,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -545,8 +550,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -599,8 +603,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      {} as never,
-      overseas as never,
+      registry({}, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -644,8 +647,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
@@ -693,8 +695,7 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
