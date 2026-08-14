@@ -119,7 +119,15 @@ export interface BrokerPort {
 
 ### D11. 토스 인증은 in-memory 토큰 캐시로 충분하다
 
-OAuth2 Client Credentials는 상태 없는 재발급이 가능하고 AUTH 그룹 한도(5/s)가 넉넉하므로 `KisToken`류 DB 영속화를 하지 않는다. 만료 전 갱신 + 401 시 1회 재발급. client id/secret은 `ConfigService` 경유 (`toss.appKey`, `toss.appSecret`, `toss.accountNo` — `.env`에만). 계좌 API 호출 시 `X-Tossinvest-Account` 헤더 필수.
+OAuth2 Client Credentials는 상태 없는 재발급이 가능하고 AUTH 그룹 한도(5/s)가 넉넉하므로 `KisToken`류 DB 영속화를 하지 않는다. 만료 전 갱신 + 401 시 1회 재발급. 자격증명은 `ConfigService` 경유이며 env 변수명은 KIS 컨벤션(`src/config/configuration.ts`)을 따라 다음으로 확정한다:
+
+| env 변수 (`.env.dev`/`.env.prod`) | config 경로 | 내용 |
+|---|---|---|
+| `TOSS_CLIENT_ID` | `toss.clientId` | 토스 오픈API Client ID |
+| `TOSS_CLIENT_SECRET` | `toss.clientSecret` | 토스 오픈API Client Secret |
+| `TOSS_ACCOUNT_NO` | `toss.accountNo` | 계좌번호 (`X-Tossinvest-Account` 헤더 값) |
+
+Phase 2에서 `configuration.ts`에 매핑 추가. 그 전에는 이 변수들을 읽는 코드가 없으므로 `.env`에 미리 넣어도 무해하고, 없어도 부팅에 영향 없다. 계좌 API 호출 시 `X-Tossinvest-Account` 헤더 필수.
 
 ## 3. 신규 모듈: `src/toss/`
 
