@@ -12,6 +12,7 @@ import { TradingBrokerOrderRecoveryService } from '../trading/trading-broker-ord
 import { TradingLiveSwitchService } from '../trading/trading-live-switch.service';
 import { TradingOrderGuardService } from '../trading/trading-order-guard.service';
 import { TradingPositionRefreshService } from '../trading/trading-position-refresh.service';
+import { ManualSellInput } from './dto';
 
 describe('TradeRecordManualOrderService', () => {
   let service: TradeRecordManualOrderService;
@@ -182,6 +183,7 @@ describe('TradeRecordManualOrderService', () => {
       mockPositionFindMany.mockResolvedValue([]);
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -193,18 +195,18 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
     });
 
-    it('fails closed before context, guard, or broker access when broker is omitted and holdings are ambiguous', async () => {
+    it('rejects a legacy missing-broker request before resolving a KIS position', async () => {
       mockPositionFindMany.mockResolvedValue([
         { broker: Broker.KIS, quantity: 2, exchangeCode: 'KRX', stockName: '삼성전자' },
-        { broker: Broker.TOSS, quantity: 3, exchangeCode: 'KRX', stockName: '삼성전자' },
       ]);
 
       await expect(service.manualSell({
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
-      })).rejects.toThrow('보유 포지션을 하나로 식별할 수 없습니다. 브로커를 지정해주세요.');
+      } as ManualSellInput)).rejects.toThrow('브로커를 지정해주세요.');
 
+      expect(mockPositionFindMany).not.toHaveBeenCalled();
       expect(mockBrokerContext.getCurrentContext).not.toHaveBeenCalled();
       expect(mockOrderGuard.admit).not.toHaveBeenCalled();
       expect(mockRegistry.get).not.toHaveBeenCalled();
@@ -256,25 +258,21 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockRegistry.requireActive).toHaveBeenCalledWith(Broker.TOSS);
     });
 
-    it('fails closed before price or admission when broker is omitted and the sole TOSS position is disabled', async () => {
+    it('never infers TOSS for a legacy missing-broker request', async () => {
       mockPositionFindMany.mockResolvedValue([{
         broker: Broker.TOSS,
         quantity: 3,
         exchangeCode: 'KRX',
         stockName: '삼성전자',
       }]);
-      mockRegistry.isActive.mockReturnValue(false);
-
       await expect(service.manualSell({
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
         quantity: 2,
-      })).resolves.toEqual({
-        success: false,
-        message: 'TOSS 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.',
-      });
+      } as ManualSellInput)).rejects.toThrow('브로커를 지정해주세요.');
 
+      expect(mockPositionFindMany).not.toHaveBeenCalled();
       expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
       expect(mockOrderGuard.admit).not.toHaveBeenCalled();
       expect(mockRegistry.requireActive).not.toHaveBeenCalled();
@@ -285,6 +283,7 @@ describe('TradeRecordManualOrderService', () => {
       'rejects an invalid explicit quantity (%s) before DB or KIS access',
       async (quantity) => {
         await expect(service.manualSell({
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: '',
           stockCode: '005930',
@@ -337,6 +336,7 @@ describe('TradeRecordManualOrderService', () => {
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
 
       await service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -407,6 +407,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'nasd',
         stockCode: 'tqqq',
@@ -468,6 +469,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -532,6 +534,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -594,6 +597,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -653,6 +657,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -715,6 +720,7 @@ describe('TradeRecordManualOrderService', () => {
 
       await expect(
         service.manualSell({
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: '',
           stockCode: '005930',
@@ -756,7 +762,7 @@ describe('TradeRecordManualOrderService', () => {
       });
     });
 
-    it('keeps the default sole-KIS omitted-broker manual sell behavior unchanged', async () => {
+    it('submits an explicit KIS manual sell without broker inference', async () => {
       mockPrisma.position.findFirst.mockResolvedValue({
         quantity: 5,
         exchangeCode: 'KRX',
@@ -786,6 +792,7 @@ describe('TradeRecordManualOrderService', () => {
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         stockCode: '005930',
         quantity: 2,
@@ -794,6 +801,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockPrisma.position.findFirst).toHaveBeenCalledWith({
         where: {
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -858,6 +866,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'nasd',
         stockCode: 'DUAL',
@@ -870,6 +879,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockPrisma.position.findFirst).toHaveBeenCalledWith({
         where: {
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'DUAL',
@@ -913,6 +923,7 @@ describe('TradeRecordManualOrderService', () => {
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.manualSell({
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -962,6 +973,7 @@ describe('TradeRecordManualOrderService', () => {
       mockRecovery.markSubmissionUnknown.mockResolvedValue(true);
 
       await expect(service.manualSell({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: '',
         stockCode: '005930',
@@ -1014,6 +1026,7 @@ describe('TradeRecordManualOrderService', () => {
 
       await expect(
         service.manualSell({
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: '',
           stockCode: '005930',
@@ -1039,7 +1052,7 @@ describe('TradeRecordManualOrderService', () => {
     it('blocks the mutation when live trading is disabled', async () => {
       service = await createService(false);
 
-      const result = await service.manualSell({ market: 'DOMESTIC', exchangeCode: '', stockCode: '005930' });
+      const result = await service.manualSell({ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: '', stockCode: '005930' });
 
       expect(result).toEqual({
         success: false,
@@ -2095,7 +2108,7 @@ describe('TradeRecordResolver manual order mutations', () => {
       cancelTradeOrder: jest.fn().mockResolvedValue({ success: true, orderNo: 'cancel-1' }),
     };
     const resolver = new TradeRecordResolver(tradeRecordService, manualOrderService as never);
-    const sellInput = { market: 'DOMESTIC', exchangeCode: '', stockCode: '005930', quantity: 1 } as const;
+    const sellInput = { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: '', stockCode: '005930', quantity: 1 } as const;
     const cancelInput = { tradeRecordId: 'trade-1' };
 
     await expect(resolver.manualSell(sellInput)).resolves.toEqual({ success: true, orderNo: 'sell-1' });

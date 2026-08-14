@@ -177,6 +177,49 @@ describe('OrderSyncService', () => {
     expect(mockKisOverseas.getUnfilledOrders).not.toHaveBeenCalled();
   });
 
+  it('propagates a targeted broker sync failure', async () => {
+    const failure = new Error('KIS order API unavailable');
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockRejectedValue(failure);
+
+    await expect(
+      service.syncMarketOrders('DOMESTIC', [], { force: true, broker: Broker.KIS }),
+    ).rejects.toThrow('KIS order API unavailable');
+    expect(mockOrderReconciliationService.reconcileOpenOrders).not.toHaveBeenCalled();
+  });
+
+  it('preserves pre-Phase-3 failure propagation when KIS is the only active broker', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockRejectedValue(new Error('KIS-only unavailable'));
+
+    await expect(service.syncMarketOrders('DOMESTIC', [], { force: true }))
+      .rejects.toThrow('KIS-only unavailable');
+  });
+
+  it('propagates a targeted broker unfilled-order read failure instead of returning an empty list', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockRejectedValue(new Error('KIS unfilled unavailable'));
+
+    await expect(service.getMarketUnfilledOrders('DOMESTIC', Broker.KIS))
+      .rejects.toThrow('KIS unfilled unavailable');
+  });
+
+  it('does not turn a KIS-only unfilled-order failure into an empty list', async () => {
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockRejectedValue(new Error('KIS-only unfilled unavailable'));
+
+    await expect(service.getMarketUnfilledOrders('DOMESTIC'))
+      .rejects.toThrow('KIS-only unfilled unavailable');
+  });
+
   it('refreshes domestic cash once when reconciliation finds new fills', async () => {
     mockPrisma.tradeRecord.findMany.mockResolvedValue([
       { createdAt: new Date('2026-04-08T00:30:00.000Z') },

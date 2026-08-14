@@ -166,6 +166,28 @@ GraphQL/프론트: WatchStock CRUD input/object에 `broker` 필드 추가(기본
 
 ## 5. 롤아웃 순서
 
+### 운영 migration 경계
+
+`20260814163000_drop_legacy_brokerless_uniques`(migration 28) 적용은 **one-way boundary**다. 이 migration 이후에는 pre-broker(pre-Phase-0/1) binary로의 rollback을 지원하지 않는다.
+
+권장 운영 순서는 다음과 같다.
+
+1. `TRADING_ENABLED=false`로 거래를 중지한다.
+2. 운영 DB를 백업한다.
+3. migration 27 `20260814110203_add_broker_dimension`을 적용한다.
+4. 새 binary를 배포한다.
+5. stability window 동안 KIS 동작과 broker-scoped 데이터를 확인한다.
+6. migration 28 `20260814163000_drop_legacy_brokerless_uniques`를 적용한다.
+7. TOSS를 활성화한다.
+
+| Binary | migration 27 전 | migration 27 적용, 28 전 | migration 28 적용 후 |
+|---|---|---|---|
+| pre-broker (pre-Phase-0/1) | OK | OK | 지원하지 않음 |
+| Phase 0-2 | migration 27 필요 | OK | OK |
+| Phase 3 | migration 27 필요 | OK (동일 종목의 KIS/TOSS 동시 등록 전에는) | OK; 동일 종목을 두 broker에서 운용하려면 migration 28 필수 |
+
+Migration 28 이후 legacy unique index를 되살리는 비상 복구는 일반 rollback이 아니다. 먼저 거래를 중지하고 백업한 뒤, `positions`, `watch_stocks`, `risk_snapshots`, `strategy_allocations`에서 legacy key 기준 broker 간 중복 데이터를 병합·제거해야 index를 다시 만들 수 있다. Binary rollback 전에는 legacy `account_status_cache`를 최신 KIS 잔고로 확인·재시드한다. Phase 3 호환 기간에는 KIS cash refresh가 scoped/legacy row를 함께 갱신하지만, 이 dual-write 제거 이후의 rollback에는 명시적 재시드가 필수다.
+
 1. **Phase 0 — 스키마**: `Broker` enum + 컬럼 5곳 + unique 키 확장. 마이그레이션 1개. 기존 동작 무변경 (전부 KIS 기본값)
 2. **Phase 1 — BrokerPort 추상화**: 인터페이스 정의, KIS 래퍼 어댑터, registry, gateway/sync 계열 라우팅 전환. **토스 없이 KIS 단일로 기존 테스트 전부 통과가 게이트**
 3. **Phase 2 — 토스 어댑터**: `src/toss/` 구현 + 유닛 테스트 (UNKNOWN 계약, 상태 매핑, rate limit 큐, LOC 매핑 중점)

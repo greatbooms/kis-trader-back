@@ -119,6 +119,29 @@ export class TradingAccountCashSyncService {
         create: { key, value },
         update: { value },
       });
+
+      if (broker === Broker.KIS) {
+        await tx.$queryRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${ACCOUNT_STATUS_CACHE_KEY}, 0))::text
+        `;
+        const legacy = await tx.appSetting.findUnique({
+          where: { key: ACCOUNT_STATUS_CACHE_KEY },
+        });
+        const legacyCache = legacy?.value as AccountStatusCache | null;
+        const legacyValue = {
+          cashBalances: [
+            ...(legacyCache?.cashBalances ?? []).filter((item) => item.market !== market),
+            ...cashBalances.map((item) => this.toLegacyJsonCashBalance(item)),
+          ],
+          lastSyncedAt: new Date().toISOString(),
+        } as unknown as Prisma.InputJsonValue;
+
+        await tx.appSetting.upsert({
+          where: { key: ACCOUNT_STATUS_CACHE_KEY },
+          create: { key: ACCOUNT_STATUS_CACHE_KEY, value: legacyValue },
+          update: { value: legacyValue },
+        });
+      }
     });
   }
 
@@ -129,6 +152,23 @@ export class TradingAccountCashSyncService {
   private toJsonCashBalance(broker: Broker, item: AccountCashBalance): Prisma.InputJsonObject {
     return {
       broker,
+      market: item.market,
+      currencyCode: item.currencyCode,
+      currencyName: item.currencyName ?? null,
+      amount: item.amount,
+      withdrawableAmount: item.withdrawableAmount ?? null,
+      orderableAmount: item.orderableAmount ?? null,
+      generalOrderableAmount: item.generalOrderableAmount ?? null,
+      integratedOrderableAmount: item.integratedOrderableAmount ?? null,
+      pendingBuyAmount: item.pendingBuyAmount ?? null,
+      pendingSellAmount: item.pendingSellAmount ?? null,
+      receivableAmount: item.receivableAmount ?? null,
+      marginAmount: item.marginAmount ?? null,
+    };
+  }
+
+  private toLegacyJsonCashBalance(item: AccountCashBalance): Prisma.InputJsonObject {
+    return {
       market: item.market,
       currencyCode: item.currencyCode,
       currencyName: item.currencyName ?? null,

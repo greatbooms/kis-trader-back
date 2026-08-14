@@ -38,6 +38,49 @@ describe('TradingAccountCashSyncService', () => {
     jest.clearAllMocks();
   });
 
+  it('refreshes KIS cash into scoped and legacy rows in the same transaction', async () => {
+    let inTransaction = false;
+    const upsertInTransaction: boolean[] = [];
+    mockPrisma.$transaction.mockImplementation(async (work) => {
+      inTransaction = true;
+      try {
+        return await work(mockPrisma);
+      } finally {
+        inTransaction = false;
+      }
+    });
+    mockPrisma.appSetting.upsert.mockImplementation(async () => {
+      upsertInTransaction.push(inTransaction);
+      return {};
+    });
+    mockPrisma.appSetting.findUnique.mockImplementation(async ({ where: { key } }) => key === 'account_status_cache'
+      ? {
+          value: {
+            cashBalances: [
+              { market: 'DOMESTIC', currencyCode: 'KRW', amount: 1 },
+              { market: 'OVERSEAS', currencyCode: 'USD', amount: 99 },
+            ],
+            lastSyncedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }
+      : null);
+    mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 1_500_000 });
+
+    await service.refreshMarketCash(Broker.KIS, 'DOMESTIC');
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(upsertInTransaction).toEqual([true, true]);
+    expect(mockPrisma.appSetting.upsert.mock.calls.map(([arg]) => arg.where.key)).toEqual([
+      'account_status_cache:KIS:DOMESTIC',
+      'account_status_cache',
+    ]);
+    const legacyValue = mockPrisma.appSetting.upsert.mock.calls[1][0].update.value;
+    expect(legacyValue.cashBalances).toEqual([
+      expect.objectContaining({ market: 'OVERSEAS', currencyCode: 'USD', amount: 99 }),
+      expect.objectContaining({ market: 'DOMESTIC', currencyCode: 'KRW', amount: 1_500_000 }),
+    ]);
+  });
+
   it('writes KIS domestic cash to its broker-market row without mixing legacy overseas cash', async () => {
     mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 1_500_000 });
     mockPrisma.appSetting.findUnique.mockResolvedValue({
@@ -74,7 +117,8 @@ describe('TradingAccountCashSyncService', () => {
       },
     });
     expect(mockPrisma.$queryRaw.mock.calls[0][1]).toBe('account_status_cache:KIS:DOMESTIC');
-    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.$queryRaw.mock.calls[1][1]).toBe('account_status_cache');
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it('routes Toss overseas cash to the Toss broker-market row', async () => {

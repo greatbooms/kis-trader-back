@@ -274,6 +274,28 @@ describe('TradingOrchestrator', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[KIS OVERSEAS]'));
   });
 
+  it('skips only the broker whose targeted order sync fails before strategy evaluation', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockRegistry.getActive.mockReturnValue([mockKisPort, mockTossPort]);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderSyncService.syncMarketOrders.mockImplementation(async (_market, _positions, options) => {
+      if (options?.broker === Broker.TOSS) throw new Error('TOSS order API unavailable');
+    });
+    const warn = jest.spyOn((orchestrator as any).logger, 'warn');
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      buildWatchStock(Broker.KIS, 'KIS-TQQQ'),
+      buildWatchStock(Broker.TOSS, 'TOSS-TQQQ'),
+    ]);
+
+    expect(mockTradingService.executePerStockStrategy).toHaveBeenCalledTimes(1);
+    expect(mockTradingService.executePerStockStrategy.mock.calls[0][1][0].watchStock.broker)
+      .toBe(Broker.KIS);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('[TOSS OVERSEAS] Trading group failed: TOSS order API unavailable'),
+    );
+  });
+
   it('isolates the running mutex by broker and market', async () => {
     jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
     mockRegistry.getActive.mockReturnValue([mockKisPort, mockTossPort]);

@@ -1859,7 +1859,11 @@
           {
             "name": "broker",
             "description": null,
-            "type": { "kind": "ENUM", "name": "Broker", "ofType": null },
+            "type": {
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": { "kind": "ENUM", "name": "Broker", "ofType": null }
+            },
             "defaultValue": null,
             "isDeprecated": false,
             "deprecationReason": null

@@ -851,7 +851,7 @@ input UpdateWatchStockInput {
 }
 
 input ManualSellInput {
-  broker: Broker
+  broker: Broker!
   stockCode: String!
   market: String!
   exchangeCode: String!

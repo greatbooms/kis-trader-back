@@ -40,6 +40,9 @@ export class TradeRecordManualOrderService {
 
   /** 수동 매도 */
   async manualSell(input: ManualSellInput): Promise<{ success: boolean; message?: string; orderNo?: string }> {
+    if (!input.broker) {
+      throw new Error('브로커를 지정해주세요.');
+    }
     if (!this.liveSwitch.isEnabled()) {
       return { success: false, message: '현재 환경에서는 실거래가 비활성화되어 수동 매도를 실행할 수 없습니다.' };
     }
@@ -53,7 +56,7 @@ export class TradeRecordManualOrderService {
 
     let canonicalKey: OrderAdmissionKey = {
       // Resolved from the unique matching position before admission.
-      broker: input.broker as Broker,
+      broker: input.broker,
       market: input.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: input.market === 'DOMESTIC'
         ? 'KRX'
@@ -63,7 +66,7 @@ export class TradeRecordManualOrderService {
     };
     const positions = await this.prisma.position.findMany({
       where: {
-        ...(input.broker ? { broker: input.broker } : {}),
+        broker: input.broker,
         market: canonicalKey.market as Market,
         exchangeCode: canonicalKey.exchangeCode,
         stockCode: canonicalKey.stockCode,
@@ -74,7 +77,7 @@ export class TradeRecordManualOrderService {
       if (positions.length === 0) {
         throw new Error('보유 포지션을 찾을 수 없습니다.');
       }
-      throw new Error('보유 포지션을 하나로 식별할 수 없습니다. 브로커를 지정해주세요.');
+      throw new Error('보유 포지션을 하나로 식별할 수 없습니다.');
     }
     const position = positions[0];
     if (input.broker && position.broker !== input.broker) {

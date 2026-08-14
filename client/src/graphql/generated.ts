@@ -254,7 +254,7 @@ export type LoginInput = {
 };
 
 export type ManualSellInput = {
-  broker?: InputMaybe<Broker>;
+  broker: Broker;
   exchangeCode: Scalars["String"]["input"];
   market: Scalars["String"]["input"];
   /** 매도 수량 (미지정 시 전량) */

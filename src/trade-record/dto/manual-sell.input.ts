@@ -4,9 +4,8 @@ import { Broker } from '@prisma/client';
 
 @InputType()
 export class ManualSellInput {
-  @Field(() => Broker, { nullable: true })
-  @IsOptional()
-  broker?: Broker;
+  @Field(() => Broker)
+  broker: Broker;
 
   @Field()
   stockCode: string;

@@ -53,7 +53,9 @@ describe('TradingPositionSyncService', () => {
         where: {
           broker: Broker.KIS,
           market: 'DOMESTIC',
-          stockCode: { notIn: ['005930'] },
+          NOT: {
+            OR: [{ exchangeCode: 'KRX', stockCode: '005930' }],
+          },
         },
       });
     });
@@ -99,7 +101,51 @@ describe('TradingPositionSyncService', () => {
         where: {
           broker: Broker.KIS,
           market: 'OVERSEAS',
-          stockCode: { notIn: ['TQQQ'] },
+          NOT: {
+            OR: [{ exchangeCode: 'NASD', stockCode: 'TQQQ' }],
+          },
+        },
+      });
+    });
+
+    it('fails closed before writes when an overseas holding has an unresolved venue', async () => {
+      await expect(service.syncPositions(Broker.TOSS, 'OVERSEAS', [{
+        stockCode: 'TQQQ',
+        stockName: 'ProShares UltraPro QQQ',
+        quantity: 2,
+        avgPrice: 80,
+        currentPrice: 82,
+        profitLoss: 4,
+        profitRate: 2.5,
+        exchangeCode: 'US',
+      }])).rejects.toThrow('Unresolved overseas venue');
+
+      expect(mockPrisma.position.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.position.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('deletes stale overseas positions by exchange and stock tuple', async () => {
+      mockPrisma.position.upsert.mockResolvedValue({});
+      mockPrisma.position.deleteMany.mockResolvedValue({ count: 1 });
+
+      await service.syncPositions(Broker.KIS, 'OVERSEAS', [{
+        stockCode: 'TQQQ',
+        stockName: 'ProShares UltraPro QQQ',
+        quantity: 2,
+        avgPrice: 80,
+        currentPrice: 82,
+        profitLoss: 4,
+        profitRate: 2.5,
+        exchangeCode: 'NASD',
+      }]);
+
+      expect(mockPrisma.position.deleteMany).toHaveBeenCalledWith({
+        where: {
+          broker: Broker.KIS,
+          market: 'OVERSEAS',
+          NOT: {
+            OR: [{ exchangeCode: 'NASD', stockCode: 'TQQQ' }],
+          },
         },
       });
     });

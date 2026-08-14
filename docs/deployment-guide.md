@@ -76,6 +76,28 @@ Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20
 
 `TRADING_ENABLED=false`인 동안에도 인증된 GraphQL/웹 복구와 허용된 Slack 복구는 동작합니다. 새 주문·취소 POST와 거래 cron만 차단됩니다.
 
+### 멀티 브로커 migration 롤아웃
+
+`20260814163000_drop_legacy_brokerless_uniques`(migration 28)를 적용한 시점부터 pre-broker(pre-Phase-0/1) binary로의 rollback은 지원하지 않습니다. 운영 적용 순서는 반드시 다음 경계를 지킵니다.
+
+1. `TRADING_ENABLED=false`로 거래를 중지합니다.
+2. 운영 DB를 백업합니다.
+3. migration 27 `20260814110203_add_broker_dimension`을 적용합니다.
+4. 새 binary를 배포합니다.
+5. stability window 동안 KIS 주문·동기화와 broker-scoped 데이터를 확인합니다.
+6. migration 28 `20260814163000_drop_legacy_brokerless_uniques`를 적용합니다.
+7. TOSS broker switch를 활성화합니다.
+
+| Binary | migration 27 전 | migration 27 적용, 28 전 | migration 28 적용 후 |
+|---|---|---|---|
+| pre-broker (pre-Phase-0/1) | OK | OK | 지원하지 않음 |
+| Phase 0-2 | migration 27 필요 | OK | OK |
+| Phase 3 | migration 27 필요 | OK (동일 종목의 KIS/TOSS 동시 등록 전에는) | OK; 동일 종목을 두 broker에서 운용하려면 migration 28 필수 |
+
+Migration 28 이후 legacy unique index를 재생성해야 하는 비상 복구에서는 먼저 거래를 중지하고 DB를 백업합니다. 그 다음 `positions`, `watch_stocks`, `risk_snapshots`, `strategy_allocations`의 legacy key 기준 broker 간 중복을 병합·제거해야 합니다. 이 절차는 지원되는 pre-broker rollback이 아닙니다.
+
+Binary rollback 전에는 legacy `account_status_cache` row가 최신 KIS 잔고인지 확인하고 필요하면 재시드합니다. Phase 3 호환 기간에는 KIS refresh가 broker-scoped row와 legacy row를 같은 transaction에서 갱신하지만, Phase 2 binary가 더 이상 rollback target이 아니어서 dual-write를 제거한 뒤에는 수동 재시드가 필수입니다. TOSS cash는 legacy row에 기록하지 않습니다.
+
 ## NAS 사전 준비
 
 필수:

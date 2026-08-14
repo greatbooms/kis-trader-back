@@ -38,12 +38,14 @@ export class OrderSyncService {
     const ports = this.registry.getActive().filter(
       (port) => !options.broker || port.broker === options.broker,
     );
+    const propagateFailure = Boolean(options.broker) || ports.length === 1;
     for (const port of ports) {
       try {
         await this.syncBrokerMarketOrders(port, market, currentPositions, options);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`[${port.broker} ${market}] Order sync failed: ${reason}`);
+        if (propagateFailure) throw error;
       }
     }
   }
@@ -87,6 +89,7 @@ export class OrderSyncService {
     const ports = this.registry.getActive().filter(
       (port) => !broker || port.broker === broker,
     );
+    const propagateFailure = Boolean(broker) || ports.length === 1;
     for (const port of ports) {
       try {
         const window = await this.getOpenOrderWindow(port.broker, market);
@@ -101,6 +104,7 @@ export class OrderSyncService {
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`[${port.broker} ${market}] Unfilled order sync failed: ${reason}`);
+        if (propagateFailure) throw error;
       }
     }
     return scopedOrders;
