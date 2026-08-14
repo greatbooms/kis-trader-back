@@ -1,10 +1,11 @@
 import { KisApiResponse, KisOrderOutput } from './types/kis-api.types';
 import { OrderResult } from './types/order-result.type';
+import { BrokerMutationError } from '../common/broker-mutation.error';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const MAX_BROKER_TIME_SKEW_MS = 10 * 60 * 1000;
 
-export class KisMutationError extends Error {
+export class KisMutationError extends BrokerMutationError {
   readonly name = KisMutationError.name;
 
   constructor(
@@ -12,7 +13,7 @@ export class KisMutationError extends Error {
     message: string,
     readonly response?: KisApiResponse,
   ) {
-    super(message);
+    super(kind, message);
   }
 }
 
@@ -59,7 +60,7 @@ export function classifyKisOrderResponse(
 
 export function classifyKisMutationFailure(error: unknown): OrderResult {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown KIS mutation error');
-  if (error instanceof KisMutationError) {
+  if (error instanceof BrokerMutationError) {
     if (error.kind === 'BUSINESS_REJECTION') {
       return rejectedResult(message);
     }

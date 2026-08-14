@@ -5,6 +5,8 @@
 
 ## 주요 파일
 - `types/` — 여러 모듈이 공유하는 외부 의존 없는 순수 TypeScript 타입
+- `broker-mutation.error.ts` — broker mutation의 명시적 거절과 제출 결과 불명 의미론을 공유하는 기반 에러
+- `utils/broker-account-hash.util.ts` — broker account context용 SHA-256 해시
 - `utils/api-data.util.ts` — KIS API 응답에서 숫자/문자 안전 추출 (`pickNumeric`, `pickString`)
 - `utils/consensus.util.ts` — 컨센서스/투자의견 데이터 요약 (`summarizeEstimatePerform`, `summarizeInvestOpinion`)
 - `utils/dividend.util.ts` — 배당 일정/캘린더 요약 (`summarizeDividendSchedule`)
