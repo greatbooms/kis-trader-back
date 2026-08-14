@@ -1,4 +1,5 @@
 import { TradingOrchestrator } from './trading-orchestrator.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingOrchestrator', () => {
   let orchestrator: TradingOrchestrator;
@@ -49,12 +50,21 @@ describe('TradingOrchestrator', () => {
     getPrice: jest.fn(),
     getBuyableAmount: jest.fn(),
   };
+  const mockKisPort = {
+    broker: Broker.KIS,
+    getDomesticBuyableAmount: jest.fn(() => mockKisDomestic.getBuyableAmount()),
+    getOverseasBuyableAmount: jest.fn((exchangeCode, stockCode, price) =>
+      mockKisOverseas.getBuyableAmount(exchangeCode, stockCode, price)),
+  };
+  const mockTossPort = {
+    broker: Broker.TOSS,
+    getDomesticBuyableAmount: jest.fn(),
+    getOverseasBuyableAmount: jest.fn(),
+  };
   const mockRegistry = {
-    get: jest.fn().mockReturnValue({
-      getDomesticBuyableAmount: jest.fn(() => mockKisDomestic.getBuyableAmount()),
-      getOverseasBuyableAmount: jest.fn((exchangeCode, stockCode, price) =>
-        mockKisOverseas.getBuyableAmount(exchangeCode, stockCode, price)),
-    }),
+    get: jest.fn((broker: Broker) => broker === Broker.KIS ? mockKisPort : mockTossPort),
+    getActive: jest.fn<any, []>(() => [mockKisPort]),
+    isActive: jest.fn((broker: Broker) => mockRegistry.getActive().some((port) => port.broker === broker)),
   };
 
   const mockPrisma = {
@@ -124,6 +134,12 @@ describe('TradingOrchestrator', () => {
     mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 1000000 });
     mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 54.6 });
     mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 1000000 });
+    mockTossPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 2000000 });
+    mockTossPort.getOverseasBuyableAmount.mockResolvedValue({
+      foreignCurrencyAvailable: 2000000,
+      maxQuantity: 100,
+    });
+    mockRegistry.getActive.mockReturnValue([mockKisPort]);
     mockMarketDataCache.getSecFundamentals.mockResolvedValue(undefined);
     mockOrderSyncService.syncMarketOrders.mockResolvedValue(undefined);
     mockMarketStateSync.cancelUnfilledOrders.mockResolvedValue(undefined);
@@ -160,6 +176,7 @@ describe('TradingOrchestrator', () => {
     });
     mockMarketStateSync.getUnfilledOrders.mockResolvedValue([
       {
+        broker: Broker.KIS,
         orderNo: 'order-1',
         stockCode: 'TQQQ',
         side: 'SELL',
@@ -168,6 +185,7 @@ describe('TradingOrchestrator', () => {
         price: 58.42,
       },
       {
+        broker: Broker.KIS,
         orderNo: 'order-2',
         stockCode: 'AAPL',
         side: 'SELL',
@@ -215,10 +233,198 @@ describe('TradingOrchestrator', () => {
     jest.useRealTimers();
   });
 
+  it('Task 4 invariant: Toss disabled executes only the legacy KIS group with KIS cash routing', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      buildWatchStock(Broker.KIS, 'KIS-TQQQ'),
+      buildWatchStock(Broker.TOSS, 'TOSS-TQQQ'),
+    ]);
+
+    expect(mockTradingService.executePerStockStrategy).toHaveBeenCalledTimes(1);
+    expect(mockTradingService.executePerStockStrategy.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        watchStock: expect.objectContaining({ broker: Broker.KIS, stockCode: 'KIS-TQQQ' }),
+        buyableAmount: 1000000,
+      }),
+    ]);
+    expect(mockRegistry.get).toHaveBeenCalledWith(Broker.KIS);
+    expect(mockRegistry.get).not.toHaveBeenCalledWith(Broker.TOSS);
+  });
+
+  it('runs active KIS and TOSS groups sequentially and warns/continues after one broker fails', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    const order: string[] = [];
+    mockRegistry.getActive.mockReturnValue([mockKisPort, mockTossPort]);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    mockTradingService.executePerStockStrategy.mockImplementation(async (_strategy, contexts) => {
+      const broker = contexts[0].watchStock.broker;
+      order.push(broker);
+      if (broker === Broker.KIS) throw new Error('KIS group failed');
+    });
+    const warn = jest.spyOn((orchestrator as any).logger, 'warn');
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      buildWatchStock(Broker.KIS, 'KIS-TQQQ'),
+      buildWatchStock(Broker.TOSS, 'TOSS-TQQQ'),
+    ]);
+
+    expect(order).toEqual([Broker.KIS, Broker.TOSS]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[KIS OVERSEAS]'));
+  });
+
+  it('isolates the running mutex by broker and market', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockRegistry.getActive.mockReturnValue([mockKisPort, mockTossPort]);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    let releaseKis!: () => void;
+    const kisBlocked = new Promise<void>((resolve) => { releaseKis = resolve; });
+    mockTradingService.executePerStockStrategy.mockImplementation(async (_strategy, contexts) => {
+      if (contexts[0].watchStock.broker === Broker.KIS) await kisBlocked;
+    });
+
+    const firstKis = (orchestrator as any).executeMarket(
+      'OVERSEAS',
+      'NASD',
+      [buildWatchStock(Broker.KIS, 'KIS-TQQQ')],
+    );
+    await Promise.resolve();
+    await (orchestrator as any).executeMarket(
+      'OVERSEAS',
+      'NASD',
+      [buildWatchStock(Broker.TOSS, 'TOSS-TQQQ')],
+    );
+    await (orchestrator as any).executeMarket(
+      'OVERSEAS',
+      'NASD',
+      [buildWatchStock(Broker.KIS, 'KIS-SOXL')],
+    );
+    releaseKis();
+    await firstKis;
+
+    const brokers = mockTradingService.executePerStockStrategy.mock.calls
+      .map(([, contexts]) => contexts[0].watchStock.broker);
+    expect(brokers).toEqual([Broker.KIS, Broker.TOSS]);
+  });
+
+  it('routes each broker BUY context to that broker buyable/cash port', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockRegistry.getActive.mockReturnValue([mockKisPort, mockTossPort]);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+
+    await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
+      buildWatchStock(Broker.KIS, 'KIS-TQQQ'),
+      buildWatchStock(Broker.TOSS, 'TOSS-TQQQ'),
+    ]);
+
+    const contexts = mockTradingService.executePerStockStrategy.mock.calls
+      .map(([, group]) => group[0]);
+    expect(contexts).toEqual([
+      expect.objectContaining({
+        watchStock: expect.objectContaining({ broker: Broker.KIS }),
+        buyableAmount: 1000000,
+      }),
+      expect.objectContaining({
+        watchStock: expect.objectContaining({ broker: Broker.TOSS }),
+        buyableAmount: 2000000,
+      }),
+    ]);
+    expect(mockKisPort.getOverseasBuyableAmount).toHaveBeenCalled();
+    expect(mockTossPort.getOverseasBuyableAmount).toHaveBeenCalled();
+  });
+
+  it('adds display-only per-symbol cross-broker exposure to the daily risk alert', async () => {
+    jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
+    mockRiskManagement.evaluateRisk.mockResolvedValue({
+      reasons: ['monitoring threshold'],
+      liquidateAll: false,
+      drawdown: -0.1,
+      dailyPnlRate: -0.02,
+      positionCount: 1,
+      investedRate: 0.5,
+    });
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockMarketStateSync.getUnfilledOrders.mockResolvedValue([]);
+    mockPrisma.position.findMany.mockImplementation(async ({ where }: any) =>
+      where?.broker
+        ? [{
+            broker: Broker.KIS,
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            quantity: 2,
+            avgPrice: 50,
+            currentPrice: 60,
+            totalInvested: 100,
+          }]
+        : [
+            { broker: Broker.KIS, exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 2, currentPrice: 60 },
+            { broker: Broker.TOSS, exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 3, currentPrice: 61 },
+            { broker: Broker.TOSS, exchangeCode: 'NYSE', stockCode: 'TQQQ', quantity: 1, currentPrice: 70 },
+          ],
+    );
+    mockPrisma.riskSnapshot.findFirst.mockResolvedValue({
+      peakValue: 1000,
+      portfolioValue: 900,
+    });
+
+    await (orchestrator as any).executeMarket(
+      'OVERSEAS',
+      'NASD',
+      [buildWatchStock(Broker.KIS, 'TQQQ')],
+    );
+
+    expect(mockSlackService.sendRiskAlert).toHaveBeenCalledWith(expect.objectContaining({
+      broker: Broker.KIS,
+      details: expect.objectContaining({
+        crossBrokerExposures: [
+          {
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            totalValue: 303,
+            brokers: [
+              { broker: Broker.KIS, value: 120 },
+              { broker: Broker.TOSS, value: 183 },
+            ],
+          },
+          {
+            exchangeCode: 'NYSE',
+            stockCode: 'TQQQ',
+            totalValue: 70,
+            brokers: [{ broker: Broker.TOSS, value: 70 }],
+          },
+        ],
+      }),
+    }));
+    expect(mockRiskManagement.evaluateRisk).toHaveBeenCalledTimes(1);
+    expect(mockRiskManagement.evaluateRisk).toHaveBeenCalledWith(Broker.KIS, 'OVERSEAS');
+  });
+
+  function buildWatchStock(broker: Broker, stockCode: string) {
+    return {
+      id: `${broker}-${stockCode}`,
+      broker,
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode,
+      stockName: stockCode,
+      strategyName: 'conservative',
+      isActive: true,
+      quota: null,
+      cycle: 0,
+      maxCycles: 40,
+      stopLossRate: 0,
+      maxPortfolioRate: 1,
+      strategyParams: null,
+    };
+  }
+
   it('should skip overseas exchange execution on exchange holiday', async () => {
     mockPrisma.watchStock.findMany.mockResolvedValue([
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -239,6 +445,7 @@ describe('TradingOrchestrator', () => {
   it('should block manual overseas execution on exchange holiday', async () => {
     mockPrisma.watchStock.findUnique.mockResolvedValue({
       id: 'ws-1',
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NASD',
       stockCode: 'TQQQ',
@@ -262,6 +469,7 @@ describe('TradingOrchestrator', () => {
   it('blocks manual execution for any locked unresolved instrument intent regardless of strategy', async () => {
     mockPrisma.watchStock.findUnique.mockResolvedValue({
       id: 'ws-locked',
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NASD',
       stockCode: 'TQQQ',
@@ -285,6 +493,7 @@ describe('TradingOrchestrator', () => {
 
     expect(mockPrisma.tradeRecord.findFirst).toHaveBeenCalledWith({
       where: {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -305,6 +514,7 @@ describe('TradingOrchestrator', () => {
     jest.spyOn(orchestrator as any, 'shouldExecuteNow').mockReturnValue(true);
     mockMarketStateSync.getUnfilledOrders.mockResolvedValue([
       {
+        broker: Broker.KIS,
         orderNo: 'order-1',
         stockCode: 'TQQQ',
         side: 'SELL',
@@ -317,6 +527,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -326,6 +537,7 @@ describe('TradingOrchestrator', () => {
       },
       {
         id: 'ws-2',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'AAPL',
@@ -358,6 +570,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -388,6 +601,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-locked',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -403,6 +617,7 @@ describe('TradingOrchestrator', () => {
     expect(context.alreadyExecutedToday).toBe(false);
     expect(mockPrisma.tradeRecord.findMany).toHaveBeenNthCalledWith(2, {
       where: {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -427,6 +642,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -446,7 +662,7 @@ describe('TradingOrchestrator', () => {
 
   it('should cancel only matching once-daily watch stock orders when scheduled now', async () => {
     mockPrisma.tradeRecord.findMany.mockResolvedValue([
-      { orderNo: 'order-1' },
+      { broker: Broker.KIS, orderNo: 'order-1' },
     ]);
 
     const shouldExecuteNowSpy = jest
@@ -456,6 +672,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -465,6 +682,7 @@ describe('TradingOrchestrator', () => {
       },
       {
         id: 'ws-2',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'AAPL',
@@ -477,6 +695,7 @@ describe('TradingOrchestrator', () => {
     expect(shouldExecuteNowSpy).toHaveBeenCalled();
     expect(mockMarketStateSync.cancelUnfilledOrders).toHaveBeenCalledWith('OVERSEAS', [
       {
+        broker: Broker.KIS,
         orderNo: 'order-1',
         stockCode: 'TQQQ',
         side: 'SELL',
@@ -503,6 +722,7 @@ describe('TradingOrchestrator', () => {
     await (orchestrator as any).executeMarket('OVERSEAS', 'NASD', [
       {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -521,6 +741,7 @@ describe('TradingOrchestrator', () => {
     mockSlackService.isEnabled.mockReturnValue(true);
     mockPrisma.position.findMany.mockResolvedValueOnce([
       {
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '027410',
@@ -534,6 +755,7 @@ describe('TradingOrchestrator', () => {
       'DOMESTIC',
       [
         {
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '027410',
@@ -550,6 +772,49 @@ describe('TradingOrchestrator', () => {
       tradeEnd: new Date('2026-06-24T23:59:59.999+09:00'),
     });
     expect(mockSlackService.sendDailySummary).toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
+  it('attaches display-only cross-broker exposure to the close summary without risk evaluation', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z'));
+    mockPrisma.position.findMany.mockResolvedValue([
+      {
+        broker: Broker.KIS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 1,
+        currentPrice: 70_000,
+      },
+      {
+        broker: Broker.TOSS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 2,
+        currentPrice: 71_000,
+      },
+    ]);
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockSlackService.sendDailySummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        crossBrokerExposures: [
+          {
+            exchangeCode: 'KRX',
+            stockCode: '005930',
+            totalValue: 212_000,
+            brokers: [
+              { broker: Broker.KIS, value: 70_000 },
+              { broker: Broker.TOSS, value: 142_000 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(mockRiskManagement.evaluateRisk).not.toHaveBeenCalled();
 
     jest.useRealTimers();
   });
@@ -606,6 +871,7 @@ describe('TradingOrchestrator', () => {
     mockSlackService.isEnabled.mockReturnValue(false);
     mockPrisma.position.findMany.mockResolvedValue([
       {
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '027410',
@@ -639,6 +905,7 @@ describe('TradingOrchestrator', () => {
     mockSlackService.isEnabled.mockReturnValue(true);
     mockPrisma.position.findMany.mockResolvedValueOnce([
       {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -652,6 +919,7 @@ describe('TradingOrchestrator', () => {
       'OVERSEAS',
       [
         {
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -676,6 +944,7 @@ describe('TradingOrchestrator', () => {
     function buildV4WatchStockRow() {
       return {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -695,7 +964,7 @@ describe('TradingOrchestrator', () => {
       mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
       mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 250, maxQuantity: 4 });
       mockPrisma.position.findMany.mockResolvedValueOnce([
-        { stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
+        { broker: Broker.KIS, stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
       ]);
 
       const evaluateStock = jest.fn().mockResolvedValue({
@@ -757,10 +1026,47 @@ describe('TradingOrchestrator', () => {
           },
         ],
         skipReasons: ['매수 수량 부족: 일일 매수 시도액 6.25으로 1주 매수 불가'],
+        appliedQuotaOverride: undefined,
       });
 
       expect(mockTradingService.executePerStockStrategy).not.toHaveBeenCalled();
       expect(mockPrisma.watchStockExecutionLog.create).not.toHaveBeenCalled();
+    });
+
+    it('uses the WatchStock broker for preview risk and cash while market data remains direct KIS', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        ...buildV4WatchStockRow(),
+        broker: Broker.TOSS,
+      });
+      mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
+      mockTossPort.getOverseasBuyableAmount.mockResolvedValue({
+        foreignCurrencyAvailable: 777,
+        maxQuantity: 12,
+      });
+      mockPrisma.position.findMany.mockResolvedValueOnce([
+        {
+          broker: Broker.TOSS,
+          stockCode: 'TQQQ',
+          exchangeCode: 'NASD',
+          quantity: 2,
+          avgPrice: 50,
+          currentPrice: 60,
+          totalInvested: 100,
+        },
+      ]);
+      const evaluateStock = jest.fn().mockResolvedValue({ signals: [], skipReasons: [] });
+      mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });
+
+      const result = await orchestrator.previewWatchStockExecution('ws-1');
+
+      expect(mockRiskManagement.evaluateRisk).toHaveBeenCalledWith(Broker.TOSS, 'OVERSEAS');
+      expect(mockPrisma.position.findMany).toHaveBeenCalledWith({
+        where: { broker: Broker.TOSS, market: 'OVERSEAS' },
+      });
+      expect(mockTossPort.getOverseasBuyableAmount).toHaveBeenCalledWith('NASD', 'TQQQ', 60);
+      expect(mockKisOverseas.getPrice).toHaveBeenCalledWith('NASD', 'TQQQ');
+      expect(evaluateStock.mock.calls[0][0].buyableMeta.source).toBe('TOSS_OVERSEAS_BUYABLE_AMOUNT');
+      expect(result.context.buyableAmount).toBe(777);
     });
 
     it('트레이딩이 비활성화된 환경(TRADING_ENABLED=false)에서도 미리보기는 동작한다', async () => {
@@ -825,7 +1131,7 @@ describe('TradingOrchestrator', () => {
       mockKisOverseas.getPrice.mockResolvedValue({ currentPrice: 60 });
       mockKisOverseas.getBuyableAmount.mockResolvedValue({ foreignCurrencyAvailable: 3000, maxQuantity: 50 });
       mockPrisma.position.findMany.mockResolvedValueOnce([
-        { stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
+        { broker: Broker.KIS, stockCode: 'TQQQ', exchangeCode: 'NASD', quantity: 8, avgPrice: 50, currentPrice: 60, totalInvested: 400 },
       ]);
       const evaluateStock = jest.fn().mockResolvedValue({ signals: [], skipReasons: [], details: {} });
       mockStrategyRegistry.getStrategy.mockReturnValue({ name: 'infinite-buy-v4', evaluateStock });

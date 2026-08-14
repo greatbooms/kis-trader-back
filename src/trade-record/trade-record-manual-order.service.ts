@@ -52,6 +52,8 @@ export class TradeRecordManualOrderService {
     }
 
     let canonicalKey: OrderAdmissionKey = {
+      // Resolved from the unique matching position before admission.
+      broker: input.broker as Broker,
       market: input.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: input.market === 'DOMESTIC'
         ? 'KRX'
@@ -59,15 +61,34 @@ export class TradeRecordManualOrderService {
       stockCode: input.stockCode.trim().toUpperCase(),
       side: 'SELL',
     };
-    const position = await this.prisma.position.findFirst({
+    const positions = await this.prisma.position.findMany({
       where: {
+        ...(input.broker ? { broker: input.broker } : {}),
         market: canonicalKey.market as Market,
         exchangeCode: canonicalKey.exchangeCode,
         stockCode: canonicalKey.stockCode,
       },
     });
 
-    if (!position || position.quantity <= 0) {
+    if (positions.length !== 1) {
+      if (positions.length === 0) {
+        throw new Error('보유 포지션을 찾을 수 없습니다.');
+      }
+      throw new Error('보유 포지션을 하나로 식별할 수 없습니다. 브로커를 지정해주세요.');
+    }
+    const position = positions[0];
+    if (input.broker && position.broker !== input.broker) {
+      throw new Error('요청한 브로커의 보유 포지션을 찾을 수 없습니다.');
+    }
+    if (!this.registry.isActive(position.broker)) {
+      return {
+        success: false,
+        message: `${position.broker} 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.`,
+      };
+    }
+    canonicalKey = { ...canonicalKey, broker: position.broker };
+
+    if (position.quantity <= 0) {
       return { success: false, message: '보유 포지션이 없습니다.' };
     }
 
@@ -98,13 +119,14 @@ export class TradeRecordManualOrderService {
       ? Math.round(currentPrice * 100) / 100
       : Math.round(currentPrice);
 
-    const context = this.brokerContext.getCurrentContext();
+    const context = this.brokerContext.getCurrentContext(position.broker);
     const record = await this.orderGuard.admit(
       canonicalKey,
       (tx, normalizedKey = canonicalKey) => {
         canonicalKey = normalizedKey;
         return tx.tradeRecord.create({
           data: {
+            broker: position.broker,
             market: canonicalKey.market as Market,
             exchangeCode: canonicalKey.exchangeCode,
             stockCode: canonicalKey.stockCode,
@@ -129,15 +151,16 @@ export class TradeRecordManualOrderService {
 
     let snapshot;
     try {
-      snapshot = await this.positionRefresh.refresh(canonicalKey.market);
+      snapshot = await this.positionRefresh.refresh(position.broker, canonicalKey.market);
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${canonicalKey.stockCode}] Manual sell position refresh failed: ${message}`);
+      this.logger.warn(`[${canonicalKey.broker} ${canonicalKey.stockCode}] Manual sell position refresh failed: ${message}`);
       await this.cancelPreSubmit(record.id, '포지션 동기화 실패로 수동 매도 취소');
       return { success: false, message: `보유 수량 동기화 실패: ${message}` };
     }
 
     if (!this.matchesCapturedBrokerContext(
+      position.broker,
       context.environment,
       context.accountHash,
       canonicalKey.stockCode,
@@ -148,7 +171,7 @@ export class TradeRecordManualOrderService {
       );
       return {
         success: false,
-        message: 'KIS 계좌 정보를 확인할 수 없어 수동 매도를 중단했습니다.',
+        message: `${position.broker} 계좌 정보를 확인할 수 없어 수동 매도를 중단했습니다.`,
       };
     }
 
@@ -168,6 +191,13 @@ export class TradeRecordManualOrderService {
       await this.cancelPreSubmit(record.id, '실거래 비활성화로 수동 매도 취소');
       return { success: false, message: '현재 환경에서는 실거래가 비활성화되어 수동 매도를 실행할 수 없습니다.' };
     }
+    if (!this.registry.isActive(position.broker)) {
+      await this.cancelPreSubmit(record.id, '브로커 비활성화로 수동 매도 취소');
+      return {
+        success: false,
+        message: `${position.broker} 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.`,
+      };
+    }
 
     const submissionStartedAt = new Date();
     const claim = await this.prisma.tradeRecord.updateMany({
@@ -186,6 +216,7 @@ export class TradeRecordManualOrderService {
     }
 
     if (!this.matchesCapturedBrokerContext(
+      position.broker,
       context.environment,
       context.accountHash,
       canonicalKey.stockCode,
@@ -197,7 +228,7 @@ export class TradeRecordManualOrderService {
       );
       return {
         success: false,
-        message: 'KIS 계좌 정보를 확인할 수 없어 수동 매도를 중단했습니다.',
+        message: `${position.broker} 계좌 정보를 확인할 수 없어 수동 매도를 중단했습니다.`,
       };
     }
 
@@ -212,11 +243,22 @@ export class TradeRecordManualOrderService {
         message: '현재 환경에서는 실거래가 비활성화되어 수동 매도를 실행할 수 없습니다.',
       };
     }
+    if (!this.registry.isActive(position.broker)) {
+      await this.cancelClaimedSubmission(
+        record.id,
+        submissionStartedAt,
+        '브로커 비활성화로 수동 매도 취소',
+      );
+      return {
+        success: false,
+        message: `${position.broker} 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.`,
+      };
+    }
 
     let result;
     try {
-      result = await this.registry.get(Broker.KIS).submitOrder({
-        broker: Broker.KIS,
+      result = await this.registry.requireActive(position.broker).submitOrder({
+        broker: position.broker,
         market: canonicalKey.market,
         exchangeCode: canonicalKey.exchangeCode,
         stockCode: canonicalKey.stockCode,
@@ -228,7 +270,7 @@ export class TradeRecordManualOrderService {
       });
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${canonicalKey.stockCode}] Manual sell outcome is unknown: ${message}`);
+      this.logger.warn(`[${canonicalKey.broker} ${canonicalKey.stockCode}] Manual sell outcome is unknown: ${message}`);
       await this.recoveryService.markSubmissionUnknown(record.id, message);
       return { success: false, message };
     }
@@ -261,11 +303,13 @@ export class TradeRecordManualOrderService {
 
     const persisted = await this.persistAcceptedManualOrder(
       record.id,
+      position.broker,
       canonicalKey.stockCode,
       result,
     );
     if (!persisted) {
       await this.recoveryService.warnAcceptedOrderPersistenceFailure({
+        broker: position.broker,
         market: canonicalKey.market,
         stockCode: canonicalKey.stockCode,
         tradeRecordId: record.id,
@@ -274,15 +318,16 @@ export class TradeRecordManualOrderService {
       return {
         success: false,
         orderNo: result.orderNo,
-        message: '브로커 주문은 접수되었으나 로컬 저장에 실패했습니다. KIS 주문 내역 확인이 필요합니다.',
+        message: `브로커 주문은 접수되었으나 로컬 저장에 실패했습니다. ${position.broker} 주문 내역 확인이 필요합니다.`,
       };
     }
-    this.logger.log(`Manual sell order submitted: ${canonicalKey.stockCode} x ${executableQty} @ ${roundPrice}`);
+    this.logger.log(`[${position.broker} ${canonicalKey.stockCode}] Manual sell order submitted: ${executableQty} @ ${roundPrice}`);
     return { success: true, orderNo: result.orderNo, message: `${executableQty}주 매도 주문 접수` };
   }
 
   private async persistAcceptedManualOrder(
     tradeRecordId: string,
+    broker: Broker,
     stockCode: string,
     result: {
       orderNo?: string;
@@ -310,7 +355,7 @@ export class TradeRecordManualOrderService {
         return persisted.count > 0;
       } catch (error) {
         this.logger.warn(
-          `[${stockCode}] Accepted manual order DB persistence failed (${attempt}/3, order ${result.orderNo || 'unknown'}): ${this.errorMessage(error)}`,
+          `[${broker} ${stockCode}] Accepted manual order DB persistence failed (${attempt}/3, order ${result.orderNo || 'unknown'}): ${this.errorMessage(error)}`,
         );
       }
     }
@@ -355,15 +400,16 @@ export class TradeRecordManualOrderService {
   }
 
   private matchesCapturedBrokerContext(
+    broker: Broker,
     environment: BrokerEnvironment | null | undefined,
     accountHash: string | null | undefined,
     stockCode: string,
   ): boolean {
     try {
-      return this.brokerContext.matchesCurrentContext(environment, accountHash);
+      return this.brokerContext.matchesCurrentContext(broker, environment, accountHash);
     } catch (error) {
       this.logger.warn(
-        `[${stockCode}] Broker context validation failed: ${this.errorMessage(error)}`,
+        `[${broker} ${stockCode}] Broker context validation failed: ${this.errorMessage(error)}`,
       );
       return false;
     }
@@ -404,22 +450,28 @@ export class TradeRecordManualOrderService {
       };
     }
     if (!this.matchesCapturedBrokerContext(
+      record.broker,
       record.brokerEnvironment,
       record.brokerAccountHash,
       record.stockCode,
     )) {
       return {
         success: false,
-        message: '저장된 브로커 주문 정보가 현재 KIS 계좌와 일치하지 않아 취소할 수 없습니다.',
+        message: `저장된 브로커 주문 정보가 현재 ${record.broker} 계좌와 일치하지 않아 취소할 수 없습니다.`,
       };
     }
-
+    if (!this.registry.isActive(record.broker)) {
+      return {
+        success: false,
+        message: `${record.broker} 브로커가 비활성화되어 주문 취소를 실행할 수 없습니다.`,
+      };
+    }
     const initialRemainingQty = Math.max(0, record.quantity - (record.executedQty || 0));
     if (initialRemainingQty <= 0) {
       return { success: false, message: '남아 있는 미체결 수량이 없습니다.' };
     }
 
-    const claimed = await this.recoveryService.claimCancellation(record.id);
+    const claimed = await this.recoveryService.claimCancellation(record.id, record.broker);
     if (!claimed) {
       return {
         success: false,
@@ -428,11 +480,12 @@ export class TradeRecordManualOrderService {
     }
 
     const claimedRecord = await this.prisma.tradeRecord.findUnique({
-      where: { id: record.id },
+      where: { id: record.id, broker: record.broker },
     });
     if (!this.isSameClaimedCancellationTarget(record, claimedRecord)) {
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        record.broker,
         '취소 대상 주문 정보 변경',
       );
       return {
@@ -449,6 +502,7 @@ export class TradeRecordManualOrderService {
     if (!this.liveSwitch.isEnabled()) {
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        record.broker,
         '실거래 비활성화로 주문 취소 중단',
       );
       return {
@@ -456,7 +510,17 @@ export class TradeRecordManualOrderService {
         message: '현재 환경에서는 실거래가 비활성화되어 주문 취소를 실행할 수 없습니다.',
       };
     }
-
+    if (!this.registry.isActive(claimedRecord.broker)) {
+      await this.recoveryService.releaseCancellationClaim(
+        record.id,
+        record.broker,
+        '브로커 비활성화로 주문 취소 중단',
+      );
+      return {
+        success: false,
+        message: `${claimedRecord.broker} 브로커가 비활성화되어 주문 취소를 실행할 수 없습니다.`,
+      };
+    }
     let executions: BrokerOrderStatus[];
     let unfilledOrders: UnfilledOrder[];
     try {
@@ -467,15 +531,16 @@ export class TradeRecordManualOrderService {
     } catch (error) {
       const message = this.errorMessage(error);
       this.logger.warn(
-        `[${claimedRecord.stockCode}] Complete cancellation-state KIS read failed: ${message}`,
+        `[${claimedRecord.broker} ${claimedRecord.stockCode}] Complete cancellation-state read failed: ${message}`,
       );
       await this.recoveryService.releaseCancellationClaim(
         claimedRecord.id,
-        'KIS 주문 상태 조회 실패',
+        claimedRecord.broker,
+        `${claimedRecord.broker} 주문 상태 조회 실패`,
       );
       return {
         success: false,
-        message: 'KIS 주문 상태 조회에 실패하여 취소를 중단했습니다.',
+        message: `${claimedRecord.broker} 주문 상태 조회에 실패하여 취소를 중단했습니다.`,
       };
     }
 
@@ -493,32 +558,36 @@ export class TradeRecordManualOrderService {
     if (!hasExactExecution || !hasExactOpenOrder) {
       await this.recoveryService.releaseCancellationClaim(
         claimedRecord.id,
-        'KIS 주문 상태 검증 실패',
+        claimedRecord.broker,
+        `${claimedRecord.broker} 주문 상태 검증 실패`,
       );
       return {
         success: false,
-        message: '현재 KIS 계좌에서 취소 대상 주문을 정확히 확인할 수 없어 취소를 중단했습니다.',
+        message: `현재 ${claimedRecord.broker} 계좌에서 취소 대상 주문을 정확히 확인할 수 없어 취소를 중단했습니다.`,
       };
     }
 
     if (!this.matchesCapturedBrokerContext(
+      claimedRecord.broker,
       claimedRecord.brokerEnvironment,
       claimedRecord.brokerAccountHash,
       claimedRecord.stockCode,
     )) {
       await this.recoveryService.releaseCancellationClaim(
         claimedRecord.id,
+        claimedRecord.broker,
         '브로커 컨텍스트 변경으로 주문 취소 중단',
       );
       return {
         success: false,
-        message: 'KIS 계좌 정보가 변경되어 취소를 중단했습니다.',
+        message: `${claimedRecord.broker} 계좌 정보가 변경되어 취소를 중단했습니다.`,
       };
     }
 
     if (!this.liveSwitch.isEnabled()) {
       await this.recoveryService.releaseCancellationClaim(
         claimedRecord.id,
+        claimedRecord.broker,
         '실거래 비활성화로 주문 취소 중단',
       );
       return {
@@ -526,10 +595,20 @@ export class TradeRecordManualOrderService {
         message: '현재 환경에서는 실거래가 비활성화되어 주문 취소를 실행할 수 없습니다.',
       };
     }
-
+    if (!this.registry.isActive(claimedRecord.broker)) {
+      await this.recoveryService.releaseCancellationClaim(
+        claimedRecord.id,
+        claimedRecord.broker,
+        '브로커 비활성화로 주문 취소 중단',
+      );
+      return {
+        success: false,
+        message: `${claimedRecord.broker} 브로커가 비활성화되어 주문 취소를 실행할 수 없습니다.`,
+      };
+    }
     let result;
     try {
-      result = await this.registry.get(claimedRecord.broker).cancelOrder({
+      result = await this.registry.requireActive(claimedRecord.broker).cancelOrder({
         market: claimedRecord.market,
         exchangeCode: claimedRecord.exchangeCode,
         orderNo,
@@ -539,15 +618,23 @@ export class TradeRecordManualOrderService {
       });
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${claimedRecord.stockCode}] Cancellation outcome is unknown: ${message}`);
-      await this.recoveryService.markCancellationUnknown(claimedRecord.id, message);
+      this.logger.warn(`[${claimedRecord.broker} ${claimedRecord.stockCode}] Cancellation outcome is unknown: ${message}`);
+      await this.recoveryService.markCancellationUnknown(
+        claimedRecord.id,
+        claimedRecord.broker,
+        message,
+      );
       return { success: false, message };
     }
 
     if (result.outcome === 'ACCEPTED') {
-      await this.recoveryService.markCancellationAccepted(claimedRecord.id, result.message);
+      await this.recoveryService.markCancellationAccepted(
+        claimedRecord.id,
+        claimedRecord.broker,
+        result.message,
+      );
       this.logger.log(
-        `Manual cancel order accepted: ${claimedRecord.stockCode} #${claimedRecord.orderNo}`,
+        `[${claimedRecord.broker} ${claimedRecord.stockCode}] Manual cancel order accepted: #${claimedRecord.orderNo}`,
       );
       return {
         success: true,
@@ -557,12 +644,20 @@ export class TradeRecordManualOrderService {
     }
 
     if (result.outcome === 'REJECTED') {
-      await this.recoveryService.markCancellationRejected(claimedRecord.id, result.message);
+      await this.recoveryService.markCancellationRejected(
+        claimedRecord.id,
+        claimedRecord.broker,
+        result.message,
+      );
       return { success: false, message: result.message };
     }
 
     if (result.outcome === 'UNKNOWN') {
-      await this.recoveryService.markCancellationUnknown(claimedRecord.id, result.message);
+      await this.recoveryService.markCancellationUnknown(
+        claimedRecord.id,
+        claimedRecord.broker,
+        result.message,
+      );
       return { success: false, message: result.message };
     }
 
@@ -581,6 +676,7 @@ export class TradeRecordManualOrderService {
     claimed: TradeRecord | null,
   ): claimed is TradeRecord {
     return claimed !== null
+      && claimed.broker === initial.broker
       && claimed.cancellationStatus === CancellationAttemptStatus.SUBMITTING
       && claimed.status === initial.status
       && claimed.market === initial.market

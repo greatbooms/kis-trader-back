@@ -7,6 +7,7 @@ import {
   registerEnumType,
 } from '@nestjs/graphql';
 import {
+  Broker,
   BrokerEnvironment,
   CancellationAttemptStatus,
   Market,
@@ -20,6 +21,9 @@ import {
 export class BrokerOrderRecoveryItemType {
   @Field(() => ID)
   tradeRecordId: string;
+
+  @Field(() => Broker)
+  broker: Broker;
 
   @Field()
   lifecycle: string;

@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import { Broker, OrderStatus } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { SellApprovalMessageStatus } from '../notification/types/sell-approval-message-status.type';
 import { PrismaService } from '../prisma.service';
@@ -51,11 +51,13 @@ export class TradingSellApprovalNotificationService {
     try {
       const approval = await this.prisma.stopLossApproval.findUnique({
         where: { id: approvalId },
+        include: { tradeRecord: { select: { broker: true } } },
       });
       if (!approval) return;
       await this.updateSlackMessage(
         approval.slackChannel,
         approval.slackMessageTs,
+        approval.tradeRecord.broker,
         approval.stockCode,
         status,
       );
@@ -69,15 +71,16 @@ export class TradingSellApprovalNotificationService {
   private async updateSlackMessage(
     channel: string | null,
     ts: string | null,
+    broker: Broker,
     stockCode: string,
     status: SellApprovalMessageStatus,
   ): Promise<void> {
     if (!this.slackService || !channel?.trim() || !ts?.trim()) return;
     try {
-      await this.slackService.updateStopLossApprovalMessage(channel, ts, stockCode, status);
+      await this.slackService.updateStopLossApprovalMessage(channel, ts, broker, stockCode, status);
     } catch (error) {
       this.logger.warn(
-        `[${stockCode}] Slack approval update failed: ${this.errorMessage(error)}`,
+        `[${broker} ${stockCode}] Slack approval update failed: ${this.errorMessage(error)}`,
       );
     }
   }

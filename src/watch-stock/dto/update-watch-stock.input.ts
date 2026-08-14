@@ -1,7 +1,11 @@
 import { InputType, Field, Float, Int } from '@nestjs/graphql';
+import { Broker } from '@prisma/client';
 
 @InputType()
 export class UpdateWatchStockInput {
+  @Field(() => Broker, { nullable: true })
+  broker?: Broker;
+
   @Field({ nullable: true })
   exchangeCode?: string;
 

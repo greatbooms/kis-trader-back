@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { App } from '@slack/bolt';
 import { Button } from '@slack/types';
-import { CancellationAttemptStatus } from '@prisma/client';
+import { Broker, CancellationAttemptStatus } from '@prisma/client';
 import { SlackService } from '../notification/slack.service';
 import { BrokerContextPreview } from './types/broker-context-preview.type';
 import { BrokerOrderCandidateInspection } from './types/broker-order-candidate-inspection.type';
@@ -18,7 +18,7 @@ const MAX_PRESENTED_ITEMS = 10;
 const SAFE_RECOVERY_FAILURE_MESSAGES: Record<SlackRecoveryFailureKind, string> = {
   UNAUTHORIZED: '주문 복구 작업을 수행할 권한이 없습니다.',
   LIST: '확인 필요 주문 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
-  INSPECTION: 'KIS 조회 결과를 확인하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.',
+  INSPECTION: '브로커 조회 결과를 확인하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.',
   MODAL: 'Slack 확인 창을 열지 못했습니다. 다시 시도하거나 웹 포트폴리오를 사용하세요.',
   MUTATION: '복구 작업을 확정하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.',
 };
@@ -51,14 +51,14 @@ export class TradingSlackRecoveryPresentationService {
     const action = this.recoveryAction(
       alert.lifecycle,
       alert.brokerContextAssigned,
-      { v: 1, tradeRecordId: alert.tradeRecordId },
+      { v: 1, tradeRecordId: alert.tradeRecordId, broker: alert.broker },
     );
     const blocks = [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `:warning: *${lifecycleLabel} | ${alert.exchangeCode}:${alert.stockCode}* (${alert.stockName})`,
+          text: `:warning: *${lifecycleLabel} | ${this.brokerTag(alert.broker, alert.stockCode)}* (${alert.stockName}, ${alert.exchangeCode})`,
         },
       },
       { type: 'divider' },
@@ -80,7 +80,7 @@ export class TradingSlackRecoveryPresentationService {
         type: 'context',
         elements: [{
           type: 'mrkdwn',
-          text: ':no_entry: KIS 확인 전 주문이나 취소를 다시 제출하지 마세요.',
+          text: `:no_entry: ${alert.broker} 확인 전 주문이나 취소를 다시 제출하지 마세요.`,
         }],
       },
       { type: 'actions', elements: [action] },
@@ -90,7 +90,7 @@ export class TradingSlackRecoveryPresentationService {
       const response = await app.client.chat.postMessage({
         channel,
         blocks,
-        text: `${lifecycleLabel} | ${alert.market}:${alert.stockCode}`,
+        text: `${lifecycleLabel} | ${this.brokerTag(alert.broker, alert.stockCode)}`,
       });
       const messageTs = typeof response.ts === 'string' ? response.ts.trim() : '';
       const responseChannel = typeof response.channel === 'string'
@@ -101,7 +101,7 @@ export class TradingSlackRecoveryPresentationService {
         : null;
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${alert.tradeRecordId}] Slack unknown alert failed: ${this.errorMessage(error)}`,
+        `${this.brokerTag(alert.broker, alert.stockCode)} [RECOVERY ${alert.tradeRecordId}] Slack unknown alert failed: ${this.errorMessage(error)}`,
       );
       return null;
     }
@@ -130,7 +130,7 @@ export class TradingSlackRecoveryPresentationService {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'KIS 주문·취소 결과가 불명확한 항목입니다. 주문을 다시 제출하지 말고 웹 포트폴리오 또는 `/확인필요주문`에서 확인하세요.',
+              text: '브로커 주문·취소 결과가 불명확한 항목입니다. 주문을 다시 제출하지 말고 웹 포트폴리오 또는 `/확인필요주문`에서 확인하세요.',
             },
           },
         ],
@@ -166,7 +166,7 @@ export class TradingSlackRecoveryPresentationService {
             type: 'mrkdwn',
             text: [
               `*${item.lifecycle === 'CANCELLATION' ? '취소 결과 불명' : '주문 제출 결과 불명'}*`,
-              `${item.exchangeCode}:${item.stockCode} ${item.side} ${item.quantity}주`,
+              `${this.brokerTag(item.broker, item.stockCode)} ${item.exchangeCode} ${item.side} ${item.quantity}주`,
               `TradeRecord: \`${item.tradeRecordId}\``,
             ].join('\n'),
           },
@@ -176,7 +176,7 @@ export class TradingSlackRecoveryPresentationService {
           elements: [this.recoveryAction(
             item.lifecycle,
             item.brokerContextAssigned,
-            { v: 1, tradeRecordId: item.tradeRecordId },
+            { v: 1, tradeRecordId: item.tradeRecordId, broker: item.broker },
           )],
         },
       );
@@ -202,7 +202,7 @@ export class TradingSlackRecoveryPresentationService {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*KIS 주문 후보 조회 | ${inspection.recoveryItem.exchangeCode}:${inspection.recoveryItem.stockCode}*`,
+        text: `*${inspection.recoveryItem.broker} 주문 후보 조회 | ${this.brokerTag(inspection.recoveryItem.broker, inspection.recoveryItem.stockCode)}*`,
       },
     }];
 
@@ -212,7 +212,7 @@ export class TradingSlackRecoveryPresentationService {
         text: {
           type: 'mrkdwn',
           text: [
-            `완전한 KIS 이력에서 후보가 ${inspection.candidates.length}건 조회되었습니다.`,
+            `완전한 ${inspection.recoveryItem.broker} 이력에서 후보가 ${inspection.candidates.length}건 조회되었습니다.`,
             '일부 후보만 표시하면 잘못된 주문을 선택할 수 있으므로 Slack 연결 버튼을 제공하지 않습니다.',
             '*웹 포트폴리오의 확인 필요 주문에서 전체 후보를 검토하세요.*',
           ].join('\n'),
@@ -220,7 +220,7 @@ export class TradingSlackRecoveryPresentationService {
       });
       await respond({
         blocks,
-        text: `KIS 주문 후보 ${inspection.candidates.length}건 · 웹 포트폴리오 확인 필요`,
+        text: `${inspection.recoveryItem.broker} 주문 후보 ${inspection.candidates.length}건 · 웹 포트폴리오 확인 필요`,
         response_type: 'ephemeral',
         replace_original: false,
       });
@@ -231,7 +231,7 @@ export class TradingSlackRecoveryPresentationService {
       blocks.push(
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: '완전한 KIS 이력에서 일치 후보가 없습니다.' },
+          text: { type: 'mrkdwn', text: `완전한 ${inspection.recoveryItem.broker} 이력에서 일치 후보가 없습니다.` },
         },
         {
           type: 'actions',
@@ -243,6 +243,7 @@ export class TradingSlackRecoveryPresentationService {
             value: this.encode({
               v: 1,
               tradeRecordId: inspection.recoveryItem.tradeRecordId,
+              broker: inspection.recoveryItem.broker,
               ...(origin ? { origin } : {}),
             }),
           }],
@@ -253,6 +254,7 @@ export class TradingSlackRecoveryPresentationService {
         const payload: SlackRecoveryCandidatePayload = {
           v: 1,
           tradeRecordId: inspection.recoveryItem.tradeRecordId,
+          broker: inspection.recoveryItem.broker,
           brokerOrderDate: candidate.orderDate,
           exchangeCode: candidate.exchangeCode,
           orderNo: candidate.orderNo,
@@ -297,7 +299,7 @@ export class TradingSlackRecoveryPresentationService {
 
     await respond({
       blocks,
-      text: `KIS 주문 후보 ${inspection.candidates.length}건`,
+      text: `${inspection.recoveryItem.broker} 주문 후보 ${inspection.candidates.length}건`,
       response_type: 'ephemeral',
       replace_original: false,
     });
@@ -314,7 +316,7 @@ export class TradingSlackRecoveryPresentationService {
       '현재 계좌 컨텍스트 지정',
       '지정',
       payload,
-      `환경: ${preview.environment}\n계좌: ${preview.maskedAccount}`,
+      `브로커: ${payload.broker}\n환경: ${preview.environment}\n계좌: ${preview.maskedAccount}`,
       '표시된 환경과 마스킹 계좌를 이 기록에 지정합니다.',
     );
   }
@@ -326,11 +328,11 @@ export class TradingSlackRecoveryPresentationService {
     return this.openConfirmationModal(
       triggerId,
       'broker_recovery_link_candidate_confirm',
-      'KIS 주문 연결',
+      `${payload.broker} 주문 연결`,
       '연결',
       payload,
       `${payload.brokerOrderDate} ${payload.exchangeCode} #${payload.orderNo}`,
-      '표시된 KIS 주문을 이 TradeRecord에 연결합니다.',
+      `표시된 ${payload.broker} 주문을 이 TradeRecord에 연결합니다.`,
     );
   }
 
@@ -345,7 +347,7 @@ export class TradingSlackRecoveryPresentationService {
       '확정',
       payload,
       `TradeRecord: ${payload.tradeRecordId}`,
-      'KIS 주문 이력을 직접 확인했으며 주문이 제출되지 않았음을 확정합니다.',
+      `${payload.broker} 주문 이력을 직접 확인했으며 주문이 제출되지 않았음을 확정합니다.`,
     );
   }
 
@@ -360,7 +362,7 @@ export class TradingSlackRecoveryPresentationService {
       '확정',
       payload,
       `${payload.brokerOrderDate} ${payload.exchangeCode} #${payload.orderNo}\n기존 TradeRecord: ${payload.existingTradeRecordId}`,
-      '표시된 KIS 주문이 기존 TradeRecord와 동일함을 확인했습니다.',
+      `표시된 ${payload.broker} 주문이 기존 TradeRecord와 동일함을 확인했습니다.`,
     );
   }
 
@@ -375,7 +377,7 @@ export class TradingSlackRecoveryPresentationService {
       '조회',
       payload,
       `TradeRecord: ${payload.tradeRecordId}`,
-      '완전한 KIS 조회 결과에 따라 주문과 취소 상태가 확정될 수 있습니다.',
+      `완전한 ${payload.broker} 조회 결과에 따라 주문과 취소 상태가 확정될 수 있습니다.`,
     );
   }
 
@@ -390,7 +392,7 @@ export class TradingSlackRecoveryPresentationService {
       '확정',
       payload,
       `TradeRecord: ${payload.tradeRecordId}`,
-      'KIS에서 원주문이 아직 미체결 상태임을 확인했습니다.',
+      `${payload.broker}에서 원주문이 아직 미체결 상태임을 확인했습니다.`,
     );
   }
 
@@ -428,6 +430,7 @@ export class TradingSlackRecoveryPresentationService {
               value: this.encode({
                 v: 1,
                 tradeRecordId: item.tradeRecordId,
+                broker: item.broker,
                 origin,
               }),
             }],
@@ -436,7 +439,7 @@ export class TradingSlackRecoveryPresentationService {
       });
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${item.tradeRecordId}] Slack cancellation result failed: ${this.errorMessage(error)}`,
+        `${this.brokerTag(item.broker, item.stockCode)} [RECOVERY ${item.tradeRecordId}] Slack cancellation result failed: ${this.errorMessage(error)}`,
       );
     }
   }
@@ -454,11 +457,11 @@ export class TradingSlackRecoveryPresentationService {
         await app.client.chat.postEphemeral({
           channel: origin.channel,
           user: userId,
-          text: ':white_check_mark: 현재 계좌 컨텍스트를 지정했습니다. KIS 조회로 결과를 확인하세요.',
+          text: `:white_check_mark: 현재 계좌 컨텍스트를 지정했습니다. ${item.broker} 조회로 결과를 확인하세요.`,
         });
       } catch (error) {
         this.logger.warn(
-          `[RECOVERY ${item.tradeRecordId}] Slack context response failed: ${this.errorMessage(error)}`,
+          `${this.brokerTag(item.broker, item.stockCode)} [RECOVERY ${item.tradeRecordId}] Slack context response failed: ${this.errorMessage(error)}`,
         );
       }
     }
@@ -473,13 +476,13 @@ export class TradingSlackRecoveryPresentationService {
       await app.client.chat.update({
         channel: origin.channel,
         ts: origin.messageTs,
-        text: `${lifecycleLabel} | ${item.market}:${item.stockCode}`,
+        text: `${lifecycleLabel} | ${this.brokerTag(item.broker, item.stockCode)}`,
         blocks: [
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `:warning: *${lifecycleLabel} | ${item.exchangeCode}:${item.stockCode}* (${item.stockName})`,
+              text: `:warning: *${lifecycleLabel} | ${this.brokerTag(item.broker, item.stockCode)}* (${item.stockName}, ${item.exchangeCode})`,
             },
           },
           { type: 'divider' },
@@ -501,7 +504,7 @@ export class TradingSlackRecoveryPresentationService {
             type: 'context',
             elements: [{
               type: 'mrkdwn',
-              text: ':information_source: 계좌 컨텍스트 지정 완료 · KIS 조회 전 주문이나 취소를 다시 제출하지 마세요.',
+              text: `:information_source: 계좌 컨텍스트 지정 완료 · ${item.broker} 조회 전 주문이나 취소를 다시 제출하지 마세요.`,
             }],
           },
           {
@@ -509,14 +512,14 @@ export class TradingSlackRecoveryPresentationService {
             elements: [this.recoveryAction(
               item.lifecycle,
               true,
-              { v: 1, tradeRecordId: item.tradeRecordId, origin },
+              { v: 1, tradeRecordId: item.tradeRecordId, broker: item.broker, origin },
             )],
           },
         ],
       });
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${item.tradeRecordId}] Context-assigned Slack alert update failed: ${this.errorMessage(error)}`,
+        `${this.brokerTag(item.broker, item.stockCode)} [RECOVERY ${item.tradeRecordId}] Context-assigned Slack alert update failed: ${this.errorMessage(error)}`,
       );
     }
   }
@@ -534,11 +537,11 @@ export class TradingSlackRecoveryPresentationService {
         await app.client.chat.postEphemeral({
           channel: origin.channel,
           user: userId,
-          text: `:white_check_mark: ${label} (${item.tradeRecordId})`,
+          text: `:white_check_mark: ${this.brokerTag(item.broker, item.stockCode)} ${label} (${item.tradeRecordId})`,
         });
       } catch (error) {
         this.logger.warn(
-          `[RECOVERY ${item.tradeRecordId}] Slack resolution response failed: ${this.errorMessage(error)}`,
+          `${this.brokerTag(item.broker, item.stockCode)} [RECOVERY ${item.tradeRecordId}] Slack resolution response failed: ${this.errorMessage(error)}`,
         );
       }
     }
@@ -551,13 +554,13 @@ export class TradingSlackRecoveryPresentationService {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:white_check_mark: *${label}*\nTradeRecord: \`${item.tradeRecordId}\`\n상태: ${item.status}${item.cancellationStatus ? ` / 취소 ${item.cancellationStatus}` : ''}`,
+            text: `:white_check_mark: *${label} | ${this.brokerTag(item.broker, item.stockCode)}*\nTradeRecord: \`${item.tradeRecordId}\`\n상태: ${item.status}${item.cancellationStatus ? ` / 취소 ${item.cancellationStatus}` : ''}`,
           },
         }],
       });
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${item.tradeRecordId}] Original Slack message update failed: ${this.errorMessage(error)}`,
+        `${this.brokerTag(item.broker, item.stockCode)} [RECOVERY ${item.tradeRecordId}] Original Slack message update failed: ${this.errorMessage(error)}`,
       );
     }
   }
@@ -666,7 +669,7 @@ export class TradingSlackRecoveryPresentationService {
     const cancellation = lifecycle === 'CANCELLATION';
     return {
       type: 'button',
-      text: { type: 'plain_text', text: cancellation ? '취소 상태 조회' : 'KIS 주문 조회' },
+      text: { type: 'plain_text', text: cancellation ? '취소 상태 조회' : `${payload.broker} 주문 조회` },
       action_id: cancellation
         ? 'broker_recovery_inspect_cancellation'
         : 'broker_recovery_inspect_submission',
@@ -691,6 +694,10 @@ export class TradingSlackRecoveryPresentationService {
     return value instanceof Date && !Number.isNaN(value.getTime())
       ? value.toISOString()
       : 'N/A';
+  }
+
+  private brokerTag(broker: Broker, stockCode: string): string {
+    return `[${broker} ${stockCode}]`;
   }
 
   private errorMessage(error: unknown): string {

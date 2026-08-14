@@ -12,6 +12,8 @@
   - `sec.userAgent` — SEC EDGAR (이메일 포함 UA 필수)
   - `fred.apiKey` — FRED (St. Louis Fed)
   - `trading.enabled` — 실전 거래 마스터 스위치 (`TRADING_ENABLED`가 정규화된 `true`일 때만 활성)
+  - `trading.brokers.kis.enabled` — KIS broker 스위치 (`TRADING_BROKER_KIS_ENABLED`, 미설정 시 `true`, 명시값은 정규화된 `true`일 때만 활성)
+  - `trading.brokers.toss.enabled` — Toss broker 스위치 (`TRADING_BROKER_TOSS_ENABLED`, 기본 `false`, 정규화된 `true`일 때만 활성)
   - `auth.*` — admin 자격증명, JWT 시크릿, 쿠키 secure 플래그
   - `slack.*` — Bot/App token, channel, enabled, 승인자 user ID allowlist
 
@@ -26,6 +28,7 @@
 - `slack.enabled`는 `'true'` 문자열 비교 — 명시적 활성화 필요
 - `slack.approverUserIds`는 `SLACK_APPROVER_USER_IDS`를 쉼표 기준으로 trim/filter/dedupe한 배열이다. 누락·빈값은 빈 배열이며 승인/거절 액션을 fail-closed한다.
 - `trading.enabled`는 trim/lowercase 정규화 후 정확히 `'true'`인 경우만 활성 (누락/빈값/오입력은 비활성)
+- `trading.brokers.kis.enabled`는 환경 변수가 없을 때만 활성 기본값이며, 명시된 빈값·오입력은 fail-closed 비활성이다. `trading.brokers.toss.enabled`는 누락·빈값·오입력 모두 비활성이다.
 - `trading.enabled=false`는 신규 주문·취소 POST와 거래 cron을 막지만, 인증된 Slack/웹 확인 필요 주문 조회·복구까지 끄지 않는다. 운영 첫 롤아웃은 false 상태에서 migration/시작 인계/불명 주문 정리를 마친 뒤 true로 전환한다.
 - `auth.cookieSecure`는 `undefined` 시 런타임에 `req.secure` / `x-forwarded-proto`로 자동 판단 (auth resolver)
 - 새 환경 변수 추가 시: `configuration.ts` 매핑 + `.env.example`(있다면) 갱신 + 모듈 `CLAUDE.md` 메모

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingAccountCashSyncService', () => {
   let service: TradingAccountCashSyncService;
@@ -37,46 +38,46 @@ describe('TradingAccountCashSyncService', () => {
     jest.clearAllMocks();
   });
 
-  it('replaces only domestic cash and preserves overseas cache', async () => {
-    const existingUsdBalance = {
-      market: 'OVERSEAS',
-      currencyCode: 'USD',
-      currencyName: '미국달러',
-      amount: 900,
-      withdrawableAmount: 850,
-    };
+  it('writes KIS domestic cash to its broker-market row without mixing legacy overseas cash', async () => {
     mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 1_500_000 });
     mockPrisma.appSetting.findUnique.mockResolvedValue({
       value: {
         cashBalances: [
           { market: 'DOMESTIC', currencyCode: 'KRW', amount: 2_000_000 },
-          existingUsdBalance,
+          { market: 'OVERSEAS', currencyCode: 'USD', amount: 900 },
         ],
         lastSyncedAt: '2026-07-18T00:00:00.000Z',
       },
     });
 
-    await service.refreshMarketCash('DOMESTIC');
+    await service.refreshMarketCash(Broker.KIS, 'DOMESTIC');
 
-    const savedValue = mockPrisma.appSetting.upsert.mock.calls[0][0].update.value;
-    expect(savedValue.cashBalances).toEqual([
-      expect.objectContaining(existingUsdBalance),
-      expect.objectContaining({
-        market: 'DOMESTIC',
-        currencyCode: 'KRW',
-        amount: 1_500_000,
-        orderableAmount: 1_500_000,
-      }),
-    ]);
+    expect(mockRegistry.get).toHaveBeenCalledWith(Broker.KIS);
+    expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith({
+      where: { key: 'account_status_cache:KIS:DOMESTIC' },
+      create: {
+        key: 'account_status_cache:KIS:DOMESTIC',
+        value: expect.objectContaining({ cashBalances: [expect.objectContaining({
+          broker: Broker.KIS,
+          market: 'DOMESTIC',
+          currencyCode: 'KRW',
+          amount: 1_500_000,
+        })] }),
+      },
+      update: {
+        value: expect.objectContaining({ cashBalances: [expect.objectContaining({
+          broker: Broker.KIS,
+          market: 'DOMESTIC',
+          currencyCode: 'KRW',
+          amount: 1_500_000,
+        })] }),
+      },
+    });
+    expect(mockPrisma.$queryRaw.mock.calls[0][1]).toBe('account_status_cache:KIS:DOMESTIC');
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
-  it('replaces all overseas currencies and preserves domestic cash', async () => {
-    const domesticBalance = {
-      market: 'DOMESTIC',
-      currencyCode: 'KRW',
-      amount: 1_000_000,
-    };
+  it('routes Toss overseas cash to the Toss broker-market row', async () => {
     mockPort.getOverseasAccountSnapshot.mockResolvedValue({
       balance: [],
       cashBalances: [
@@ -97,20 +98,19 @@ describe('TradingAccountCashSyncService', () => {
         },
       ],
     });
-    mockPrisma.appSetting.findUnique.mockResolvedValue({
-      value: {
-        cashBalances: [domesticBalance, { market: 'OVERSEAS', currencyCode: 'USD', amount: 900 }],
-        lastSyncedAt: '2026-07-18T00:00:00.000Z',
-      },
+    mockPrisma.appSetting.findUnique.mockResolvedValue(null);
+
+    await service.refreshMarketCash(Broker.TOSS, 'OVERSEAS');
+
+    expect(mockRegistry.get).toHaveBeenCalledWith(Broker.TOSS);
+    expect(mockPrisma.appSetting.upsert.mock.calls[0][0].where).toEqual({
+      key: 'account_status_cache:TOSS:OVERSEAS',
     });
-
-    await service.refreshMarketCash('OVERSEAS');
-
     const savedValue = mockPrisma.appSetting.upsert.mock.calls[0][0].update.value;
     expect(savedValue.cashBalances).toEqual([
-      expect.objectContaining(domesticBalance),
-      expect.objectContaining({ market: 'OVERSEAS', currencyCode: 'USD', amount: 700 }),
+      expect.objectContaining({ broker: Broker.TOSS, market: 'OVERSEAS', currencyCode: 'USD', amount: 700 }),
       expect.objectContaining({
+        broker: Broker.TOSS,
         market: 'OVERSEAS',
         currencyCode: 'JPY',
         amount: 10_000,
@@ -124,12 +124,12 @@ describe('TradingAccountCashSyncService', () => {
     mockPort.getDomesticBuyableAmount.mockResolvedValue({ cashAvailable: 500_000 });
     mockPrisma.appSetting.findUnique.mockResolvedValue(null);
 
-    await service.refreshMarketCash('DOMESTIC');
+    await service.refreshMarketCash(Broker.KIS, 'DOMESTIC');
 
     expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith({
-      where: { key: 'account_status_cache' },
+      where: { key: 'account_status_cache:KIS:DOMESTIC' },
       create: {
-        key: 'account_status_cache',
+        key: 'account_status_cache:KIS:DOMESTIC',
         value: expect.objectContaining({
           cashBalances: [expect.objectContaining({ amount: 500_000 })],
           lastSyncedAt: expect.any(String),
@@ -142,5 +142,72 @@ describe('TradingAccountCashSyncService', () => {
         }),
       },
     });
+  });
+
+  it('aggregates scoped rows and interprets the legacy row as KIS only', async () => {
+    mockPrisma.appSetting.findUnique.mockImplementation(async ({ where: { key } }) => ({
+      account_status_cache: {
+        value: {
+          cashBalances: [
+            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 100 },
+            { market: 'OVERSEAS', currencyCode: 'USD', amount: 20 },
+          ],
+          lastSyncedAt: '2026-07-18T00:00:00.000Z',
+        },
+      },
+      'account_status_cache:TOSS:OVERSEAS': {
+        value: {
+          cashBalances: [{ market: 'OVERSEAS', currencyCode: 'USD', amount: 30 }],
+          lastSyncedAt: '2026-07-19T00:00:00.000Z',
+        },
+      },
+    })[key] ?? null);
+
+    await expect(service.getCache()).resolves.toEqual({
+      cashBalances: [
+        expect.objectContaining({ broker: Broker.KIS, market: 'DOMESTIC', amount: 100 }),
+        expect.objectContaining({ broker: Broker.KIS, market: 'OVERSEAS', amount: 20 }),
+        expect.objectContaining({ broker: Broker.TOSS, market: 'OVERSEAS', amount: 30 }),
+      ],
+      lastSyncedAt: '2026-07-19T00:00:00.000Z',
+    });
+  });
+
+  it('writes an authoritative empty market snapshot and blocks legacy fallback for that market', async () => {
+    await service.replaceCache(Broker.KIS, [], ['OVERSEAS']);
+
+    expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith({
+      where: { key: 'account_status_cache:KIS:OVERSEAS' },
+      create: {
+        key: 'account_status_cache:KIS:OVERSEAS',
+        value: expect.objectContaining({ cashBalances: [] }),
+      },
+      update: {
+        value: expect.objectContaining({ cashBalances: [] }),
+      },
+    });
+
+    mockPrisma.appSetting.findUnique.mockImplementation(async ({ where: { key } }) => ({
+      account_status_cache: {
+        value: {
+          cashBalances: [
+            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 100 },
+            { market: 'OVERSEAS', currencyCode: 'USD', amount: 999 },
+          ],
+          lastSyncedAt: '2026-07-18T00:00:00.000Z',
+        },
+      },
+      'account_status_cache:KIS:OVERSEAS': {
+        value: {
+          cashBalances: [],
+          lastSyncedAt: '2026-07-19T00:00:00.000Z',
+        },
+      },
+    })[key] ?? null);
+
+    const cache = await service.getCache();
+    expect(cache?.cashBalances).toEqual([
+      expect.objectContaining({ broker: Broker.KIS, market: 'DOMESTIC', amount: 100 }),
+    ]);
   });
 });

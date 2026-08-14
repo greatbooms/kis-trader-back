@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma.service';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { OrderSyncService } from './order-sync.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
+import { Broker } from '@prisma/client';
 
 describe('OrderSyncService', () => {
   let service: OrderSyncService;
@@ -26,15 +27,18 @@ describe('OrderSyncService', () => {
     getOrderExecutions: jest.fn(),
     getUnfilledOrders: jest.fn(),
   };
-  const mockRegistry = {
-    get: jest.fn().mockReturnValue({
+  const mockKisPort = {
+      broker: Broker.KIS,
       getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
         ? mockKisDomestic.getOrderExecutions(startDate, endDate)
         : mockKisOverseas.getOrderExecutions(startDate, endDate)),
       getUnfilledOrders: jest.fn((market) => market === 'DOMESTIC'
         ? mockKisDomestic.getUnfilledOrders()
         : mockKisOverseas.getUnfilledOrders()),
-    }),
+  };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue(mockKisPort),
+    getActive: jest.fn().mockReturnValue([mockKisPort]),
   };
 
   const mockPrisma = {
@@ -53,6 +57,8 @@ describe('OrderSyncService', () => {
   beforeEach(async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-09T06:00:00.000Z'));
+    mockRegistry.get.mockReturnValue(mockKisPort);
+    mockRegistry.getActive.mockReturnValue([mockKisPort]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -93,14 +99,15 @@ describe('OrderSyncService', () => {
     mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
 
     await service.syncMarketOrders('DOMESTIC', [
-      { market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 },
+      { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 },
     ]);
 
     expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledWith('20260407', '20260409');
     expect(mockKisDomestic.getUnfilledOrders).toHaveBeenCalled();
     expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledWith(
+      Broker.KIS,
       'DOMESTIC',
-      [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
       [],
       [
         {
@@ -117,6 +124,59 @@ describe('OrderSyncService', () => {
     );
   });
 
+  it('isolates active broker API failures and reconciles only KIS records and positions', async () => {
+    const toss = {
+      broker: Broker.TOSS,
+      getOrderExecutions: jest.fn().mockRejectedValue(new Error('Toss unavailable')),
+      getUnfilledOrders: jest.fn(),
+    };
+    mockRegistry.getActive.mockReturnValueOnce([toss, mockKisPort]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
+
+    await service.syncMarketOrders('DOMESTIC', [
+      { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 },
+      { broker: Broker.TOSS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 8 },
+    ], { force: true });
+
+    expect(toss.getOrderExecutions).toHaveBeenCalledTimes(1);
+    expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledTimes(1);
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledWith(
+      Broker.KIS,
+      'DOMESTIC',
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [],
+      [],
+    );
+    expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ broker: Broker.KIS }),
+    }));
+  });
+
+  it('restricts an orchestrator-targeted sync and unfilled read to one broker', async () => {
+    const toss = {
+      broker: Broker.TOSS,
+      getOrderExecutions: jest.fn().mockResolvedValue([]),
+      getUnfilledOrders: jest.fn().mockResolvedValue([]),
+    };
+    mockRegistry.getActive.mockReturnValue([mockKisPort, toss]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
+
+    await service.syncMarketOrders('OVERSEAS', [], { force: true, broker: Broker.TOSS });
+    await service.getMarketUnfilledOrders('OVERSEAS', Broker.TOSS);
+
+    expect(toss.getOrderExecutions).toHaveBeenCalledTimes(2);
+    expect(mockKisOverseas.getOrderExecutions).not.toHaveBeenCalled();
+    expect(mockKisOverseas.getUnfilledOrders).not.toHaveBeenCalled();
+  });
+
   it('refreshes domestic cash once when reconciliation finds new fills', async () => {
     mockPrisma.tradeRecord.findMany.mockResolvedValue([
       { createdAt: new Date('2026-04-08T00:30:00.000Z') },
@@ -128,7 +188,7 @@ describe('OrderSyncService', () => {
     await service.syncMarketOrders('DOMESTIC', []);
 
     expect(mockAccountCashSync.refreshMarketCash).toHaveBeenCalledTimes(1);
-    expect(mockAccountCashSync.refreshMarketCash).toHaveBeenCalledWith('DOMESTIC');
+    expect(mockAccountCashSync.refreshMarketCash).toHaveBeenCalledWith(Broker.KIS, 'DOMESTIC');
   });
 
   it('does not refresh cash when reconciliation finds no new fill', async () => {
@@ -166,7 +226,7 @@ describe('OrderSyncService', () => {
 
     await service.syncMarketOrders(
       'DOMESTIC',
-      [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
       { force: false },
     );
 
@@ -174,7 +234,7 @@ describe('OrderSyncService', () => {
 
     await service.syncMarketOrders(
       'DOMESTIC',
-      [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
       { force: false },
     );
 
@@ -191,7 +251,7 @@ describe('OrderSyncService', () => {
 
     await service.syncMarketOrders(
       'DOMESTIC',
-      [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
       { force: true },
     );
 
@@ -199,7 +259,7 @@ describe('OrderSyncService', () => {
 
     await service.syncMarketOrders(
       'DOMESTIC',
-      [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
       { force: true },
     );
 
@@ -213,6 +273,7 @@ describe('OrderSyncService', () => {
     ]);
     mockKisOverseas.getOrderExecutions.mockResolvedValue([
       {
+        broker: Broker.KIS,
         orderNo: '2001',
         stockCode: 'AAPL',
         side: 'BUY',
@@ -231,6 +292,7 @@ describe('OrderSyncService', () => {
     expect(mockKisOverseas.getUnfilledOrders).not.toHaveBeenCalled();
     expect(unfilledOrders).toEqual([
       {
+        broker: Broker.KIS,
         orderNo: '2001',
         stockCode: 'AAPL',
         side: 'BUY',
@@ -239,5 +301,59 @@ describe('OrderSyncService', () => {
         exchangeCode: 'NASD',
       },
     ]);
+  });
+
+  it('returns broker-scoped KIS and TOSS unfilled orders without dropping either broker', async () => {
+    const kisOrders = [{
+      orderNo: '1001',
+      stockCode: '005930',
+      side: 'BUY',
+      quantity: 1,
+      price: 70_000,
+    }];
+    const toss = {
+      broker: Broker.TOSS,
+      getOrderExecutions: jest.fn().mockResolvedValue([]),
+      getUnfilledOrders: jest.fn().mockResolvedValue([{ orderNo: 'toss-order' }]),
+    };
+    mockRegistry.getActive.mockReturnValueOnce([mockKisPort, toss]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue(kisOrders);
+    await expect(service.getMarketUnfilledOrders('DOMESTIC')).resolves.toEqual([
+      { ...kisOrders[0], broker: Broker.KIS },
+      { orderNo: 'toss-order', broker: Broker.TOSS },
+    ]);
+
+    expect(toss.getOrderExecutions).toHaveBeenCalledTimes(1);
+    expect(toss.getUnfilledOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles TOSS with only TOSS positions and the explicit TOSS broker', async () => {
+    const toss = {
+      broker: Broker.TOSS,
+      getOrderExecutions: jest.fn().mockResolvedValue([]),
+      getUnfilledOrders: jest.fn().mockResolvedValue([]),
+    };
+    mockRegistry.getActive.mockReturnValueOnce([toss]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
+
+    await service.syncMarketOrders('DOMESTIC', [
+      { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 },
+      { broker: Broker.TOSS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 8 },
+    ], { force: true });
+
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledWith(
+      Broker.TOSS,
+      'DOMESTIC',
+      [{ broker: Broker.TOSS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 8 }],
+      [],
+      [],
+    );
   });
 });

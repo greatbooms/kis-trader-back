@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma.service';
 import { TradingOrderGuardService } from './trading-order-guard.service';
 import { OrderAdmissionKey } from './types/order-admission-key.type';
+import { Broker } from '@prisma/client';
 
 describe('TradingOrderGuardService', () => {
   const buildHarness = (unresolved: object | null = null) => {
@@ -42,6 +43,7 @@ describe('TradingOrderGuardService', () => {
 
   it('uses a collision-safe canonical key and canonical domestic instrument fields', async () => {
     const { tx } = await admit({
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'not-krx',
       stockCode: ' 005930 ',
@@ -50,7 +52,7 @@ describe('TradingOrderGuardService', () => {
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.$queryRaw.mock.calls[0][1]).toBe(
-      '8:DOMESTIC|3:KRX|6:005930|4:SELL',
+      '3:KIS|8:DOMESTIC|3:KRX|6:005930|4:SELL',
     );
     expect(tx.$queryRaw.mock.calls[0][0].join('')).toContain(
       'pg_advisory_xact_lock(hashtextextended(',
@@ -59,6 +61,7 @@ describe('TradingOrderGuardService', () => {
 
   it('normalizes overseas exchange and stock codes before locking and lookup', async () => {
     const { tx } = await admit({
+      broker: Broker.TOSS,
       market: 'OVERSEAS',
       exchangeCode: ' nasd ',
       stockCode: ' aapl ',
@@ -66,10 +69,11 @@ describe('TradingOrderGuardService', () => {
     });
 
     expect(tx.$queryRaw.mock.calls[0][1]).toBe(
-      '8:OVERSEAS|4:NASD|4:AAPL|3:BUY',
+      '4:TOSS|8:OVERSEAS|4:NASD|4:AAPL|3:BUY',
     );
     expect(tx.tradeRecord.findFirst).toHaveBeenCalledWith({
       where: {
+        broker: Broker.TOSS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'AAPL',
@@ -96,12 +100,14 @@ describe('TradingOrderGuardService', () => {
 
   it('keeps distinct instruments distinct in the canonical key', async () => {
     const first = await admit({
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'AB',
       stockCode: 'C',
       side: 'BUY',
     });
     const second = await admit({
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'A',
       stockCode: 'BC',
@@ -112,15 +118,16 @@ describe('TradingOrderGuardService', () => {
       second.tx.$queryRaw.mock.calls[0][1],
     );
     expect(first.tx.$queryRaw.mock.calls[0][1]).toBe(
-      '8:OVERSEAS|2:AB|1:C|3:BUY',
+      '3:KIS|8:OVERSEAS|2:AB|1:C|3:BUY',
     );
     expect(second.tx.$queryRaw.mock.calls[0][1]).toBe(
-      '8:OVERSEAS|1:A|2:BC|3:BUY',
+      '3:KIS|8:OVERSEAS|1:A|2:BC|3:BUY',
     );
   });
 
   it('runs the lock, lookup, and creator on the interactive transaction client only', async () => {
     const { prisma, tx, createWithTx, result } = await admit({
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NYSE',
       stockCode: 'BRK.B',
@@ -132,6 +139,7 @@ describe('TradingOrderGuardService', () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.tradeRecord.findFirst).not.toHaveBeenCalled();
     expect(createWithTx).toHaveBeenCalledWith(tx, {
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NYSE',
       stockCode: 'BRK.B',
@@ -149,6 +157,7 @@ describe('TradingOrderGuardService', () => {
   it('returns null without invoking the creator when an unresolved intent exists', async () => {
     const { createWithTx, result } = await admit(
       {
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -161,12 +170,38 @@ describe('TradingOrderGuardService', () => {
     expect(createWithTx).not.toHaveBeenCalled();
   });
 
+  it('does not collide equal instrument tuples across KIS and TOSS lock/query scopes', async () => {
+    const kis = await admit({
+      broker: Broker.KIS,
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      side: 'BUY',
+    });
+    const toss = await admit({
+      broker: Broker.TOSS,
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      side: 'BUY',
+    });
+
+    expect(kis.tx.$queryRaw.mock.calls[0][1]).not.toBe(toss.tx.$queryRaw.mock.calls[0][1]);
+    expect(kis.tx.tradeRecord.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ broker: Broker.KIS }),
+    }));
+    expect(toss.tx.tradeRecord.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ broker: Broker.TOSS }),
+    }));
+  });
+
   it.each([
-    [{ market: 'INVALID', exchangeCode: 'KRX', stockCode: '005930', side: 'SELL' }],
-    [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '', side: 'SELL' }],
-    [{ market: 'OVERSEAS', exchangeCode: ' ', stockCode: 'AAPL', side: 'BUY' }],
-    [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'A|B', side: 'BUY' }],
-    [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'AAPL', side: 'HOLD' }],
+    [{ broker: Broker.KIS, market: 'INVALID', exchangeCode: 'KRX', stockCode: '005930', side: 'SELL' }],
+    [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '', side: 'SELL' }],
+    [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: ' ', stockCode: 'AAPL', side: 'BUY' }],
+    [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'A|B', side: 'BUY' }],
+    [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'AAPL', side: 'HOLD' }],
+    [{ broker: undefined, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'AAPL', side: 'BUY' }],
   ])('rejects an invalid admission key before opening a transaction', async (invalidKey) => {
     const { service, prisma } = buildHarness();
 

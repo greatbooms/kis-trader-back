@@ -8,6 +8,7 @@ import { TradingSlackRecoveryPresentationService } from './trading-slack-recover
 
 const UNKNOWN_ALERT_SELECT = {
   id: true,
+  broker: true,
   market: true,
   exchangeCode: true,
   stockCode: true,
@@ -37,6 +38,7 @@ export class TradingBrokerRecoverySlackAlertService {
   async notifyUnknown(tradeRecordId: string): Promise<void> {
     const id = tradeRecordId?.trim();
     if (!id) return;
+    let tag = `[RECOVERY ${id}]`;
 
     try {
       const record = await this.prisma.tradeRecord.findFirst({
@@ -50,11 +52,13 @@ export class TradingBrokerRecoverySlackAlertService {
         select: UNKNOWN_ALERT_SELECT,
       });
       if (!record) return;
+      tag = `[${record.broker} ${record.stockCode}] [RECOVERY ${id}]`;
 
       const cancellationUnknown = record.cancellationStatus
         === CancellationAttemptStatus.UNKNOWN;
       await this.presentation.sendUnknownAlert({
         tradeRecordId: record.id,
+        broker: record.broker,
         lifecycle: cancellationUnknown ? 'CANCELLATION' : 'SUBMISSION',
         market: record.market,
         exchangeCode: record.exchangeCode,
@@ -71,7 +75,7 @@ export class TradingBrokerRecoverySlackAlertService {
       });
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${id}] Slack unknown-order alert failed: ${this.errorMessage(error)}`,
+        `${tag} Slack unknown-order alert failed: ${this.errorMessage(error)}`,
       );
     }
   }

@@ -1,16 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Broker, Market, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { BalanceItem } from '../kis/types/kis-api.types';
 
 @Injectable()
 export class TradingPositionSyncService {
-  private readonly logger = new Logger(TradingPositionSyncService.name);
-
   constructor(private prisma: PrismaService) {}
 
   /** 포지션 동기화 (DB) */
   async syncPositions(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     items: BalanceItem[],
   ): Promise<void> {
@@ -21,13 +20,14 @@ export class TradingPositionSyncService {
       await this.prisma.position.upsert({
         where: {
           broker_market_exchangeCode_stockCode: {
-            broker: Broker.KIS,
+            broker,
             market: market as Market,
             exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
             stockCode: item.stockCode,
           },
         },
         create: {
+          broker,
           market: market as Market,
           exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
           stockCode: item.stockCode,
@@ -57,10 +57,11 @@ export class TradingPositionSyncService {
     await this.prisma.position.deleteMany({
       where: stockCodes.length > 0
         ? {
+          broker,
           market: market as Market,
           stockCode: { notIn: stockCodes },
         }
-        : { market: market as Market },
+        : { broker, market: market as Market },
     });
   }
 }

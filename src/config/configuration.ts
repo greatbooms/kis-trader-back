@@ -24,6 +24,16 @@ export default () => ({
   },
   trading: {
     enabled: process.env.TRADING_ENABLED?.trim().toLowerCase() === 'true',
+    brokers: {
+      kis: {
+        enabled: process.env.TRADING_BROKER_KIS_ENABLED === undefined
+          ? true
+          : process.env.TRADING_BROKER_KIS_ENABLED.trim().toLowerCase() === 'true',
+      },
+      toss: {
+        enabled: process.env.TRADING_BROKER_TOSS_ENABLED?.trim().toLowerCase() === 'true',
+      },
+    },
   },
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',

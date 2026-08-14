@@ -1,7 +1,9 @@
 import { TradingSignal, MarketCondition } from '../../trading/types';
 import { OrderResult } from '../../kis/types/kis-api.types';
+import { Broker } from '@prisma/client';
 
 export interface PositionInfo {
+  broker: Broker;
   stockCode: string;
   stockName: string;
   exchangeCode: string;
@@ -52,6 +54,14 @@ export interface DailySummaryContext {
   marketCondition?: MarketCondition;
   marketSummaries?: DailySummaryMarketSummary[];
   marketConditions?: DailySummaryMarketConditionSummary[];
+  crossBrokerExposures?: CrossBrokerExposure[];
+}
+
+export interface CrossBrokerExposure {
+  exchangeCode: string;
+  stockCode: string;
+  totalValue: number;
+  brokers: Array<{ broker: Broker; value: number }>;
 }
 
 export interface DailySummaryBuildOptions {
@@ -81,6 +91,7 @@ export interface DailySummaryMarketConditionSummary {
 }
 
 export interface FilterLogContext {
+  broker: Broker;
   stockCode: string;
   exchangeCode: string;
   reason: string;
@@ -88,6 +99,7 @@ export interface FilterLogContext {
 }
 
 export interface InsufficientFundsAlertContext {
+  broker: Broker;
   stockCode: string;
   stockName: string;
   exchangeCode: string;
@@ -104,6 +116,7 @@ export interface InsufficientFundsAlertContext {
 }
 
 export interface RiskAlertContext {
+  broker: Broker;
   market: string;
   riskType: 'MDD_LIQUIDATE' | 'MDD_BUY_BLOCK' | 'DAILY_PNL' | 'POSITION_LIMIT' | 'INVESTED_RATE';
   reasons: string[];
@@ -114,10 +127,12 @@ export interface RiskAlertContext {
     dailyPnlRate?: number;
     positionCount?: number;
     investedRate?: number;
+    crossBrokerExposures?: CrossBrokerExposure[];
   };
 }
 
 export interface StopLossApprovalRequest {
+  broker: Broker;
   approvalId: string;
   tradeRecordId: string;
   stockCode: string;
@@ -138,6 +153,7 @@ export interface StopLossApprovalRequest {
 }
 
 export interface StopLossAlertContext {
+  broker: Broker;
   stockCode: string;
   stockName: string;
   exchangeCode: string;

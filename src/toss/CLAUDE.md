@@ -2,7 +2,7 @@
 
 ## 책임
 
-토스증권 Open API의 OAuth2 인증, API 그룹별 rate-limit 큐, HTTP 오류 정규화, `BrokerPort` 응답 매핑을 담당한다. Phase 2에서는 포트만 등록하며 운영 주문 라우팅은 Phase 3 전까지 KIS를 유지한다.
+토스증권 Open API의 OAuth2 인증, API 그룹별 rate-limit 큐, HTTP 오류 정규화, `BrokerPort` 응답 매핑을 담당한다. Phase 3부터 명시적으로 활성화된 TOSS WatchStock의 운영 주문·동기화 경로에 사용한다.
 
 ## 주요 서비스 / 컴포넌트
 

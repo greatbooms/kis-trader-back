@@ -1,10 +1,13 @@
-import { ObjectType, Field, ID, Float, Int } from '@nestjs/graphql';
-import { Market } from '@prisma/client';
+import { ObjectType, Field, ID, Float, Int, registerEnumType } from '@nestjs/graphql';
+import { Broker, Market } from '@prisma/client';
 
 @ObjectType()
 export class WatchStockType {
   @Field(() => ID)
   id: string;
+
+  @Field(() => Broker)
+  broker: Broker;
 
   @Field(() => Market)
   market: Market;
@@ -54,3 +57,5 @@ export class WatchStockType {
   @Field()
   updatedAt: Date;
 }
+
+registerEnumType(Broker, { name: 'Broker' });

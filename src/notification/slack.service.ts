@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { App, LogLevel } from '@slack/bolt';
 import { KnownBlock } from '@slack/types';
+import { Broker } from '@prisma/client';
 import { EXCHANGE_CURRENCY } from '../kis/types/kis-config.types';
 import { BrokerOrderPersistenceWarning } from './types/broker-order-persistence-warning.type';
 import { OrderFailureAlertContext } from './types/order-failure-alert-context.type';
@@ -10,6 +11,7 @@ import {
   PositionInfo,
   TradeAlertContext,
   DailySummaryContext,
+  CrossBrokerExposure,
   FilterLogContext,
   InsufficientFundsAlertContext,
   RiskAlertContext,
@@ -240,10 +242,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `${ctx.signal.side === 'BUY' ? '매수' : '매도'} 체결 | ${ctx.signal.stockCode}`,
+        text: `${ctx.signal.side === 'BUY' ? '매수' : '매도'} 체결 | [${ctx.signal.broker ?? 'UNKNOWN'} ${ctx.signal.stockCode}]`,
       });
     } catch (e) {
-      this.logger.error(`Failed to send trade alert: ${e.message}`);
+      this.logger.error(`[${ctx.signal.broker ?? 'UNKNOWN'} ${ctx.signal.stockCode}] Failed to send trade alert: ${e.message}`);
       this.handleSendError(e);
     }
   }
@@ -256,10 +258,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     try {
       const lines = [
         `*시장:* ${warning.market}`,
-        `*종목:* ${warning.stockCode}`,
+        `*종목:* [${warning.broker} ${warning.stockCode}]`,
         `*TradeRecord:* ${warning.tradeRecordId}`,
         `*브로커 주문번호:* ${warning.orderNo}`,
-        '*조치:* KIS 주문 내역과 로컬 상태를 확인하세요. 주문을 다시 제출하지 마세요.',
+        `*조치:* ${warning.broker} 주문 내역과 로컬 상태를 확인하세요. 주문을 다시 제출하지 마세요.`,
       ].join('\n');
       await this.app!.client.chat.postMessage({
         channel: this.channel,
@@ -272,10 +274,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
             },
           },
         ],
-        text: `브로커 주문 접수 후 로컬 저장 실패 | ${warning.market}:${warning.stockCode}`,
+        text: `브로커 주문 접수 후 로컬 저장 실패 | [${warning.broker} ${warning.stockCode}]`,
       });
     } catch (error) {
-      this.logger.error(`Failed to send broker order persistence warning: ${error.message}`);
+      this.logger.error(`[${warning.broker} ${warning.stockCode}] Failed to send broker order persistence warning: ${error.message}`);
       this.handleSendError(error);
     }
   }
@@ -291,7 +293,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         hour12: false,
       }).format(context.occurredAt);
       const lines = [
-        `*종목:* ${context.stockName} (${context.exchangeCode}:${context.stockCode})`,
+        `*종목:* ${context.stockName} [${context.broker} ${context.stockCode}] (${context.exchangeCode})`,
         `*주문:* ${context.side} ${context.quantity}주 / ${context.orderType} / ${context.price}`,
         `*전략:* ${context.strategyName}`,
         `*사유:* ${this.redactOrderFailureAlertText(context.reason)}`,
@@ -308,10 +310,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           type: 'section',
           text: { type: 'mrkdwn', text: `:rotating_light: *자동 주문 실패*\n${lines}` },
         }],
-        text: `자동 주문 실패 | ${context.exchangeCode}:${context.stockCode} ${context.side}`,
+        text: `자동 주문 실패 | [${context.broker} ${context.stockCode}] ${context.side}`,
       });
     } catch (error) {
-      this.logger.warn(`Failed to send automatic order failure alert: ${error.message}`);
+      this.logger.warn(`[${context.broker} ${context.stockCode}] Failed to send automatic order failure alert: ${error.message}`);
       this.handleSendError(error);
     }
   }
@@ -342,7 +344,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `전략 스킵 | ${ctx.stockCode}`,
+        text: `전략 스킵 | [${ctx.broker} ${ctx.stockCode}]`,
       });
     } catch (e) {
       this.logger.error(`Failed to send filter log: ${e.message}`);
@@ -378,7 +380,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `:warning: *실예수금 부족 | ${ctx.exchangeCode}:${ctx.stockCode}* (${ctx.stockName})`,
+              text: `:warning: *실예수금 부족 | [${ctx.broker} ${ctx.stockCode}]* (${ctx.stockName})`,
             },
           },
           { type: 'divider' },
@@ -387,7 +389,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
             text: { type: 'mrkdwn', text: lines },
           },
         ],
-        text: `실예수금 부족 | ${ctx.exchangeCode}:${ctx.stockCode}`,
+        text: `실예수금 부족 | [${ctx.broker} ${ctx.stockCode}]`,
       });
     } catch (e) {
       this.logger.error(`Failed to send insufficient funds alert: ${e.message}`);
@@ -412,10 +414,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `🚨 리스크 경고 | ${marketLabel} | ${ctx.reasons.join(', ')}`,
+        text: `🚨 리스크 경고 | ${ctx.broker} ${marketLabel} | ${ctx.reasons.join(', ')}`,
       });
     } catch (e) {
-      this.logger.error(`Failed to send risk alert: ${e.message}`);
+      this.logger.error(`[${ctx.broker} ${ctx.market}] Failed to send risk alert: ${e.message}`);
       this.handleSendError(e);
     }
   }
@@ -671,7 +673,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:rotating_light: *${title} | ${exchange}:${req.stockCode}* (${req.stockName})`,
+            text: `:rotating_light: *${title} | [${req.broker} ${req.stockCode}]* (${req.stockName}, ${exchange})`,
           },
         },
         { type: 'divider' },
@@ -722,12 +724,12 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       const result = await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `${title} | ${exchange}:${req.stockCode} | ${expectedPnlRateLabel}`,
+        text: `${title} | [${req.broker} ${req.stockCode}] | ${expectedPnlRateLabel}`,
       });
 
       return result.ts ? { ts: result.ts, channel: result.channel as string } : null;
     } catch (e) {
-      this.logger.error(`Failed to send sell approval: ${e.message}`);
+      this.logger.error(`[${req.broker} ${req.stockCode}] Failed to send sell approval: ${e.message}`);
       this.handleSendError(e);
       return null;
     }
@@ -745,7 +747,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:rotating_light: *손절 알림 | ${exchange}:${req.stockCode}* (${req.stockName})`,
+            text: `:rotating_light: *손절 알림 | [${req.broker} ${req.stockCode}]* (${req.stockName}, ${exchange})`,
           },
         },
         { type: 'divider' },
@@ -771,10 +773,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       await this.app!.client.chat.postMessage({
         channel: this.channel,
         blocks,
-        text: `손절 알림 | ${exchange}:${req.stockCode} | -${lossPercent}%`,
+        text: `손절 알림 | [${req.broker} ${req.stockCode}] | -${lossPercent}%`,
       });
     } catch (e) {
-      this.logger.error(`Failed to send stop-loss alert: ${e.message}`);
+      this.logger.error(`[${req.broker} ${req.stockCode}] Failed to send stop-loss alert: ${e.message}`);
       this.handleSendError(e);
     }
   }
@@ -783,6 +785,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   async updateStopLossApprovalMessage(
     channel: string,
     ts: string,
+    broker: Broker,
     stockCode: string,
     status: SellApprovalMessageStatus,
   ): Promise<void> {
@@ -791,7 +794,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     const presentation: Record<SellApprovalMessageStatus, { emoji: string; label: string }> = {
       APPROVED_ACCEPTED: { emoji: ':white_check_mark:', label: '승인됨 - 주문 접수' },
       APPROVED_NOT_SUBMITTED: { emoji: ':warning:', label: '승인됨 - 주문 미실행' },
-      APPROVED_REJECTED: { emoji: ':no_entry_sign:', label: '승인됨 - KIS 거절' },
+      APPROVED_REJECTED: { emoji: ':no_entry_sign:', label: `승인됨 - ${broker} 거절` },
       APPROVED_UNKNOWN: { emoji: ':warning:', label: '승인됨 - 결과 확인 필요' },
       REJECTED: { emoji: ':no_entry_sign:', label: '거절됨 - 스킵' },
       EXPIRED: { emoji: ':hourglass:', label: '미응답 - 주문 미실행' },
@@ -802,7 +805,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       const blocks: KnownBlock[] = [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: `${emoji} *매도 승인 ${label} | ${stockCode}*` },
+          text: { type: 'mrkdwn', text: `${emoji} *매도 승인 ${label} | [${broker} ${stockCode}]*` },
         },
       ];
 
@@ -817,10 +820,10 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         channel,
         ts,
         blocks,
-        text: `매도 승인 ${label} | ${stockCode}`,
+        text: `매도 승인 ${label} | [${broker} ${stockCode}]`,
       });
     } catch (e) {
-      this.logger.error(`Failed to update stop-loss message: ${e.message}`);
+      this.logger.error(`[${broker} ${stockCode}] Failed to update stop-loss message: ${e.message}`);
     }
   }
 
@@ -848,7 +851,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     }
 
     const exchange = signal.exchangeCode;
-    const header = `${emoji} ${title} | ${exchange}:${signal.stockCode}`;
+    const header = `${emoji} ${title} | [${signal.broker ?? 'UNKNOWN'} ${signal.stockCode}] (${exchange})`;
 
     const blocks: KnownBlock[] = [
       {
@@ -991,9 +994,9 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
       for (const summary of marketSummaries) {
         const posLines = summary.positions.map((p) => {
           const market = p.market === 'OVERSEAS' ? 'OVERSEAS' : 'DOMESTIC';
-          const codeLabel = p.exchangeCode && p.exchangeCode !== 'KRX'
-            ? `${p.exchangeCode}:${p.stockCode}`
-            : p.stockCode;
+          const codeLabel = `[${p.broker} ${p.stockCode}]${p.exchangeCode && p.exchangeCode !== 'KRX'
+            ? ` ${p.exchangeCode}`
+            : ''}`;
           return `${codeLabel}  ${p.quantity}주 | 평단 ${this.fmtPrice(p.avgPrice, market, p.exchangeCode)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(1)}%`;
         });
 
@@ -1019,6 +1022,19 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
           },
         );
       }
+    }
+
+    if (ctx.crossBrokerExposures?.length) {
+      blocks.push(
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: this.formatCrossBrokerExposures(ctx.crossBrokerExposures),
+          },
+        },
+      );
     }
 
     // Market condition
@@ -1058,7 +1074,6 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   }
 
   formatFilterLog(ctx: FilterLogContext): KnownBlock[] {
-    const exchange = ctx.exchangeCode;
     const detailLines = Object.entries(ctx.details)
       .map(([k, v]) => `*${k}:* ${typeof v === 'object' ? JSON.stringify(v) : v}`)
       .join('\n');
@@ -1068,7 +1083,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `:warning: *전략 스킵 | ${exchange}:${ctx.stockCode}*`,
+          text: `:warning: *전략 스킵 | [${ctx.broker} ${ctx.stockCode}]*`,
         },
       },
       { type: 'divider' },
@@ -1108,7 +1123,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         text: {
           type: 'mrkdwn',
           text: [
-            `*${exchange}:${p.stockCode}* (${p.stockName})`,
+            `*[${p.broker} ${p.stockCode}] ${exchange}* (${p.stockName})`,
             `보유: ${p.quantity}주 | 평단: ${this.fmtPrice(p.avgPrice, p.market, p.exchangeCode)} | 현재가: ${this.fmtPrice(p.currentPrice, p.market, p.exchangeCode)}`,
             `투자금: ${this.fmtMoney(p.totalInvested, p.market, p.exchangeCode)} | 평가: ${this.fmtMoney(evalAmount, p.market, p.exchangeCode)} | ${p.profitRate >= 0 ? '+' : ''}${p.profitRate.toFixed(2)}%`,
           ].join('\n'),
@@ -1131,7 +1146,7 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
         : 0;
 
     const lines: string[] = [
-      `*${exchange}:${position.stockCode}* (${position.stockName})`,
+      `*[${position.broker} ${position.stockCode}] ${exchange}* (${position.stockName})`,
       '',
       `:bar_chart: *보유 현황*`,
       `*보유:* ${position.quantity}주`,
@@ -1220,11 +1235,17 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
     if (d.investedRate !== undefined) {
       lines.push(`*투자비율:* ${(d.investedRate * 100).toFixed(1)}%`);
     }
+    if (d.crossBrokerExposures?.length) {
+      lines.push(
+        '',
+        this.formatCrossBrokerExposures(d.crossBrokerExposures),
+      );
+    }
 
     const blocks: KnownBlock[] = [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: `${emoji} *${title} | ${marketLabel}*` },
+        text: { type: 'mrkdwn', text: `${emoji} *${title} | ${marketLabel} | ${ctx.broker}*` },
       },
       { type: 'divider' },
       {
@@ -1259,6 +1280,26 @@ export class SlackService implements OnModuleInit, OnModuleDestroy {
   }
 
   // --- Helpers ---
+
+  private formatCrossBrokerExposures(exposures: CrossBrokerExposure[]): string {
+    return [
+      '*종목별 크로스 브로커 노출 (표시 전용):*',
+      ...exposures.map((exposure) => {
+        const market = exposure.exchangeCode === 'KRX' ? 'DOMESTIC' : 'OVERSEAS';
+        return `${exposure.exchangeCode}:${exposure.stockCode} 총 ${this.fmtMoney(
+          exposure.totalValue,
+          market,
+          exposure.exchangeCode,
+        )} = ${exposure.brokers
+          .map((item) => `${item.broker} ${this.fmtMoney(
+            item.value,
+            market,
+            exposure.exchangeCode,
+          )}`)
+          .join(' + ')}`;
+      }),
+    ].join('\n');
+  }
 
   private fmtPrice(price: number, market: string, exchangeCode?: string): string {
     return this.formatCurrency(price, market, exchangeCode);

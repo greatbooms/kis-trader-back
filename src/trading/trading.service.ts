@@ -126,7 +126,7 @@ export class TradingService {
       diagnosticReasons.push('전략 가감산 적용');
     }
     if (cashCapApplied) {
-      diagnosticReasons.push('KIS 주문가능금액 상한 적용');
+      diagnosticReasons.push(`${ctx.watchStock.broker} 주문가능금액 상한 적용`);
     }
 
     return {
@@ -237,6 +237,7 @@ export class TradingService {
       : undefined;
 
     await this.slackService.sendInsufficientFundsAlert({
+      broker: ctx.watchStock.broker,
       stockCode: ctx.watchStock.stockCode,
       stockName: ctx.watchStock.stockName,
       exchangeCode: ctx.watchStock.exchangeCode,
@@ -322,6 +323,7 @@ export class TradingService {
           // Send filter skip log to Slack
           if (this.slackService?.isEnabled()) {
             this.slackService.sendFilterLog({
+              broker: ctx.watchStock.broker,
               stockCode: ctx.watchStock.stockCode,
               exchangeCode: ctx.watchStock.exchangeCode,
               reason,
@@ -339,7 +341,7 @@ export class TradingService {
         }
 
         this.logger.log(
-          `Strategy "${strategy.name}" generated ${signals.length} signal(s) for ${ctx.watchStock.stockCode}`,
+          `[${ctx.watchStock.broker} ${ctx.watchStock.stockCode}] Strategy "${strategy.name}" generated ${signals.length} signal(s)`,
         );
 
         if (this.isQuotaCarryEligible(skipReasons)) {
@@ -384,7 +386,7 @@ export class TradingService {
           && !executableSignals.some((signal) => signal.side === 'BUY');
         if (blockedBuySignals.length > 0) {
           this.logger.warn(
-            `[${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) — same-cycle SELL does not clear minimum profit gap`,
+            `[${ctx.watchStock.broker} ${ctx.watchStock.stockCode}] Skipping ${blockedBuySignals.length} BUY signal(s) — same-cycle SELL does not clear minimum profit gap`,
           );
           // 전부 차단된 경우에만 quota carry 등록. 다른 가격대 BUY가 살아있으면
           // 그 시도의 성공/실패에 따라 아래에서 reset/carry가 결정된다.
@@ -479,7 +481,7 @@ export class TradingService {
           { error: e.message },
         );
         this.logger.error(
-          `Error executing strategy for ${ctx.watchStock.stockCode}: ${e.message}`,
+          `[${ctx.watchStock.broker ?? 'UNKNOWN'} ${ctx.watchStock.stockCode}] Error executing strategy: ${e.message}`,
         );
       }
     }
@@ -607,10 +609,10 @@ export class TradingService {
         data: { strategyParams: { ...params, accumulatedQuota: 0, lastAccumulatedDate: today } },
       });
       if (params.accumulatedQuota) {
-        this.logger.log(`[${ws.stockCode}] Accumulated quota reset after buy`);
+        this.logger.log(`[${ws.broker} ${ws.stockCode}] Accumulated quota reset after buy`);
       }
     } catch (e) {
-      this.logger.warn(`Failed to reset accumulated quota: ${e.message}`);
+      this.logger.warn(`[WATCH_STOCK ${watchStockId}] Failed to reset accumulated quota: ${e.message}`);
     }
   }
 
@@ -628,9 +630,9 @@ export class TradingService {
         where: { id: watchStockId },
         data: { strategyParams: rest },
       });
-      this.logger.log(`[${ws.stockCode}] Accumulated quota cleared (${reason})`);
+      this.logger.log(`[${ws.broker} ${ws.stockCode}] Accumulated quota cleared (${reason})`);
     } catch (e) {
-      this.logger.warn(`Failed to clear accumulated quota: ${e.message}`);
+      this.logger.warn(`[WATCH_STOCK ${watchStockId}] Failed to clear accumulated quota: ${e.message}`);
     }
   }
 
@@ -678,7 +680,7 @@ export class TradingService {
         },
       });
       this.logger.log(
-        `[${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (insufficient quantity only)`,
+        `[${ws.broker} ${ws.stockCode}] Accumulated quota: ${newAccumulated.toFixed(2)} (insufficient quantity only)`,
       );
     }
   }
@@ -752,7 +754,7 @@ export class TradingService {
     }));
 
     if (previousMode !== 'REVERSE' && update.mode === 'REVERSE') {
-      const message = `[${ctx.watchStock.stockCode}] 무한매수 V4 REVERSE 모드 진입 (T > N-1, 소진 후 리버스 전환)`;
+      const message = `[${ctx.watchStock.broker} ${ctx.watchStock.stockCode}] 무한매수 V4 REVERSE 모드 진입 (T > N-1, 소진 후 리버스 전환)`;
       this.logger.log(message);
       await this.logWatchStockExecution(ctx, WatchStockExecutionEventType.SIGNAL_CREATED, message, {
         phase: 'v4-reverse-enter',
@@ -818,7 +820,7 @@ export class TradingService {
 
     if (result.cycleCompleted) {
       this.logger.log(
-        `[${watchStock.stockCode}] V4 사이클 종료: cycleSeq=${result.state.cycleSeq}, ` +
+        `[${watchStock.broker} ${watchStock.stockCode}] V4 사이클 종료: cycleSeq=${result.state.cycleSeq}, ` +
         `cashRemaining=${result.state.cashRemaining.toFixed(2)}, compoundMode=${compoundMode}` +
         (result.discardedExcess > 0 ? `, 단리 초과분 제외=${result.discardedExcess.toFixed(2)}` : ''),
       );
@@ -918,6 +920,7 @@ export class TradingService {
       const position = watchStock
         ? await this.prisma.position.findFirst({
             where: {
+              broker: watchStock.broker,
               market: watchStock.market,
               exchangeCode: watchStock.exchangeCode,
               stockCode: watchStock.stockCode,
@@ -1079,6 +1082,7 @@ export class TradingService {
 
   private async buildInfiniteBuyFollowUpContext(
     watchStock: {
+      broker: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -1123,7 +1127,7 @@ export class TradingService {
       };
     } catch (e) {
       this.logger.warn(
-        `Failed to refresh same-day second target context for ${watchStock.stockCode}: ${e.message}`,
+        `[${watchStock.broker} ${watchStock.stockCode}] Failed to refresh same-day second target context: ${e.message}`,
       );
 
       const currentPrice = Number(position?.currentPrice ?? fallbackPrice);

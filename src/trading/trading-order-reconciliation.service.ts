@@ -33,14 +33,19 @@ export class TradingOrderReconciliationService {
   ) {}
 
   async reconcileOpenOrders(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     currentPositions: PositionQuantitySnapshot[],
     unfilledOrders: UnfilledOrder[],
     brokerOrders: BrokerOrderStatus[],
   ): Promise<OrderReconciliationResult> {
-    const currentBrokerContext = this.brokerContext.getCurrentContext();
+    const currentBrokerContext = this.brokerContext.getCurrentContext(broker);
+    if (currentBrokerContext.broker !== broker) {
+      throw new Error(`Resolved broker context does not match reconciliation broker: ${broker}`);
+    }
     const openRecords = await this.prisma.tradeRecord.findMany({
       where: {
+        broker,
         market: market as Market,
         status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
         orderNo: { not: null },
@@ -403,7 +408,10 @@ export class TradingOrderReconciliationService {
     return undefined;
   }
 
-  private async getSubmittedSignal(tradeRecordId: string): Promise<TradingSignal | undefined> {
+  private async getSubmittedSignal(
+    tradeRecordId: string,
+    broker: Broker,
+  ): Promise<TradingSignal | undefined> {
     const executionLogs = await this.prisma.watchStockExecutionLog.findMany({
       where: {
         tradeRecordId,
@@ -424,6 +432,7 @@ export class TradingOrderReconciliationService {
       }
 
       return {
+        broker,
         market: executionLog.market as 'DOMESTIC' | 'OVERSEAS',
         exchangeCode: executionLog.exchangeCode,
         stockCode: executionLog.stockCode,
@@ -444,7 +453,8 @@ export class TradingOrderReconciliationService {
       orderBy: { respondedAt: 'desc' },
       select: { signal: true },
     });
-    return this.normalizeStoredSignal(approval?.signal);
+    const storedSignal = this.normalizeStoredSignal(approval?.signal);
+    return storedSignal ? { ...storedSignal, broker } : undefined;
   }
 
   private normalizeStoredSignal(value: unknown): TradingSignal | undefined {
@@ -500,7 +510,7 @@ export class TradingOrderReconciliationService {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
         broker_market_exchangeCode_stockCode: {
-          broker: Broker.KIS,
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,
@@ -509,7 +519,7 @@ export class TradingOrderReconciliationService {
     });
     if (!watchStock) return;
 
-    const signal = await this.getSubmittedSignal(tradeRecordId);
+    const signal = await this.getSubmittedSignal(tradeRecordId, record.broker);
     if (!signal) return;
 
     // 실제 체결가(broker 평균체결가). LOC/MOC는 제출가(지정/시장)와 다를 수 있어
@@ -562,7 +572,7 @@ export class TradingOrderReconciliationService {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
         broker_market_exchangeCode_stockCode: {
-          broker: Broker.KIS,
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,
@@ -578,7 +588,7 @@ export class TradingOrderReconciliationService {
     // (BUY 제출 전부 실패 시 quotaCarryEligibleIds → accumulateUnusedQuotas가 lastAccumulatedDate=today 기록)
     if (params.lastAccumulatedDate === today) {
       this.logger.debug(
-        `[${watchStock.stockCode}] Quota already accumulated today (${today}), skipping restore on ${status}`,
+        `[${record.broker} ${watchStock.stockCode}] Quota already accumulated today (${today}), skipping restore on ${status}`,
       );
       return;
     }
@@ -588,6 +598,7 @@ export class TradingOrderReconciliationService {
 
     const position = await this.prisma.position.findFirst({
       where: {
+        broker: record.broker,
         market: record.market,
         exchangeCode: record.exchangeCode,
         stockCode: record.stockCode,
@@ -612,7 +623,7 @@ export class TradingOrderReconciliationService {
     });
 
     this.logger.log(
-      `[${watchStock.stockCode}] Quota restored after ${status} order: +${perCycleQuota.toFixed(2)} → ${nextAccumulated.toFixed(2)}`,
+      `[${record.broker} ${watchStock.stockCode}] Quota restored after ${status} order: +${perCycleQuota.toFixed(2)} → ${nextAccumulated.toFixed(2)}`,
     );
   }
 
@@ -633,7 +644,7 @@ export class TradingOrderReconciliationService {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
         broker_market_exchangeCode_stockCode: {
-          broker: Broker.KIS,
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,
@@ -701,16 +712,17 @@ export class TradingOrderReconciliationService {
     });
     if (!record) return;
 
-    const signal = await this.getSubmittedSignal(tradeRecordId);
+    const signal = await this.getSubmittedSignal(tradeRecordId, record.broker);
     if (!signal) {
       this.logger.warn(
-        `[${record.stockCode}] Slack fill alert skipped: submitted signal unavailable for trade ${tradeRecordId}`,
+        `[${record.broker} ${record.stockCode}] Slack fill alert skipped: submitted signal unavailable for trade ${tradeRecordId}`,
       );
       return;
     }
 
     const position = await this.prisma.position.findFirst({
       where: {
+        broker: record.broker,
         market: record.market,
         exchangeCode: record.exchangeCode,
         stockCode: record.stockCode,
@@ -742,6 +754,7 @@ export class TradingOrderReconciliationService {
       },
       position: position
         ? {
+            broker: record.broker,
             stockCode: position.stockCode,
             stockName: position.stockName,
             exchangeCode: position.exchangeCode,
@@ -760,6 +773,7 @@ export class TradingOrderReconciliationService {
 
   private async buildTradeAlertStrategyDetails(
     record: {
+      broker: Broker;
       strategyName?: string | null;
       market: Market;
       exchangeCode: string;
@@ -776,7 +790,7 @@ export class TradingOrderReconciliationService {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
         broker_market_exchangeCode_stockCode: {
-          broker: Broker.KIS,
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,

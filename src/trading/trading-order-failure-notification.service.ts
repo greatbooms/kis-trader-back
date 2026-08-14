@@ -17,12 +17,14 @@ export class TradingOrderFailureNotificationService {
     tradeRecordId: string,
     stage: OrderFailureAlertContext['stage'],
   ): Promise<void> {
+    let tag = `[TRADE ${tradeRecordId}]`;
     try {
       if (!this.slackService?.isEnabled()) return;
 
       const record = await this.prisma.tradeRecord.findUnique({
         where: { id: tradeRecordId },
         select: {
+          broker: true,
           market: true,
           exchangeCode: true,
           stockCode: true,
@@ -48,8 +50,10 @@ export class TradingOrderFailureNotificationService {
         || record.strategyName === 'manual'
         || record.stopLossApprovals.length > 0
       ) return;
+      tag = `[${record.broker} ${record.stockCode}] [TRADE ${tradeRecordId}]`;
 
       await this.slackService.sendOrderFailureAlert({
+        broker: record.broker,
         market: record.market,
         exchangeCode: record.exchangeCode,
         stockCode: record.stockCode,
@@ -68,7 +72,7 @@ export class TradingOrderFailureNotificationService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `[TRADE ${tradeRecordId}] Failed to send order failure alert: ${message}`,
+        `${tag} Failed to send order failure alert: ${message}`,
       );
     }
   }

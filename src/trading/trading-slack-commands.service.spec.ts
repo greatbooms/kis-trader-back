@@ -1,4 +1,4 @@
-import { ApprovalStatus, Market, OrderStatus, Side } from '@prisma/client';
+import { ApprovalStatus, Broker, Market, OrderStatus, Side } from '@prisma/client';
 import { TradingSlackCommandsService } from './trading-slack-commands.service';
 
 describe('TradingSlackCommandsService', () => {
@@ -17,6 +17,7 @@ describe('TradingSlackCommandsService', () => {
     },
     watchStock: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
     },
   };
 
@@ -65,6 +66,18 @@ describe('TradingSlackCommandsService', () => {
     mockSlackService.getApp.mockReturnValue(app);
     service.onModuleInit();
     return actionHandlers.get(actionName)!;
+  }
+
+  function registerCommand(commandName: string): (args: any) => Promise<void> {
+    const commandHandlers = new Map<string, (args: any) => Promise<void>>();
+    const app = {
+      command: jest.fn((name, handler) => commandHandlers.set(name, handler)),
+      action: jest.fn(),
+      event: jest.fn(),
+    };
+    mockSlackService.getApp.mockReturnValue(app);
+    service.onModuleInit();
+    return commandHandlers.get(commandName)!;
   }
 
   it('delegates the exact approval ID and Slack actor to the approval workflow once', async () => {
@@ -475,5 +488,129 @@ describe('TradingSlackCommandsService', () => {
     expect(summary.marketSummaries).toHaveLength(1);
     expect(summary.marketSummaries?.[0].label).toBe('미국');
     expect(mockMarketAnalysisService.getMarketCondition).toHaveBeenCalledWith('NASD');
+  });
+
+  it('fails closed when a stock detail command matches the same symbol at multiple brokers', async () => {
+    mockPrisma.position.findMany.mockResolvedValue([
+      {
+        broker: Broker.KIS,
+        market: Market.OVERSEAS,
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+      },
+      {
+        broker: Broker.TOSS,
+        market: Market.OVERSEAS,
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+      },
+    ]);
+    const handler = registerCommand('/종목');
+    const respond = jest.fn().mockResolvedValue(undefined);
+
+    await handler({
+      ack: jest.fn().mockResolvedValue(undefined),
+      respond,
+      command: { text: 'tqqq' },
+    });
+
+    expect(respond).toHaveBeenCalledWith({
+      text: expect.stringMatching(/여러 브로커/),
+    });
+    expect(mockPrisma.watchStock.findUnique).not.toHaveBeenCalled();
+    expect(mockSlackService.formatStockDetail).not.toHaveBeenCalled();
+  });
+
+  it('joins an unambiguous legacy KIS stock detail on the full broker unit', async () => {
+    const position = {
+      broker: Broker.KIS,
+      market: Market.DOMESTIC,
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      stockName: '삼성전자',
+      quantity: 3,
+      avgPrice: 70_000,
+      currentPrice: 71_000,
+      profitLoss: 3_000,
+      profitRate: 1.43,
+      totalInvested: 210_000,
+    };
+    mockPrisma.position.findMany.mockResolvedValue([position]);
+    mockPrisma.watchStock.findUnique.mockResolvedValue({
+      isActive: true,
+      quota: 1_000_000,
+      cycle: 2,
+      maxCycles: 40,
+      stopLossRate: 0.3,
+    });
+    mockSlackService.formatStockDetail.mockReturnValue([{ type: 'section' }]);
+    const handler = registerCommand('/종목');
+    const respond = jest.fn().mockResolvedValue(undefined);
+
+    await handler({
+      ack: jest.fn().mockResolvedValue(undefined),
+      respond,
+      command: { text: '005930' },
+    });
+
+    expect(mockPrisma.watchStock.findUnique).toHaveBeenCalledWith({
+      where: {
+        broker_market_exchangeCode_stockCode: {
+          broker: Broker.KIS,
+          market: Market.DOMESTIC,
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+        },
+      },
+    });
+    expect(mockSlackService.formatStockDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        broker: Broker.KIS,
+        market: Market.DOMESTIC,
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+      }),
+      expect.objectContaining({ quota: 1_000_000 }),
+    );
+    expect(respond).toHaveBeenCalledWith({
+      blocks: [{ type: 'section' }],
+      response_type: 'ephemeral',
+    });
+  });
+
+  it('keeps inactive exact-unit WatchStock strategy details hidden', async () => {
+    mockPrisma.position.findMany.mockResolvedValue([{
+      broker: Broker.KIS,
+      market: Market.DOMESTIC,
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      stockName: '삼성전자',
+      quantity: 1,
+      avgPrice: 70_000,
+      currentPrice: 71_000,
+      profitLoss: 1_000,
+      profitRate: 1.43,
+      totalInvested: 70_000,
+    }]);
+    mockPrisma.watchStock.findUnique.mockResolvedValue({
+      isActive: false,
+      quota: 1_000_000,
+      cycle: 2,
+      maxCycles: 40,
+      stopLossRate: 0.3,
+    });
+    mockSlackService.formatStockDetail.mockReturnValue([{ type: 'section' }]);
+    const handler = registerCommand('/종목');
+
+    await handler({
+      ack: jest.fn().mockResolvedValue(undefined),
+      respond: jest.fn().mockResolvedValue(undefined),
+      command: { text: '005930' },
+    });
+
+    expect(mockSlackService.formatStockDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ broker: Broker.KIS, stockCode: '005930' }),
+      undefined,
+    );
   });
 });

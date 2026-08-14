@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerOrderAction,
   BrokerOrderActionChannel,
   CancellationAttemptStatus,
@@ -9,7 +10,7 @@ import { TradingBrokerCancellationRecoveryService } from './trading-broker-cance
 describe('TradingBrokerCancellationRecoveryService', () => {
   const record = (overrides: Record<string, unknown> = {}) => ({
     id: 'trade-cancel-unknown',
-    broker: 'KIS',
+    broker: Broker.KIS,
     market: 'DOMESTIC',
     exchangeCode: 'KRX',
     stockCode: '005930',
@@ -81,6 +82,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
     unfilledOrders?: ReturnType<typeof unfilled>[];
     claimedCount?: number;
     contextSequence?: Array<{
+      broker: Broker;
       environment: 'PAPER' | 'PROD';
       accountHash: string;
       maskedAccount: string;
@@ -123,13 +125,15 @@ describe('TradingBrokerCancellationRecoveryService', () => {
       cancelOrder: jest.fn(),
     };
     const contexts = options.contextSequence ?? [{
+      broker: Broker.KIS,
       environment: 'PROD' as const,
       accountHash: 'current-account-hash',
       maskedAccount: '****1234-01',
     }];
     const brokerContext = {
       getCurrentContext: jest.fn()
-        .mockImplementation(() => contexts.shift() ?? contexts[contexts.length - 1] ?? {
+        .mockImplementation((broker: Broker) => contexts.shift() ?? contexts[contexts.length - 1] ?? {
+          broker,
           environment: 'PROD',
           accountHash: 'current-account-hash',
           maskedAccount: '****1234-01',
@@ -150,7 +154,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
       brokerContext as never,
       registry as never,
     );
-    return { service, prisma, tx, domestic, overseas, brokerContext, storedRecord };
+    return { service, prisma, tx, domestic, overseas, brokerContext, registry, storedRecord };
   }
 
   it('reconciles a completely unfilled closed order to CANCELLED and RESOLVED atomically', async () => {
@@ -169,6 +173,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
     expect(tx.tradeRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'trade-cancel-unknown',
+        broker: Broker.KIS,
         status: OrderStatus.PENDING,
         orderNo: 'ORDER-1',
         cancellationStatus: CancellationAttemptStatus.UNKNOWN,
@@ -319,6 +324,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
   it('fails before KIS on a stored context mismatch and before mutation if context changes after reads', async () => {
     const mismatched = setup({
       contextSequence: [{
+        broker: Broker.KIS,
         environment: 'PAPER',
         accountHash: 'other-hash',
         maskedAccount: '****9999-01',
@@ -333,11 +339,13 @@ describe('TradingBrokerCancellationRecoveryService', () => {
     const changed = setup({
       contextSequence: [
         {
+          broker: Broker.KIS,
           environment: 'PROD',
           accountHash: 'current-account-hash',
           maskedAccount: '****1234-01',
         },
         {
+          broker: Broker.KIS,
           environment: 'PROD',
           accountHash: 'changed-account-hash',
           maskedAccount: '****5678-01',
@@ -350,6 +358,30 @@ describe('TradingBrokerCancellationRecoveryService', () => {
     ).rejects.toThrow('changed during cancellation inspection');
     expect(changed.prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [Broker.KIS, Broker.TOSS],
+    [Broker.TOSS, Broker.KIS],
+  ])(
+    'fails closed before broker reads when a %s record resolves a %s context',
+    async (recordBroker, currentBroker) => {
+      const mismatched = setup({
+        storedRecord: record({ broker: recordBroker }),
+        contextSequence: [{
+          broker: currentBroker,
+          environment: 'PROD',
+          accountHash: 'current-account-hash',
+          maskedAccount: '****1234-01',
+        }],
+      });
+
+      await expect(
+        mismatched.service.inspectCancellation('trade-cancel-unknown', context),
+      ).rejects.toThrow(`does not match current ${recordBroker} context`);
+      expect(mismatched.registry.get).not.toHaveBeenCalled();
+      expect(mismatched.prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
 
   it('ignores same-number execution rows from a wrong tuple or date', async () => {
     const { service, prisma } = setup({
@@ -381,6 +413,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
     expect(tx.tradeRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: storedRecord.id,
+        broker: Broker.KIS,
         status: OrderStatus.PARTIAL,
         orderNo: 'ORDER-1',
         cancellationStatus: CancellationAttemptStatus.UNKNOWN,

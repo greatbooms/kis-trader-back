@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Broker, Prisma } from '@prisma/client';
 import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { AccountCashBalance, AccountStatusCache } from '../common/types';
+import type { BrokerPort } from '../common/types';
 import { PrismaService } from '../prisma.service';
 
 const ACCOUNT_STATUS_CACHE_KEY = 'account_status_cache';
@@ -15,21 +16,61 @@ export class TradingAccountCashSyncService {
     private readonly registry: BrokerPortRegistry,
   ) {}
 
-  async refreshMarketCash(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
+  async refreshMarketCash(
+    broker: Broker,
+    market: 'DOMESTIC' | 'OVERSEAS',
+  ): Promise<void> {
+    const port = this.registry.get(broker);
     const cashBalances = market === 'DOMESTIC'
-      ? await this.getDomesticCashBalances()
-      : await this.getOverseasCashBalances();
+      ? await this.getDomesticCashBalances(port)
+      : await this.getOverseasCashBalances(port);
 
-    await this.mergeMarketCache(market, cashBalances);
-    this.logger.debug(`Refreshed ${market} cash cache after broker fill`);
+    await this.writeCache(broker, market, cashBalances);
+    this.logger.debug(`[${broker} ${market}] Refreshed cash cache after broker fill`);
   }
 
-  async replaceCache(cashBalances: AccountCashBalance[]): Promise<void> {
-    await this.writeCache(async () => cashBalances);
+  async replaceCache(
+    broker: Broker,
+    cashBalances: AccountCashBalance[],
+    authoritativeMarkets: Array<'DOMESTIC' | 'OVERSEAS'>,
+  ): Promise<void> {
+    for (const market of authoritativeMarkets) {
+      const marketBalances = cashBalances.filter((item) => item.market === market);
+      await this.writeCache(broker, market, marketBalances);
+    }
   }
 
-  private async getDomesticCashBalances(): Promise<AccountCashBalance[]> {
-    const domesticCash = await this.registry.get(Broker.KIS).getDomesticBuyableAmount();
+  async getCache(): Promise<AccountStatusCache | null> {
+    const legacy = await this.prisma.appSetting.findUnique({
+      where: { key: ACCOUNT_STATUS_CACHE_KEY },
+    });
+    const legacyCache = legacy?.value as AccountStatusCache | null;
+    const cashBalances: AccountCashBalance[] = [];
+    const syncedAt: string[] = [];
+
+    for (const broker of [Broker.KIS, Broker.TOSS]) {
+      for (const market of ['DOMESTIC', 'OVERSEAS'] as const) {
+        const saved = await this.prisma.appSetting.findUnique({
+          where: { key: this.cacheKey(broker, market) },
+        });
+        const scoped = saved?.value as AccountStatusCache | null;
+        const cache = scoped ?? (broker === Broker.KIS ? legacyCache : null);
+        const balances = cache?.cashBalances.filter((item) => item.market === market) ?? [];
+        cashBalances.push(...balances.map((item) => ({ ...item, broker, market })));
+        if (balances.length > 0 && cache?.lastSyncedAt) syncedAt.push(cache.lastSyncedAt);
+      }
+    }
+
+    if (cashBalances.length === 0) return null;
+    syncedAt.sort();
+    return {
+      cashBalances,
+      lastSyncedAt: syncedAt[syncedAt.length - 1],
+    };
+  }
+
+  private async getDomesticCashBalances(port: BrokerPort): Promise<AccountCashBalance[]> {
+    const domesticCash = await port.getDomesticBuyableAmount();
     return [{
       market: 'DOMESTIC',
       currencyCode: 'KRW',
@@ -40,8 +81,8 @@ export class TradingAccountCashSyncService {
     }];
   }
 
-  private async getOverseasCashBalances(): Promise<AccountCashBalance[]> {
-    const snapshot = await this.registry.get(Broker.KIS).getOverseasAccountSnapshot();
+  private async getOverseasCashBalances(port: BrokerPort): Promise<AccountCashBalance[]> {
+    const snapshot = await port.getOverseasAccountSnapshot();
     return snapshot.cashBalances.map((item) => ({
       market: 'OVERSEAS',
       currencyCode: item.currencyCode,
@@ -58,43 +99,36 @@ export class TradingAccountCashSyncService {
     }));
   }
 
-  private async mergeMarketCache(
+  private async writeCache(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     cashBalances: AccountCashBalance[],
   ): Promise<void> {
-    await this.writeCache((current) => [
-      ...current.filter((item) => item.market !== market),
-      ...cashBalances,
-    ]);
-  }
-
-  private async writeCache(
-    buildCashBalances: (current: AccountCashBalance[]) => AccountCashBalance[] | Promise<AccountCashBalance[]>,
-  ): Promise<void> {
+    const key = this.cacheKey(broker, market);
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtextextended(${ACCOUNT_STATUS_CACHE_KEY}, 0))::text
+        SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))::text
       `;
-      const saved = await tx.appSetting.findUnique({
-        where: { key: ACCOUNT_STATUS_CACHE_KEY },
-      });
-      const current = (saved?.value as AccountStatusCache | null)?.cashBalances ?? [];
-      const nextCashBalances = await buildCashBalances(current);
       const value = {
-        cashBalances: nextCashBalances.map((item) => this.toJsonCashBalance(item)),
+        cashBalances: cashBalances.map((item) => this.toJsonCashBalance(broker, item)),
         lastSyncedAt: new Date().toISOString(),
       } as unknown as Prisma.InputJsonValue;
 
       await tx.appSetting.upsert({
-        where: { key: ACCOUNT_STATUS_CACHE_KEY },
-        create: { key: ACCOUNT_STATUS_CACHE_KEY, value },
+        where: { key },
+        create: { key, value },
         update: { value },
       });
     });
   }
 
-  private toJsonCashBalance(item: AccountCashBalance): Prisma.InputJsonObject {
+  private cacheKey(broker: Broker, market: 'DOMESTIC' | 'OVERSEAS'): string {
+    return `${ACCOUNT_STATUS_CACHE_KEY}:${broker}:${market}`;
+  }
+
+  private toJsonCashBalance(broker: Broker, item: AccountCashBalance): Prisma.InputJsonObject {
     return {
+      broker,
       market: item.market,
       currencyCode: item.currencyCode,
       currencyName: item.currencyName ?? null,

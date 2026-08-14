@@ -14,6 +14,40 @@ describe('trading.enabled', () => {
   });
 });
 
+describe('trading.brokers', () => {
+  afterEach(() => {
+    delete process.env.TRADING_BROKER_KIS_ENABLED;
+    delete process.env.TRADING_BROKER_TOSS_ENABLED;
+  });
+
+  it('keeps KIS active and Toss inactive by default', () => {
+    expect(configuration().trading.brokers).toEqual({
+      kis: { enabled: true },
+      toss: { enabled: false },
+    });
+  });
+
+  it.each(['', '   ', 'false', '1', 'yes'])(
+    'fails closed for malformed KIS enable value %p',
+    (value) => {
+      process.env.TRADING_BROKER_KIS_ENABLED = value;
+
+      expect(configuration().trading.brokers.kis.enabled).toBe(false);
+    },
+  );
+
+  it.each([
+    ['TRADING_BROKER_KIS_ENABLED', 'false', false],
+    ['TRADING_BROKER_TOSS_ENABLED', 'true', true],
+    ['TRADING_BROKER_TOSS_ENABLED', ' TRUE ', true],
+  ])('normalizes %s=%s', (name, value, expected) => {
+    process.env[name] = value;
+
+    const brokers = configuration().trading.brokers;
+    expect(name === 'TRADING_BROKER_KIS_ENABLED' ? brokers.kis.enabled : brokers.toss.enabled).toBe(expected);
+  });
+});
+
 describe('slack.approverUserIds', () => {
   afterEach(() => delete process.env.SLACK_APPROVER_USER_IDS);
 

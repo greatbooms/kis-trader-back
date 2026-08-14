@@ -16,6 +16,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     matchesCurrentContext: jest.fn().mockReturnValue(true),
   });
   const submissionGateway = (domestic: any = {}, overseas: any = {}) => ({
+    isActive: jest.fn().mockReturnValue(true),
     submit: jest.fn((signal) => signal.market === Market.DOMESTIC
       ? domestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
       : overseas.orderSell(
@@ -163,9 +164,10 @@ describe('TradingSellApprovalWorkflowService', () => {
     brokerContext.matchesCurrentContext.mockReturnValue(
       brokerContextResults[brokerContextResults.length - 1],
     );
+    const orderSubmission = submissionGateway(kisDomestic, kisOverseas);
     const service = new TradingSellApprovalWorkflowService(
       prisma as any,
-      submissionGateway(kisDomestic, kisOverseas) as any,
+      orderSubmission as any,
       liveSwitch as any,
       positionRefresh as any,
       recovery as any,
@@ -185,6 +187,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       recovery,
       slack,
       brokerContext,
+      orderSubmission,
       tradeRecordUpdateMany,
     };
   };
@@ -444,6 +447,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       expiresAt: new Date('2026-07-13T01:09:00.000Z'),
       tradeRecord: {
         id: 'trade-reject',
+        broker: Broker.KIS,
         status: OrderStatus.AWAITING_APPROVAL,
       },
     };
@@ -513,6 +517,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783904340.000000',
+      Broker.KIS,
       'TQQQ',
       'REJECTED',
     );
@@ -979,7 +984,7 @@ describe('TradingSellApprovalWorkflowService', () => {
 
     expect(harness.kisOverseas.orderSell).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TQQQ] Approved submission mirror failed: approved mirror unavailable',
+      '[KIS TQQQ] Approved submission mirror failed: approved mirror unavailable',
     );
   });
 
@@ -995,12 +1000,33 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(harness.kisOverseas.orderSell).not.toHaveBeenCalled();
   });
 
+  it.each([Broker.KIS, Broker.TOSS])(
+    'leaves a pending %s approval untouched when its broker is inactive',
+    async (broker) => {
+      const harness = createPostClaimHarness({ tradeRecord: { broker } });
+      harness.orderSubmission.isActive.mockReturnValue(false);
+
+      const result = await harness.service.approve('approval-post-claim', 'U123');
+
+      expect(harness.tx.stopLossApproval.updateMany).not.toHaveBeenCalled();
+      expect(harness.tx.tradeRecord.updateMany).not.toHaveBeenCalled();
+      expect(harness.positionRefresh.refresh).not.toHaveBeenCalled();
+      expect(harness.orderSubmission.submit).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        claimed: false,
+        submitted: false,
+        reason: 'BROKER_DISABLED',
+      }));
+    },
+  );
+
   it('leaves a pending approval untouched when its stored broker context does not match', async () => {
     const harness = createPostClaimHarness({ brokerContextResults: [false] });
 
     const result = await harness.service.approve('approval-post-claim', 'U123');
 
     expect(harness.brokerContext.matchesCurrentContext).toHaveBeenCalledWith(
+      Broker.KIS,
       'PROD',
       'account-a-hash',
     );
@@ -1020,6 +1046,36 @@ describe('TradingSellApprovalWorkflowService', () => {
     });
   });
 
+  it.each([
+    [Broker.KIS, Broker.TOSS],
+    [Broker.TOSS, Broker.KIS],
+  ])(
+    'fails closed before approval claim when a %s record is checked under %s context',
+    async (recordBroker, currentBroker) => {
+      const harness = createPostClaimHarness({ tradeRecord: { broker: recordBroker } });
+      harness.brokerContext.matchesCurrentContext.mockReset().mockImplementation(
+        (broker) => broker === currentBroker,
+      );
+
+      const result = await harness.service.approve('approval-post-claim', 'U123');
+
+      expect(harness.brokerContext.matchesCurrentContext).toHaveBeenCalledWith(
+        recordBroker,
+        'PROD',
+        'account-a-hash',
+      );
+      expect(harness.tx.stopLossApproval.updateMany).not.toHaveBeenCalled();
+      expect(harness.positionRefresh.refresh).not.toHaveBeenCalled();
+      expect(harness.kisDomestic.orderSell).not.toHaveBeenCalled();
+      expect(harness.kisOverseas.orderSell).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        claimed: false,
+        submitted: false,
+        reason: 'BROKER_CONTEXT_MISMATCH',
+      }));
+    },
+  );
+
   it('treats a missing stored broker context as a pre-claim mismatch', async () => {
     const harness = createPostClaimHarness({
       brokerContextResults: [false],
@@ -1031,7 +1087,11 @@ describe('TradingSellApprovalWorkflowService', () => {
 
     const result = await harness.service.approve('approval-post-claim', 'U123');
 
-    expect(harness.brokerContext.matchesCurrentContext).toHaveBeenCalledWith(null, null);
+    expect(harness.brokerContext.matchesCurrentContext).toHaveBeenCalledWith(
+      Broker.KIS,
+      null,
+      null,
+    );
     expect(harness.tx.stopLossApproval.updateMany).not.toHaveBeenCalled();
     expect(harness.tx.tradeRecord.updateMany).not.toHaveBeenCalled();
     expect(harness.kisOverseas.orderSell).not.toHaveBeenCalled();
@@ -1090,6 +1150,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       tradeRecordUpdateMany: jest.fn().mockResolvedValue({ count: 0 }),
     });
     (harness.prisma.tradeRecord as any).findUnique = jest.fn().mockResolvedValue({
+      broker: Broker.KIS,
       status: OrderStatus.FAILED,
     });
 
@@ -1102,7 +1163,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       reason: 'STATE_CHANGED',
     }));
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TQQQ] Trade state changed before workflow persistence: FAILED',
+      '[KIS TQQQ] Trade state changed before workflow persistence: FAILED',
     );
   });
 
@@ -1195,6 +1256,41 @@ describe('TradingSellApprovalWorkflowService', () => {
     }));
   });
 
+  it('rechecks broker activity after the winning submission audit and cancels by timestamp', async () => {
+    let brokerActive = true;
+    const harness = createPostClaimHarness();
+    harness.orderSubmission.isActive.mockImplementation(() => brokerActive);
+    harness.prisma.watchStock.findUnique.mockResolvedValue({ id: 'watch-broker-audit' });
+    harness.prisma.watchStockExecutionLog.create.mockImplementation(async () => {
+      brokerActive = false;
+      return {};
+    });
+
+    const result = await harness.service.approve('approval-post-claim', 'U123');
+
+    const submissionStartedAt = harness.tradeRecordUpdateMany.mock.calls[0][0]
+      .data.submissionStartedAt;
+    expect(harness.tradeRecordUpdateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: 'trade-post-claim',
+        status: OrderStatus.SUBMITTING,
+        submissionStartedAt,
+      },
+      data: {
+        status: OrderStatus.CANCELLED,
+        submissionStartedAt: null,
+        brokerMessage: 'Broker disabled after submission claim',
+      },
+    });
+    expect(harness.prisma.watchStockExecutionLog.create).toHaveBeenCalledTimes(1);
+    expect(harness.orderSubmission.submit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      tradeStatus: OrderStatus.CANCELLED,
+      submitted: false,
+      reason: 'BROKER_DISABLED',
+    }));
+  });
+
   it('rechecks the live switch after the winning submission audit and cancels by timestamp', async () => {
     const harness = createPostClaimHarness({
       liveSwitchResults: [true, true, true, false],
@@ -1236,6 +1332,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(harness.slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783904340.000000',
+      Broker.KIS,
       'TQQQ',
       'APPROVED_UNKNOWN',
     );
@@ -1247,6 +1344,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       tradeRecordUpdateMany: jest.fn().mockResolvedValue({ count: 0 }),
     });
     (harness.prisma.tradeRecord as any).findUnique = jest.fn().mockResolvedValue({
+      broker: Broker.KIS,
       status: OrderStatus.FAILED,
     });
 
@@ -1256,6 +1354,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(harness.slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783904340.000000',
+      Broker.KIS,
       'TQQQ',
       'APPROVED_UNKNOWN',
     );
@@ -1272,6 +1371,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(harness.kisOverseas.orderSell).toHaveBeenCalledTimes(1);
     expect(persistence).toHaveBeenCalledTimes(4);
     expect(harness.recovery.warnAcceptedOrderPersistenceFailure).toHaveBeenCalledWith({
+      broker: Broker.KIS,
       market: Market.OVERSEAS,
       stockCode: 'TQQQ',
       tradeRecordId: 'trade-post-claim',
@@ -1351,6 +1451,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       },
     });
     (harness.prisma.tradeRecord as any).findUnique = jest.fn().mockResolvedValue({
+      broker: Broker.KIS,
       status: OrderStatus.CANCELLED,
     });
 
@@ -1364,7 +1465,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       reason: 'STATE_CHANGED',
     }));
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TQQQ] Trade state changed before workflow persistence: CANCELLED',
+      '[KIS TQQQ] Trade state changed before workflow persistence: CANCELLED',
     );
   });
 
@@ -1461,6 +1562,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     const harness = createPostClaimHarness(options);
     harness.recovery.markSubmissionUnknown.mockResolvedValue(false);
     (harness.prisma.tradeRecord as any).findUnique = jest.fn().mockResolvedValue({
+      broker: Broker.KIS,
       status: OrderStatus.FAILED,
     });
 
@@ -1474,7 +1576,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       reason: 'STATE_CHANGED',
     }));
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TQQQ] Trade state changed before workflow persistence: FAILED',
+      '[KIS TQQQ] Trade state changed before workflow persistence: FAILED',
     );
   });
 
@@ -1491,7 +1593,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       slackMessageTs: '1783903740.000000',
       slackChannel: 'C123',
       expiresAt: new Date('2026-07-13T00:59:00.000Z'),
-      tradeRecord: { id: 'trade-expired-slack', status: OrderStatus.AWAITING_APPROVAL },
+      tradeRecord: { id: 'trade-expired-slack', broker: Broker.KIS, status: OrderStatus.AWAITING_APPROVAL },
     };
     const tx = {
       stopLossApproval: {
@@ -1527,6 +1629,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783903740.000000',
+      Broker.KIS,
       '005930',
       'EXPIRED',
     );
@@ -1594,6 +1697,7 @@ describe('TradingSellApprovalWorkflowService', () => {
     expect(harness.slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783904340.000000',
+      Broker.KIS,
       'TQQQ',
       'APPROVED_ACCEPTED',
     );
@@ -1625,6 +1729,7 @@ describe('TradingSellApprovalWorkflowService', () => {
       expect(harness.slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
         'C123',
         '1783904340.000000',
+        Broker.KIS,
         'TQQQ',
         expectedStatus,
       );
@@ -1639,6 +1744,7 @@ describe('TradingSellApprovalWorkflowService', () => {
 
     expect(harness.slack.updateStopLossApprovalMessage).toHaveBeenCalledTimes(1);
     expect(harness.positionRefresh.refresh).toHaveBeenCalledTimes(1);
+    expect(harness.positionRefresh.refresh).toHaveBeenCalledWith(Broker.KIS, Market.OVERSEAS);
     expect(harness.kisOverseas.orderSell).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       tradeStatus: OrderStatus.PENDING,

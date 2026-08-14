@@ -1,10 +1,11 @@
 import { Logger } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import { Broker, OrderStatus } from '@prisma/client';
 import { TradingSellApprovalNotificationService } from './trading-sell-approval-notification.service';
 
 describe('TradingSellApprovalNotificationService', () => {
   const approval = {
     id: 'approval-1',
+    tradeRecord: { broker: Broker.TOSS },
     stockCode: 'TQQQ',
     slackChannel: 'C123',
     slackMessageTs: '1783904340.000000',
@@ -104,6 +105,7 @@ describe('TradingSellApprovalNotificationService', () => {
     expect(slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
       'C123',
       '1783904340.000000',
+      Broker.TOSS,
       'TQQQ',
       expectedStatus,
     );
@@ -119,6 +121,7 @@ describe('TradingSellApprovalNotificationService', () => {
       expect(slack.updateStopLossApprovalMessage).toHaveBeenCalledWith(
         'C123',
         '1783904340.000000',
+        Broker.TOSS,
         'TQQQ',
         status,
       );
@@ -162,7 +165,7 @@ describe('TradingSellApprovalNotificationService', () => {
     expect(warn).toHaveBeenCalledWith(
       '[APPROVAL approval-1] Slack outcome lookup failed: db unavailable',
     );
-    expect(warn).toHaveBeenCalledWith('[TQQQ] Slack approval update failed: Slack unavailable');
+    expect(warn).toHaveBeenCalledWith('[TOSS TQQQ] Slack approval update failed: Slack unavailable');
     warn.mockRestore();
   });
 });

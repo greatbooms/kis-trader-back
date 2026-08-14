@@ -229,6 +229,7 @@ describe('TossBrokerService', () => {
     const matcher = new TradingBrokerOrderMatcherService(
       {
         getCurrentContext: jest.fn(() => ({
+          broker: Broker.TOSS,
           environment: BrokerEnvironment.PROD,
           accountHash: 'stable-account-hash',
         })),

@@ -92,6 +92,7 @@ describe('TradingService', () => {
 
   const mockBrokerContext = {
     getCurrentContext: jest.fn().mockReturnValue({
+      broker: Broker.KIS,
       environment: 'PAPER',
       accountHash: 'account-hash',
       maskedAccount: '****1234-01',
@@ -179,6 +180,54 @@ describe('TradingService', () => {
 
       expect(registry.get).not.toHaveBeenCalled();
       expect(port.submitOrder).not.toHaveBeenCalled();
+    });
+
+    it('routes every generated signal with the WatchStock broker as truth', async () => {
+      const strategy = {
+        name: 'test-strategy',
+        evaluateStock: jest.fn().mockResolvedValue({
+          signals: [{
+            broker: Broker.KIS,
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+            side: 'BUY',
+            quantity: 1,
+            price: 50,
+            reason: 'test buy',
+          }],
+          skipReasons: [],
+        }),
+      };
+      const context = {
+        watchStock: {
+          id: 'ws-toss',
+          broker: Broker.TOSS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          cycle: 0,
+          maxCycles: 1,
+          stopLossRate: 0.1,
+          maxPortfolioRate: 1,
+        },
+        price: { currentPrice: 50 },
+        alreadyExecutedToday: false,
+        marketCondition: {},
+        stockIndicators: {},
+        buyableAmount: 50,
+        totalPortfolioValue: 50,
+      } as any;
+
+      await service.executePerStockStrategy(strategy as any, [context]);
+
+      expect(mockOrderExecutionService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ broker: Broker.TOSS, stockCode: 'TQQQ' }),
+        'test-strategy',
+        context,
+        undefined,
+      );
     });
 
     it('should send one insufficient funds alert when actual buyable cash is lower than planned quota', async () => {
@@ -1058,6 +1107,7 @@ describe('TradingService', () => {
     it('requires approval for Korean stop-loss liquidation signals instead of submitting a sell order', async () => {
       const result = await (service as any).executeSignal(
         {
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -1121,6 +1171,7 @@ describe('TradingService', () => {
     it('requires approval for infinite-buy take-profit signals when T is 20 or higher', async () => {
       const result = await (service as any).executeSignal(
         {
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -1347,7 +1398,7 @@ describe('TradingService', () => {
       expect(clearPlanSpy).not.toHaveBeenCalled();
     });
 
-    it('should submit same-day second target after first take-profit fill when trend stays strong', async () => {
+    it('uses only the watch stock broker position for the same-day second target quantity', async () => {
       const executeSignalSpy = jest.spyOn(service as any, 'executeSignal').mockResolvedValue(true);
       const persistPlanSpy = jest
         .spyOn(service as any, 'persistInfiniteBuySecondaryExitPlan')
@@ -1356,6 +1407,7 @@ describe('TradingService', () => {
 
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -1368,13 +1420,25 @@ describe('TradingService', () => {
         maxPortfolioRate: 1,
         strategyParams: {},
       });
-      mockPrisma.position.findFirst.mockResolvedValue({
-        stockCode: 'TQQQ',
-        quantity: 2,
-        avgPrice: 52.1,
-        currentPrice: 58.4,
-        totalInvested: 104.2,
-      });
+      mockPrisma.position.findFirst.mockImplementation(({ where }) => (
+        where.broker === Broker.KIS
+          ? Promise.resolve({
+            broker: Broker.KIS,
+            stockCode: 'TQQQ',
+            quantity: 2,
+            avgPrice: 52.1,
+            currentPrice: 58.4,
+            totalInvested: 104.2,
+          })
+          : Promise.resolve({
+            broker: Broker.TOSS,
+            stockCode: 'TQQQ',
+            quantity: 99,
+            avgPrice: 52.1,
+            currentPrice: 58.4,
+            totalInvested: 5157.9,
+          })
+      ));
       mockKisOverseas.getPrice.mockResolvedValue({
         stockCode: 'TQQQ',
         stockName: 'TQQQ',
@@ -1442,6 +1506,14 @@ describe('TradingService', () => {
           alreadyExecutedToday: true,
         }),
       );
+      expect(mockPrisma.position.findFirst).toHaveBeenCalledWith({
+        where: {
+          broker: Broker.KIS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+        },
+      });
       expect(persistPlanSpy).not.toHaveBeenCalled();
     });
 

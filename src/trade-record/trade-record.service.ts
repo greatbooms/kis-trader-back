@@ -3,18 +3,17 @@ import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
-import { Broker, Market, Side, Prisma } from '@prisma/client';
-import { BalanceItem, StockPriceResult } from '../kis/types/kis-api.types';
+import { Broker, Market, Side } from '@prisma/client';
+import { StockPriceResult } from '../kis/types/kis-api.types';
 import { AccountCashBalance, AccountStatusCache } from './types';
 import { DailyPrice } from '../kis/types/kis-api.types';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { TradingAccountCashSyncService } from '../trading/trading-account-cash-sync.service';
+import { TradingPositionSyncService } from '../trading/trading-position-sync.service';
 
 @Injectable()
 export class TradeRecordService {
   private readonly logger = new Logger(TradeRecordService.name);
-  private readonly accountStatusCacheKey = 'account_status_cache';
-
   constructor(
     private prisma: PrismaService,
     private kisDomestic: KisDomesticService,
@@ -22,9 +21,11 @@ export class TradeRecordService {
     private readonly registry: BrokerPortRegistry,
     private marketAnalysis: MarketAnalysisService,
     private readonly accountCashSync: TradingAccountCashSyncService,
+    private readonly positionSync: TradingPositionSyncService,
   ) {}
 
   findAll(options?: {
+    broker?: Broker;
     market?: Market;
     side?: Side;
     stockCode?: string;
@@ -40,6 +41,7 @@ export class TradeRecordService {
 
     return this.prisma.tradeRecord.findMany({
       where: {
+        ...(options?.broker && { broker: options.broker }),
         ...(options?.market && { market: options.market }),
         ...(options?.side && { side: options.side }),
         ...(options?.stockCode && { stockCode: options.stockCode }),
@@ -148,8 +150,7 @@ export class TradeRecordService {
     // 최신 RiskSnapshot에서 cashBalance 조회
     const latestSnapshots = await this.prisma.riskSnapshot.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 2, // DOMESTIC + OVERSEAS 각 1개
-      distinct: ['market'],
+      distinct: ['broker', 'market'],
     });
     const statusCache = await this.getAccountStatusCache();
     const cachedKrwCash = statusCache?.cashBalances
@@ -180,54 +181,69 @@ export class TradeRecordService {
     let hasSuccess = false;
 
     this.logger.debug('Refreshing account state');
-    const port = this.registry.get(Broker.KIS);
+    for (const port of this.registry.getActive()) {
+      const brokerCashBalances: AccountCashBalance[] = [];
+      const authoritativeCashMarkets: Array<'DOMESTIC' | 'OVERSEAS'> = [];
+      try {
+        const domesticBalance = await port.getBalance(Market.DOMESTIC);
+        await this.positionSync.syncPositions(port.broker, 'DOMESTIC', domesticBalance);
+        const domesticCash = await port.getDomesticBuyableAmount();
+        brokerCashBalances.push({
+          broker: port.broker,
+          market: Market.DOMESTIC,
+          currencyCode: 'KRW',
+          currencyName: '원화',
+          amount: domesticCash.cashAvailable,
+          withdrawableAmount: domesticCash.cashAvailable,
+          orderableAmount: domesticCash.cashAvailable,
+        });
+        authoritativeCashMarkets.push('DOMESTIC');
+        hasSuccess = true;
+      } catch (e) {
+        messages.push(`${port.broker} 국내 계좌 조회 실패: ${e.message}`);
+        this.logger.warn(`Failed to refresh ${port.broker} domestic account state: ${e.message}`);
+      }
 
-    try {
-      const domesticBalance = await port.getBalance(Market.DOMESTIC);
-      await this.syncPositions('DOMESTIC', domesticBalance);
-      const domesticCash = await port.getDomesticBuyableAmount();
-      cashBalances.push({
-        market: Market.DOMESTIC,
-        currencyCode: 'KRW',
-        currencyName: '원화',
-        amount: domesticCash.cashAvailable,
-        withdrawableAmount: domesticCash.cashAvailable,
-        orderableAmount: domesticCash.cashAvailable,
-      });
-      hasSuccess = true;
-    } catch (e) {
-      messages.push(`국내 계좌 조회 실패: ${e.message}`);
-      this.logger.warn(`Failed to refresh domestic account state: ${e.message}`);
-    }
+      try {
+        const overseasSnapshot = await port.getOverseasAccountSnapshot();
+        await this.positionSync.syncPositions(port.broker, 'OVERSEAS', overseasSnapshot.balance);
+        brokerCashBalances.push(
+          ...overseasSnapshot.cashBalances.map((item) => ({
+            broker: port.broker,
+            market: Market.OVERSEAS,
+            currencyCode: item.currencyCode,
+            currencyName: item.currencyName,
+            amount: item.amount,
+            withdrawableAmount: item.withdrawableAmount,
+            orderableAmount: item.orderableAmount,
+            generalOrderableAmount: item.generalOrderableAmount,
+            integratedOrderableAmount: item.integratedOrderableAmount,
+            pendingBuyAmount: item.pendingBuyAmount,
+            pendingSellAmount: item.pendingSellAmount,
+            receivableAmount: item.receivableAmount,
+            marginAmount: item.marginAmount,
+          })),
+        );
+        authoritativeCashMarkets.push('OVERSEAS');
+        hasSuccess = true;
+      } catch (e) {
+        messages.push(`${port.broker} 해외 계좌 조회 실패: ${e.message}`);
+        this.logger.warn(`Failed to refresh ${port.broker} overseas account state: ${e.message}`);
+      }
 
-    try {
-      const overseasSnapshot = await port.getOverseasAccountSnapshot();
-      await this.syncPositions('OVERSEAS', overseasSnapshot.balance);
-      const overseasCashBalances = overseasSnapshot.cashBalances;
-      cashBalances.push(
-        ...overseasCashBalances.map((item) => ({
-          market: Market.OVERSEAS,
-          currencyCode: item.currencyCode,
-          currencyName: item.currencyName,
-          amount: item.amount,
-          withdrawableAmount: item.withdrawableAmount,
-          orderableAmount: item.orderableAmount,
-          generalOrderableAmount: item.generalOrderableAmount,
-          integratedOrderableAmount: item.integratedOrderableAmount,
-          pendingBuyAmount: item.pendingBuyAmount,
-          pendingSellAmount: item.pendingSellAmount,
-          receivableAmount: item.receivableAmount,
-          marginAmount: item.marginAmount,
-        })),
-      );
-      hasSuccess = true;
-    } catch (e) {
-      messages.push(`해외 계좌 조회 실패: ${e.message}`);
-      this.logger.warn(`Failed to refresh overseas account state: ${e.message}`);
-    }
-
-    if (cashBalances.length > 0) {
-      await this.accountCashSync.replaceCache(cashBalances);
+      if (authoritativeCashMarkets.length > 0) {
+        try {
+          await this.accountCashSync.replaceCache(
+            port.broker,
+            brokerCashBalances,
+            authoritativeCashMarkets,
+          );
+          cashBalances.push(...brokerCashBalances);
+        } catch (e) {
+          messages.push(`${port.broker} 현금 캐시 저장 실패: ${e.message}`);
+          this.logger.warn(`Failed to cache ${port.broker} account cash: ${e.message}`);
+        }
+      }
     }
 
     this.logger.debug(
@@ -252,11 +268,16 @@ export class TradeRecordService {
     let realizedPnL = 0;
 
     for (const sellTrade of sellTrades) {
+      const isSameInstrument = (trade: typeof sellTrade) =>
+        trade.broker === sellTrade.broker &&
+        trade.market === sellTrade.market &&
+        trade.exchangeCode === sellTrade.exchangeCode &&
+        trade.stockCode === sellTrade.stockCode;
       const buyTrades = trades.filter(
-        (t) => t.side === 'BUY' && t.stockCode === sellTrade.stockCode && t.createdAt <= sellTrade.createdAt,
+        (t) => t.side === 'BUY' && isSameInstrument(t) && t.createdAt <= sellTrade.createdAt,
       );
       const sellsBefore = trades.filter(
-        (t) => t.side === 'SELL' && t.stockCode === sellTrade.stockCode && t.createdAt < sellTrade.createdAt,
+        (t) => t.side === 'SELL' && isSameInstrument(t) && t.createdAt < sellTrade.createdAt,
       );
 
       let totalBuyQty = 0;
@@ -284,64 +305,7 @@ export class TradeRecordService {
   }
 
   private async getAccountStatusCache(): Promise<AccountStatusCache | null> {
-    const saved = await this.prisma.appSetting.findUnique({
-      where: { key: this.accountStatusCacheKey },
-    });
-    return (saved?.value as AccountStatusCache | null) ?? null;
-  }
-
-  private async syncPositions(market: 'DOMESTIC' | 'OVERSEAS', items: BalanceItem[]): Promise<void> {
-    for (const item of items) {
-      const totalInvested = item.quantity * item.avgPrice;
-
-      await this.prisma.position.upsert({
-        where: {
-          broker_market_exchangeCode_stockCode: {
-            broker: Broker.KIS,
-            market: market as Market,
-            exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
-            stockCode: item.stockCode,
-          },
-        },
-        create: {
-          market: market as Market,
-          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
-          stockCode: item.stockCode,
-          stockName: item.stockName,
-          quantity: item.quantity,
-          avgPrice: new Prisma.Decimal(item.avgPrice),
-          currentPrice: new Prisma.Decimal(item.currentPrice),
-          profitLoss: new Prisma.Decimal(item.profitLoss),
-          profitRate: new Prisma.Decimal(item.profitRate),
-          totalInvested: new Prisma.Decimal(totalInvested),
-        },
-        update: {
-          quantity: item.quantity,
-          avgPrice: new Prisma.Decimal(item.avgPrice),
-          currentPrice: new Prisma.Decimal(item.currentPrice),
-          profitLoss: new Prisma.Decimal(item.profitLoss),
-          profitRate: new Prisma.Decimal(item.profitRate),
-          stockName: item.stockName,
-          exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
-          totalInvested: new Prisma.Decimal(totalInvested),
-        },
-      });
-    }
-
-    const stockCodes = items.map((i) => i.stockCode);
-    if (stockCodes.length > 0) {
-      await this.prisma.position.deleteMany({
-        where: {
-          market: market as Market,
-          stockCode: { notIn: stockCodes },
-        },
-      });
-      return;
-    }
-
-    await this.prisma.position.deleteMany({
-      where: { market: market as Market },
-    });
+    return this.accountCashSync.getCache();
   }
 
 }

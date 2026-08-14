@@ -45,9 +45,10 @@ import { TradingSellApprovalNotificationService } from './trading-sell-approval-
 import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 import { BrokerModule } from '../broker/broker.module';
+import { TossModule } from '../toss/toss.module';
 
 @Module({
-  imports: [BrokerModule, KisModule, NotificationModule],
+  imports: [BrokerModule, KisModule, TossModule, NotificationModule],
   providers: [
     TradingService,
     TradingPositionSyncService,

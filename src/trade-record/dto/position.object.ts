@@ -1,10 +1,13 @@
 import { ObjectType, Field, Float, Int, ID } from '@nestjs/graphql';
-import { Market } from '@prisma/client';
+import { Broker, Market } from '@prisma/client';
 
 @ObjectType()
 export class PositionType {
   @Field(() => ID)
   id: string;
+
+  @Field(() => Broker)
+  broker: Broker;
 
   @Field(() => Market)
   market: Market;

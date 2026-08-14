@@ -42,7 +42,7 @@ export class TradingBrokerOrderMatcherService {
         .getOrderExecutions(request.market, startDate, endDate);
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${request.tradeRecordId}] Complete KIS order-history read failed: ${this.errorMessage(error)}`,
+        `[RECOVERY ${request.tradeRecordId}] Complete ${request.broker} order-history read failed: ${this.errorMessage(error)}`,
       );
       throw error;
     }
@@ -73,17 +73,18 @@ export class TradingBrokerOrderMatcherService {
   private assertCurrentContext(request: BrokerOrderMatchRequest): void {
     if (!request.brokerEnvironment || !request.brokerAccountHash?.trim()) {
       throw new Error(
-        `[RECOVERY ${request.tradeRecordId}] Assign broker context before KIS lookup`,
+        `[RECOVERY ${request.tradeRecordId}] Assign broker context before ${request.broker} lookup`,
       );
     }
 
-    const current = this.brokerContextService.getCurrentContext();
+    const current = this.brokerContextService.getCurrentContext(request.broker);
     if (
-      current.environment !== request.brokerEnvironment
+      current.broker !== request.broker
+      || current.environment !== request.brokerEnvironment
       || current.accountHash !== request.brokerAccountHash
     ) {
       throw new Error(
-        `[RECOVERY ${request.tradeRecordId}] Stored broker context does not match current KIS context`,
+        `[RECOVERY ${request.tradeRecordId}] Stored broker context does not match current ${request.broker} context`,
       );
     }
   }

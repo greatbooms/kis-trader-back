@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 import { PrismaService } from '../prisma.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingPositionSyncService', () => {
   let service: TradingPositionSyncService;
@@ -45,11 +46,12 @@ describe('TradingPositionSyncService', () => {
       mockPrisma.position.upsert.mockResolvedValue({});
       mockPrisma.position.deleteMany.mockResolvedValue({ count: 0 });
 
-      await service.syncPositions('DOMESTIC', items);
+      await service.syncPositions(Broker.KIS, 'DOMESTIC', items);
 
       expect(mockPrisma.position.upsert).toHaveBeenCalledTimes(1);
       expect(mockPrisma.position.deleteMany).toHaveBeenCalledWith({
         where: {
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           stockCode: { notIn: ['005930'] },
         },
@@ -59,11 +61,46 @@ describe('TradingPositionSyncService', () => {
     it('deletes all market positions after a successful empty broker snapshot', async () => {
       mockPrisma.position.deleteMany.mockResolvedValue({ count: 1 });
 
-      await service.syncPositions('DOMESTIC', []);
+      await service.syncPositions(Broker.KIS, 'DOMESTIC', []);
 
       expect(mockPrisma.position.upsert).not.toHaveBeenCalled();
       expect(mockPrisma.position.deleteMany).toHaveBeenCalledWith({
-        where: { market: 'DOMESTIC' },
+        where: { broker: Broker.KIS, market: 'DOMESTIC' },
+      });
+    });
+
+    it('scopes every KIS upsert and deletion so TOSS positions cannot be changed', async () => {
+      mockPrisma.position.upsert.mockResolvedValue({});
+      mockPrisma.position.deleteMany.mockResolvedValue({ count: 1 });
+
+      await service.syncPositions(Broker.KIS, 'OVERSEAS', [{
+        stockCode: 'TQQQ',
+        stockName: 'ProShares UltraPro QQQ',
+        quantity: 2,
+        avgPrice: 80,
+        currentPrice: 82,
+        profitLoss: 4,
+        profitRate: 2.5,
+        exchangeCode: 'NASD',
+      }]);
+
+      expect(mockPrisma.position.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.KIS,
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+          },
+        },
+        create: expect.objectContaining({ broker: Broker.KIS }),
+      }));
+      expect(mockPrisma.position.deleteMany).toHaveBeenCalledWith({
+        where: {
+          broker: Broker.KIS,
+          market: 'OVERSEAS',
+          stockCode: { notIn: ['TQQQ'] },
+        },
       });
     });
   });

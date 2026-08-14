@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { OrderStatus } from '@prisma/client';
+import { Broker, OrderStatus } from '@prisma/client';
 import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
@@ -15,6 +15,10 @@ import { TradingPositionRefreshService } from '../trading/trading-position-refre
 
 describe('TradeRecordManualOrderService', () => {
   let service: TradeRecordManualOrderService;
+  const mockPositionFindFirst = jest.fn();
+  const mockPositionFindMany = jest.fn((args) => Promise.resolve(
+    mockPositionFindFirst(args),
+  ).then((position) => position ? [{ broker: Broker.KIS, ...position }] : []));
 
   const mockPrisma = {
     tradeRecord: {
@@ -24,7 +28,8 @@ describe('TradeRecordManualOrderService', () => {
       updateMany: jest.fn(),
     },
     position: {
-      findFirst: jest.fn(),
+      findFirst: mockPositionFindFirst,
+      findMany: mockPositionFindMany,
     },
   };
 
@@ -74,20 +79,28 @@ describe('TradeRecordManualOrderService', () => {
         request.price,
       )),
   };
-  const mockRegistry = { get: jest.fn().mockReturnValue(mockPort) };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue(mockPort),
+    isActive: jest.fn().mockReturnValue(true),
+    requireActive: jest.fn().mockReturnValue(mockPort),
+  };
 
   const mockLiveSwitch = {
     isEnabled: jest.fn().mockReturnValue(true),
   };
 
   const mockBrokerContext = {
-    getCurrentContext: jest.fn().mockReturnValue({
-      environment: 'PAPER',
+    getCurrentContext: jest.fn((broker) => ({
+      broker,
+      environment: broker === Broker.TOSS ? 'PROD' : 'PAPER',
       accountHash: 'account-hash',
       maskedAccount: '****1234-01',
-    }),
+    })),
     matchesCurrentContext: jest.fn(
-      (environment, accountHash) => environment === 'PAPER' && accountHash === 'account-hash',
+      (_broker, environment, accountHash) => (
+        (environment === 'PAPER' || environment === 'PROD')
+        && accountHash === 'account-hash'
+      ),
     ),
   };
 
@@ -135,6 +148,25 @@ describe('TradeRecordManualOrderService', () => {
 
   beforeEach(async () => {
     service = await createService();
+    mockRegistry.isActive.mockReset().mockReturnValue(true);
+    mockRegistry.requireActive.mockReset().mockReturnValue(mockPort);
+    mockPort.submitOrder.mockImplementation((signal) => signal.market === 'DOMESTIC'
+      ? mockKisDomestic.orderSell(
+        signal.stockCode,
+        signal.quantity,
+        signal.price,
+        signal.orderDivision,
+      )
+      : mockKisOverseas.orderSell(
+        signal.exchangeCode,
+        signal.stockCode,
+        signal.quantity,
+        signal.price,
+        signal.orderDivision,
+      ));
+    mockPositionFindMany.mockImplementation((args) => Promise.resolve(
+      mockPositionFindFirst(args),
+    ).then((position) => position ? [{ broker: Broker.KIS, ...position }] : []));
     mockRecovery.claimCancellation.mockResolvedValue(true);
     mockOrderGuard.admit.mockImplementation(async (_key, createWithTx) => createWithTx({
       tradeRecord: { create: mockPrisma.tradeRecord.create },
@@ -146,6 +178,109 @@ describe('TradeRecordManualOrderService', () => {
   });
 
   describe('manualSell', () => {
+    it('fails closed before context, guard, or broker access when no position matches', async () => {
+      mockPositionFindMany.mockResolvedValue([]);
+
+      await expect(service.manualSell({
+        market: 'DOMESTIC',
+        exchangeCode: '',
+        stockCode: '005930',
+      })).rejects.toThrow('보유 포지션을 찾을 수 없습니다.');
+
+      expect(mockBrokerContext.getCurrentContext).not.toHaveBeenCalled();
+      expect(mockOrderGuard.admit).not.toHaveBeenCalled();
+      expect(mockRegistry.get).not.toHaveBeenCalled();
+      expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
+    });
+
+    it('fails closed before context, guard, or broker access when broker is omitted and holdings are ambiguous', async () => {
+      mockPositionFindMany.mockResolvedValue([
+        { broker: Broker.KIS, quantity: 2, exchangeCode: 'KRX', stockName: '삼성전자' },
+        { broker: Broker.TOSS, quantity: 3, exchangeCode: 'KRX', stockName: '삼성전자' },
+      ]);
+
+      await expect(service.manualSell({
+        market: 'DOMESTIC',
+        exchangeCode: '',
+        stockCode: '005930',
+      })).rejects.toThrow('보유 포지션을 하나로 식별할 수 없습니다. 브로커를 지정해주세요.');
+
+      expect(mockBrokerContext.getCurrentContext).not.toHaveBeenCalled();
+      expect(mockOrderGuard.admit).not.toHaveBeenCalled();
+      expect(mockRegistry.get).not.toHaveBeenCalled();
+      expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
+    });
+
+    it('filters by an explicit broker before submitting a sell', async () => {
+      mockPositionFindMany.mockResolvedValue([
+        { broker: Broker.TOSS, quantity: 3, exchangeCode: 'KRX', stockName: '삼성전자' },
+      ]);
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70_000 });
+      mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'explicit-toss-sell' });
+      mockPositionRefresh.refresh.mockResolvedValue([{
+        stockCode: '005930',
+        stockName: '삼성전자',
+        exchangeCode: 'KRX',
+        quantity: 3,
+      }]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
+      mockPort.submitOrder.mockResolvedValue({
+        outcome: 'ACCEPTED',
+        success: true,
+        orderNo: 'toss-sell',
+        brokerOrderDate: '20260713',
+        orderTime: '101112',
+        message: '접수',
+      });
+
+      await expect(service.manualSell({
+        broker: Broker.TOSS,
+        market: 'DOMESTIC',
+        exchangeCode: '',
+        stockCode: '005930',
+        quantity: 2,
+      })).resolves.toEqual({
+        success: true,
+        orderNo: 'toss-sell',
+        message: '2주 매도 주문 접수',
+      });
+
+      expect(mockPositionFindMany).toHaveBeenCalledWith({
+        where: {
+          broker: Broker.TOSS,
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+        },
+      });
+      expect(mockRegistry.requireActive).toHaveBeenCalledWith(Broker.TOSS);
+    });
+
+    it('fails closed before price or admission when broker is omitted and the sole TOSS position is disabled', async () => {
+      mockPositionFindMany.mockResolvedValue([{
+        broker: Broker.TOSS,
+        quantity: 3,
+        exchangeCode: 'KRX',
+        stockName: '삼성전자',
+      }]);
+      mockRegistry.isActive.mockReturnValue(false);
+
+      await expect(service.manualSell({
+        market: 'DOMESTIC',
+        exchangeCode: '',
+        stockCode: '005930',
+        quantity: 2,
+      })).resolves.toEqual({
+        success: false,
+        message: 'TOSS 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.',
+      });
+
+      expect(mockKisDomestic.getPrice).not.toHaveBeenCalled();
+      expect(mockOrderGuard.admit).not.toHaveBeenCalled();
+      expect(mockRegistry.requireActive).not.toHaveBeenCalled();
+      expect(mockPort.submitOrder).not.toHaveBeenCalled();
+    });
+
     it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
       'rejects an invalid explicit quantity (%s) before DB or KIS access',
       async (quantity) => {
@@ -172,6 +307,7 @@ describe('TradeRecordManualOrderService', () => {
         },
       };
       mockPrisma.position.findFirst.mockResolvedValue({
+        broker: Broker.KIS,
         quantity: 5,
         exchangeCode: 'KRX',
         stockName: '삼성전자',
@@ -209,6 +345,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockOrderGuard.admit).toHaveBeenCalledWith(
         {
+          broker: Broker.KIS,
           market: 'DOMESTIC',
           exchangeCode: 'KRX',
           stockCode: '005930',
@@ -218,6 +355,7 @@ describe('TradeRecordManualOrderService', () => {
       );
       expect(tx.tradeRecord.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          broker: Broker.KIS,
           status: OrderStatus.SUBMITTING,
           submissionStartedAt: null,
           brokerEnvironment: 'PAPER',
@@ -482,8 +620,70 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.orderSell).not.toHaveBeenCalled();
     });
 
+    it('cancels only its claimed manual submission when its broker becomes inactive before POST', async () => {
+      mockPrisma.position.findFirst.mockResolvedValue({
+        quantity: 2,
+        exchangeCode: 'KRX',
+        stockName: '삼성전자',
+      });
+      mockKisDomestic.getPrice.mockResolvedValue({ currentPrice: 70_000 });
+      mockPrisma.tradeRecord.create.mockResolvedValue({ id: 'manual-broker-disabled' });
+      mockPositionRefresh.refresh.mockResolvedValue([{
+        stockCode: '005930',
+        stockName: '삼성전자',
+        exchangeCode: 'KRX',
+        quantity: 2,
+        avgPrice: 65_000,
+        currentPrice: 70_000,
+        profitLoss: 0,
+        profitRate: 0,
+      }]);
+      mockRegistry.isActive
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
+      mockKisDomestic.orderSell.mockResolvedValue({
+        outcome: 'ACCEPTED',
+        success: true,
+        orderNo: 'must-not-submit',
+        brokerOrderDate: '20260714',
+        orderTime: '101112',
+        message: '접수',
+      });
+
+      await expect(service.manualSell({
+        market: 'DOMESTIC',
+        exchangeCode: '',
+        stockCode: '005930',
+        quantity: 2,
+      })).resolves.toEqual({
+        success: false,
+        message: 'KIS 브로커가 비활성화되어 수동 매도를 실행할 수 없습니다.',
+      });
+
+      expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledTimes(2);
+      const claim = mockPrisma.tradeRecord.updateMany.mock.calls[0][0];
+      expect(mockPrisma.tradeRecord.updateMany.mock.calls[1][0]).toEqual({
+        where: {
+          id: 'manual-broker-disabled',
+          status: OrderStatus.SUBMITTING,
+          submissionStartedAt: claim.data.submissionStartedAt,
+        },
+        data: {
+          status: OrderStatus.CANCELLED,
+          submissionStartedAt: null,
+          brokerMessage: '브로커 비활성화로 수동 매도 취소',
+        },
+      });
+      expect(mockRegistry.requireActive).not.toHaveBeenCalled();
+      expect(mockKisDomestic.orderSell).not.toHaveBeenCalled();
+      expect(mockRecovery.markSubmissionUnknown).not.toHaveBeenCalled();
+    });
+
     it('refreshes holdings, clamps quantity, wins the CAS, and persists an accepted manual order', async () => {
       mockPrisma.position.findFirst.mockResolvedValue({
+        broker: Broker.KIS,
         quantity: 5,
         exchangeCode: 'KRX',
         stockName: '삼성전자',
@@ -526,7 +726,7 @@ describe('TradeRecordManualOrderService', () => {
         message: '2주 매도 주문 접수',
       });
 
-      expect(mockPositionRefresh.refresh).toHaveBeenCalledWith('DOMESTIC');
+      expect(mockPositionRefresh.refresh).toHaveBeenCalledWith(Broker.KIS, 'DOMESTIC');
       expect(mockPrisma.tradeRecord.updateMany).toHaveBeenNthCalledWith(1, {
         where: {
           id: 'manual-clamped',
@@ -556,7 +756,7 @@ describe('TradeRecordManualOrderService', () => {
       });
     });
 
-    it('submits a domestic sell from the current position snapshot', async () => {
+    it('keeps the default sole-KIS omitted-broker manual sell behavior unchanged', async () => {
       mockPrisma.position.findFirst.mockResolvedValue({
         quantity: 5,
         exchangeCode: 'KRX',
@@ -828,6 +1028,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.orderSell).toHaveBeenCalledTimes(1);
       expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledTimes(4);
       expect(mockRecovery.warnAcceptedOrderPersistenceFailure).toHaveBeenCalledWith({
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         stockCode: '005930',
         tradeRecordId: 'manual-db-failure',
@@ -851,6 +1052,7 @@ describe('TradeRecordManualOrderService', () => {
   describe('cancelTradeOrder', () => {
     it('fails closed before claim or KIS access when the stored broker context mismatches', async () => {
       mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        broker: Broker.KIS,
         id: 'trade-wrong-account',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -879,6 +1081,7 @@ describe('TradeRecordManualOrderService', () => {
       });
 
       expect(mockBrokerContext.matchesCurrentContext).toHaveBeenCalledWith(
+        Broker.KIS,
         'PROD',
         'another-account-hash',
       );
@@ -887,6 +1090,40 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.getUnfilledOrders).not.toHaveBeenCalled();
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
     });
+
+    it.each([Broker.KIS, Broker.TOSS])(
+      'fails closed before a manual cancellation claim when %s is inactive',
+      async (broker) => {
+        mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+          broker,
+          id: `trade-disabled-${broker}`,
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'SELL',
+          quantity: 2,
+          executedQty: 0,
+          price: '70000',
+          status: 'PENDING',
+          orderNo: `${broker}-order`,
+          brokerOrderDate: '20260713',
+          brokerEnvironment: broker === Broker.TOSS ? 'PROD' : 'PAPER',
+          brokerAccountHash: 'account-hash',
+        });
+        mockRegistry.isActive.mockReturnValue(false);
+
+        await expect(
+          service.cancelTradeOrder({ tradeRecordId: `trade-disabled-${broker}` }),
+        ).resolves.toEqual({
+          success: false,
+          message: `${broker} 브로커가 비활성화되어 주문 취소를 실행할 수 없습니다.`,
+        });
+
+        expect(mockRecovery.claimCancellation).not.toHaveBeenCalled();
+        expect(mockRegistry.requireActive).not.toHaveBeenCalled();
+        expect(mockPort.cancelOrder).not.toHaveBeenCalled();
+      },
+    );
 
     it.each([
       ['missing broker environment', { brokerEnvironment: null }],
@@ -899,6 +1136,7 @@ describe('TradeRecordManualOrderService', () => {
       identityOverride,
     ) => {
       mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        broker: Broker.KIS,
         id: 'trade-incomplete-identity',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -935,6 +1173,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when the reloaded broker order identity changed', async () => {
       const initialRecord = {
+        broker: Broker.KIS,
         id: 'trade-identity-race',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -974,6 +1213,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockPrisma.tradeRecord.findUnique).toHaveBeenCalledTimes(2);
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         initialRecord.id,
+        Broker.KIS,
         '취소 대상 주문 정보 변경',
       );
       expect(mockKisDomestic.getOrderExecutions).not.toHaveBeenCalled();
@@ -981,8 +1221,54 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
     });
 
+    it('constrains and rechecks the broker when reloading a won cancellation claim', async () => {
+      const initialRecord = {
+        broker: Broker.KIS,
+        id: 'trade-broker-race',
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        side: 'SELL',
+        quantity: 2,
+        executedQty: 0,
+        price: '70000',
+        status: 'PENDING',
+        cancellationStatus: null,
+        orderNo: 'broker-race-order',
+        brokerOrderDate: '20260713',
+        brokerEnvironment: 'PAPER',
+        brokerAccountHash: 'account-hash',
+      };
+      mockPrisma.tradeRecord.findUnique
+        .mockResolvedValueOnce(initialRecord)
+        .mockResolvedValueOnce({
+          ...initialRecord,
+          broker: Broker.TOSS,
+          cancellationStatus: 'SUBMITTING',
+        });
+      mockRecovery.releaseCancellationClaim.mockResolvedValue(true);
+
+      await expect(
+        service.cancelTradeOrder({ tradeRecordId: initialRecord.id }),
+      ).resolves.toEqual({
+        success: false,
+        message: '취소 대상 주문 정보가 변경되어 취소를 중단했습니다.',
+      });
+
+      expect(mockPrisma.tradeRecord.findUnique).toHaveBeenNthCalledWith(2, {
+        where: { id: initialRecord.id, broker: Broker.KIS },
+      });
+      expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
+        initialRecord.id,
+        Broker.KIS,
+        '취소 대상 주문 정보 변경',
+      );
+      expect(mockRegistry.get).not.toHaveBeenCalled();
+    });
+
     it('releases the claim when complete broker reads do not prove the exact open order', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-broker-mismatch',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1044,6 +1330,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.getUnfilledOrders).toHaveBeenCalledTimes(1);
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         'KIS 주문 상태 검증 실패',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1051,6 +1338,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('does not treat a conflicting domestic exchange as the exact broker order', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-broker-exchange-mismatch',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1107,6 +1395,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         'KIS 주문 상태 검증 실패',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1114,6 +1403,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when a broker row has malformed order identity', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-malformed-broker-row',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1165,6 +1455,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         'KIS 주문 상태 검증 실패',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1172,6 +1463,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when complete broker reads contain no target order', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-broker-none',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1211,6 +1503,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.getUnfilledOrders).toHaveBeenCalledTimes(1);
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         'KIS 주문 상태 검증 실패',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1218,6 +1511,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when a complete broker read fails', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-broker-read-failed',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1266,6 +1560,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.getUnfilledOrders).toHaveBeenCalledTimes(1);
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         'KIS 주문 상태 조회 실패',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1273,6 +1568,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when the broker context changes after complete reads', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-context-drift',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1335,6 +1631,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockBrokerContext.matchesCurrentContext).toHaveBeenCalledTimes(2);
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         '브로커 컨텍스트 변경으로 주문 취소 중단',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1342,6 +1639,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases the claim when broker-context validation throws after complete reads', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-context-validation-error',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1398,6 +1696,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         record.id,
+        Broker.KIS,
         '브로커 컨텍스트 변경으로 주문 취소 중단',
       );
       expect(mockKisDomestic.cancelOrder).not.toHaveBeenCalled();
@@ -1405,6 +1704,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('does not POST when another caller already owns or blocks the cancellation claim', async () => {
       mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        broker: Broker.KIS,
         id: 'trade-claimed',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1435,6 +1735,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('releases a won cancellation claim when the live switch closes before POST', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-switch-off',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1495,6 +1796,7 @@ describe('TradeRecordManualOrderService', () => {
 
       expect(mockRecovery.releaseCancellationClaim).toHaveBeenCalledWith(
         'trade-switch-off',
+        Broker.KIS,
         '실거래 비활성화로 주문 취소 중단',
       );
       expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledTimes(1);
@@ -1505,6 +1807,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('persists an accepted cancellation without terminalizing the original order', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-3',
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
@@ -1564,6 +1867,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisOverseas.cancelOrder).toHaveBeenCalledTimes(1);
       expect(mockRecovery.markCancellationAccepted).toHaveBeenCalledWith(
         'trade-3',
+        Broker.KIS,
         '취소 접수',
       );
       expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
@@ -1576,6 +1880,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('returns the broker failure while the order remains open', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-4',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1630,6 +1935,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(result).toEqual({ success: false, message: 'broker rejected' });
       expect(mockRecovery.markCancellationRejected).toHaveBeenCalledWith(
         'trade-4',
+        Broker.KIS,
         'broker rejected',
       );
       expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledWith(
@@ -1642,6 +1948,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('persists an UNKNOWN cancellation after verified reads without mutating the original order', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-cancel-unknown',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1696,6 +2003,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.cancelOrder).toHaveBeenCalledTimes(1);
       expect(mockRecovery.markCancellationUnknown).toHaveBeenCalledWith(
         'trade-cancel-unknown',
+        Broker.KIS,
         'network timeout',
       );
       expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledWith(
@@ -1708,6 +2016,7 @@ describe('TradeRecordManualOrderService', () => {
 
     it('treats a thrown cancellation transport failure as UNKNOWN without another POST', async () => {
       const record = {
+        broker: Broker.KIS,
         id: 'trade-cancel-throw',
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
@@ -1758,6 +2067,7 @@ describe('TradeRecordManualOrderService', () => {
       expect(mockKisDomestic.cancelOrder).toHaveBeenCalledTimes(1);
       expect(mockRecovery.markCancellationUnknown).toHaveBeenCalledWith(
         'trade-cancel-throw',
+        Broker.KIS,
         'socket closed',
       );
       expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();

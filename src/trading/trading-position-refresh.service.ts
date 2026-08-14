@@ -13,16 +13,15 @@ export class TradingPositionRefreshService {
     private readonly positionSyncService: TradingPositionSyncService,
   ) {}
 
-  async refresh(market: 'DOMESTIC' | 'OVERSEAS'): Promise<BalanceItem[]> {
+  async refresh(broker: Broker, market: 'DOMESTIC' | 'OVERSEAS'): Promise<BalanceItem[]> {
     try {
-      // Phase 3: active broker 루프로 확장
-      const snapshot = await this.registry.get(Broker.KIS).getBalance(market as Market);
+      const snapshot = await this.registry.get(broker).getBalance(market as Market);
 
-      await this.positionSyncService.syncPositions(market, snapshot);
+      await this.positionSyncService.syncPositions(broker, market, snapshot);
       return snapshot;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Failed to refresh ${market} positions: ${message}`);
+      this.logger.warn(`[${broker} ${market}] Failed to refresh positions: ${message}`);
       throw error;
     }
   }

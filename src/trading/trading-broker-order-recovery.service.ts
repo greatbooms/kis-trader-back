@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
+  Broker,
   BrokerOrderAction,
   BrokerOrderActionChannel,
   CancellationAttemptStatus,
@@ -85,9 +86,10 @@ export class TradingBrokerOrderRecoveryService {
     return records.map((record) => this.toRecoveryItem(record));
   }
 
-  getCurrentContextPreview(): BrokerContextPreview {
-    const current = this.brokerContextService.getCurrentContext();
+  getCurrentContextPreview(broker: Broker): BrokerContextPreview {
+    const current = this.brokerContextService.getCurrentContext(broker);
     return {
+      broker: current.broker,
       environment: current.environment,
       maskedAccount: current.maskedAccount,
       contextToken: this.brokerContextService.createContextBindingToken(current),
@@ -103,20 +105,28 @@ export class TradingBrokerOrderRecoveryService {
     if (!actor) {
       throw new Error(`[RECOVERY ${tradeRecordId}] Recovery actor is required`);
     }
-    const currentContext = this.brokerContextService.getCurrentContext();
-    if (!this.brokerContextService.matchesContextBindingToken(
-      currentContext,
-      expectedContextToken,
-    )) {
-      throw new Error(
-        `[RECOVERY ${tradeRecordId}] Broker preview context changed before assignment`,
-      );
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      const target = await tx.tradeRecord.findUnique({
+        where: { id: tradeRecordId },
+        select: { broker: true },
+      });
+      if (!target) {
+        throw new Error(`[RECOVERY ${tradeRecordId}] Trade record not found`);
+      }
+      const currentContext = this.brokerContextService.getCurrentContext(target.broker);
+      if (!this.brokerContextService.matchesContextBindingToken(
+        currentContext,
+        expectedContextToken,
+      )) {
+        throw new Error(
+          `[RECOVERY ${tradeRecordId}] Broker preview context changed before assignment`,
+        );
+      }
+
       const claimed = await tx.tradeRecord.updateMany({
         where: {
           id: tradeRecordId,
+          broker: target.broker,
           brokerEnvironment: null,
           brokerAccountHash: null,
           OR: [
@@ -198,9 +208,10 @@ export class TradingBrokerOrderRecoveryService {
     };
     const matchedCandidates = await this.brokerOrderMatcher
       .findSubmissionCandidates(matchRequest);
-    const currentContext = this.brokerContextService.getCurrentContext();
+    const currentContext = this.brokerContextService.getCurrentContext(record.broker);
     if (
-      record.brokerEnvironment !== currentContext.environment
+      record.broker !== currentContext.broker
+      || record.brokerEnvironment !== currentContext.environment
       || record.brokerAccountHash !== currentContext.accountHash
     ) {
       throw new Error(
@@ -215,6 +226,7 @@ export class TradingBrokerOrderRecoveryService {
       const stillUnknown = await tx.tradeRecord.findFirst({
         where: {
           id: tradeRecordId,
+          broker: record.broker,
           status: OrderStatus.SUBMISSION_UNKNOWN,
           brokerEnvironment: record.brokerEnvironment,
           brokerAccountHash: record.brokerAccountHash,
@@ -266,7 +278,7 @@ export class TradingBrokerOrderRecoveryService {
     context: BrokerActionContext,
   ): Promise<BrokerOrderRecoveryItem> {
     const record = await this.brokerOrderResolution.linkCandidate(input, context);
-    return this.toRecoveryItem(record, this.currentContextForDisplay());
+    return this.toRecoveryItem(record, this.currentContextForDisplay(record.broker));
   }
 
   async confirmNotSubmitted(
@@ -277,7 +289,7 @@ export class TradingBrokerOrderRecoveryService {
       tradeRecordId,
       context,
     );
-    return this.toRecoveryItem(record, this.currentContextForDisplay());
+    return this.toRecoveryItem(record, this.currentContextForDisplay(record.broker));
   }
 
   async confirmMatchesExisting(
@@ -288,7 +300,7 @@ export class TradingBrokerOrderRecoveryService {
       input,
       context,
     );
-    return this.toRecoveryItem(record, this.currentContextForDisplay());
+    return this.toRecoveryItem(record, this.currentContextForDisplay(record.broker));
   }
 
   async inspectCancellation(
@@ -299,7 +311,7 @@ export class TradingBrokerOrderRecoveryService {
       tradeRecordId,
       context,
     );
-    return this.toRecoveryItem(record, this.currentContextForDisplay());
+    return this.toRecoveryItem(record, this.currentContextForDisplay(record.broker));
   }
 
   async confirmCancellationNotAccepted(
@@ -308,7 +320,7 @@ export class TradingBrokerOrderRecoveryService {
   ): Promise<BrokerOrderRecoveryItem> {
     const record = await this.brokerCancellationRecovery
       .confirmCancellationNotAccepted(tradeRecordId, context);
-    return this.toRecoveryItem(record, this.currentContextForDisplay());
+    return this.toRecoveryItem(record, this.currentContextForDisplay(record.broker));
   }
 
   private toRecoveryItem(
@@ -319,6 +331,7 @@ export class TradingBrokerOrderRecoveryService {
       && record.brokerAccountHash !== null;
     return {
       tradeRecordId: record.id,
+      broker: record.broker,
       lifecycle: record.cancellationStatus !== null
         ? 'CANCELLATION'
         : 'SUBMISSION',
@@ -347,7 +360,8 @@ export class TradingBrokerOrderRecoveryService {
       currentBrokerEnvironment: currentContext?.environment ?? null,
       maskedCurrentAccount: currentContext?.maskedAccount ?? null,
       brokerContextMatchesCurrent: brokerContextAssigned && currentContext
-        ? record.brokerEnvironment === currentContext.environment
+        ? record.broker === currentContext.broker
+          && record.brokerEnvironment === currentContext.environment
           && record.brokerAccountHash === currentContext.accountHash
         : null,
       createdAt: record.createdAt,
@@ -355,12 +369,12 @@ export class TradingBrokerOrderRecoveryService {
     };
   }
 
-  private currentContextForDisplay(): BrokerContext | null {
+  private currentContextForDisplay(broker: Broker): BrokerContext | null {
     try {
-      return this.brokerContextService.getCurrentContext();
+      return this.brokerContextService.getCurrentContext(broker);
     } catch (error) {
       this.logger.debug(
-        `[RECOVERY LIST] Current broker context unavailable: ${this.errorMessage(error)}`,
+        `[${broker}] Current broker context unavailable for recovery list: ${this.errorMessage(error)}`,
       );
       return null;
     }
@@ -378,15 +392,16 @@ export class TradingBrokerOrderRecoveryService {
       await this.slackService.sendBrokerOrderPersistenceWarning(warning);
     } catch {
       this.logger.warn(
-        `[${warning.stockCode}] Failed to deliver accepted-order persistence warning`,
+        `[${warning.broker} ${warning.stockCode}] Failed to deliver accepted-order persistence warning`,
       );
     }
   }
 
-  async claimCancellation(tradeRecordId: string): Promise<boolean> {
+  async claimCancellation(tradeRecordId: string, broker: Broker): Promise<boolean> {
     const claimed = await this.prisma.tradeRecord.updateMany({
       where: {
         id: tradeRecordId,
+        broker,
         status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
         orderNo: { not: null },
         OR: [
@@ -412,10 +427,15 @@ export class TradingBrokerOrderRecoveryService {
     return claimed.count > 0;
   }
 
-  async releaseCancellationClaim(tradeRecordId: string, message: string): Promise<boolean> {
+  async releaseCancellationClaim(
+    tradeRecordId: string,
+    broker: Broker,
+    message: string,
+  ): Promise<boolean> {
     const released = await this.prisma.tradeRecord.updateMany({
       where: {
         id: tradeRecordId,
+        broker,
         cancellationStatus: CancellationAttemptStatus.SUBMITTING,
       },
       data: {
@@ -428,10 +448,15 @@ export class TradingBrokerOrderRecoveryService {
     return released.count > 0;
   }
 
-  async markCancellationAccepted(tradeRecordId: string, message: string): Promise<boolean> {
+  async markCancellationAccepted(
+    tradeRecordId: string,
+    broker: Broker,
+    message: string,
+  ): Promise<boolean> {
     const persisted = await this.prisma.tradeRecord.updateMany({
       where: {
         id: tradeRecordId,
+        broker,
         cancellationStatus: CancellationAttemptStatus.SUBMITTING,
       },
       data: {
@@ -442,10 +467,15 @@ export class TradingBrokerOrderRecoveryService {
     return persisted.count > 0;
   }
 
-  async markCancellationRejected(tradeRecordId: string, message: string): Promise<boolean> {
+  async markCancellationRejected(
+    tradeRecordId: string,
+    broker: Broker,
+    message: string,
+  ): Promise<boolean> {
     const persisted = await this.prisma.tradeRecord.updateMany({
       where: {
         id: tradeRecordId,
+        broker,
         cancellationStatus: CancellationAttemptStatus.SUBMITTING,
       },
       data: {
@@ -460,6 +490,7 @@ export class TradingBrokerOrderRecoveryService {
 
   async markCancellationUnknown(
     tradeRecordId: string,
+    broker: Broker,
     message: string,
     notifySlack = true,
   ): Promise<boolean> {
@@ -469,6 +500,7 @@ export class TradingBrokerOrderRecoveryService {
       const persisted = await tx.tradeRecord.updateMany({
         where: {
           id: tradeRecordId,
+          broker,
           cancellationStatus: CancellationAttemptStatus.SUBMITTING,
         },
         data: {
@@ -498,13 +530,14 @@ export class TradingBrokerOrderRecoveryService {
   async takeOverCancellationAttempts(): Promise<number> {
     const staleAttempts = await this.prisma.tradeRecord.findMany({
       where: { cancellationStatus: CancellationAttemptStatus.SUBMITTING },
-      select: { id: true },
+      select: { id: true, broker: true },
     });
 
     let takenOver = 0;
     for (const attempt of staleAttempts) {
       const changed = await this.markCancellationUnknown(
         attempt.id,
+        attempt.broker,
         'Cold-start takeover of unfinished cancellation',
         false,
       );
@@ -627,6 +660,6 @@ export class TradingBrokerOrderRecoveryService {
 
   private sanitizeMessage(message: string): string {
     const normalized = typeof message === 'string' ? message.trim() : '';
-    return (normalized || 'KIS mutation outcome unknown').slice(0, 500);
+    return (normalized || 'Broker mutation outcome unknown').slice(0, 500);
   }
 }

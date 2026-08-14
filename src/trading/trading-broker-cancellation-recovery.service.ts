@@ -13,9 +13,6 @@ import { TradingBrokerContextService } from './trading-broker-context.service';
 import { BrokerActionContext } from './types/broker-action-context.type';
 import { BrokerCancellationRead } from './types/broker-cancellation-read.type';
 
-const RECONCILED_MESSAGE = 'Cancellation closure confirmed from complete KIS reads';
-const NOT_ACCEPTED_MESSAGE = 'Operator confirmed cancellation was not accepted after complete KIS reads';
-
 @Injectable()
 export class TradingBrokerCancellationRecoveryService {
   private readonly logger = new Logger(
@@ -36,7 +33,7 @@ export class TradingBrokerCancellationRecoveryService {
     const actor = this.requireActor(id, context.actor);
     const record = await this.loadUnknownCancellation(id);
     this.assertStoredIdentity(record);
-    this.assertCurrentContext(record, 'does not match current KIS context');
+    this.assertCurrentContext(record, `does not match current ${record.broker} context`);
 
     const brokerRead = await this.readCompleteBrokerState(record);
     this.assertCurrentContext(record, 'changed during cancellation inspection');
@@ -52,7 +49,7 @@ export class TradingBrokerCancellationRecoveryService {
 
     if (executionRows.length === 0) {
       throw new Error(
-        `[RECOVERY ${id}] Complete KIS reads cannot prove whether the broker order is open or closed`,
+        `[RECOVERY ${id}] Complete ${record.broker} reads cannot prove whether the broker order is open or closed`,
       );
     }
 
@@ -69,7 +66,9 @@ export class TradingBrokerCancellationRecoveryService {
       : executedQty > 0
         ? OrderStatus.PARTIAL
         : OrderStatus.CANCELLED;
-    const cancellationMessage = this.sanitizeMessage(RECONCILED_MESSAGE);
+    const cancellationMessage = this.sanitizeMessage(
+      `Cancellation closure confirmed from complete ${record.broker} reads`,
+    );
     const resolvedAt = new Date();
 
     return this.prisma.$transaction(async (tx) => {
@@ -130,7 +129,7 @@ export class TradingBrokerCancellationRecoveryService {
     const actor = this.requireActor(id, context.actor);
     const record = await this.loadUnknownCancellation(id);
     this.assertStoredIdentity(record);
-    this.assertCurrentContext(record, 'does not match current KIS context');
+    this.assertCurrentContext(record, `does not match current ${record.broker} context`);
 
     const brokerRead = await this.readCompleteBrokerState(record);
     this.assertCurrentContext(record, 'changed during cancellation confirmation');
@@ -145,7 +144,9 @@ export class TradingBrokerCancellationRecoveryService {
       );
     }
 
-    const cancellationMessage = this.sanitizeMessage(NOT_ACCEPTED_MESSAGE);
+    const cancellationMessage = this.sanitizeMessage(
+      `Operator confirmed cancellation was not accepted after complete ${record.broker} reads`,
+    );
     const resolvedAt = new Date();
     return this.prisma.$transaction(async (tx) => {
       const changed = await tx.tradeRecord.updateMany({
@@ -212,7 +213,7 @@ export class TradingBrokerCancellationRecoveryService {
       return { executions, unfilledOrders };
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${record.id}] Complete cancellation-state KIS read failed: ${this.errorMessage(error)}`,
+        `[${record.broker} ${record.stockCode}] Complete cancellation-state read failed (${record.id}): ${this.errorMessage(error)}`,
       );
       throw error;
     }
@@ -289,6 +290,7 @@ export class TradingBrokerCancellationRecoveryService {
   private cancellationCasWhere(record: TradeRecord) {
     return {
       id: record.id,
+      broker: record.broker,
       status: record.status,
       orderNo: record.orderNo,
       cancellationStatus: CancellationAttemptStatus.UNKNOWN,
@@ -312,9 +314,10 @@ export class TradingBrokerCancellationRecoveryService {
   }
 
   private assertCurrentContext(record: TradeRecord, reason: string): void {
-    const current = this.brokerContextService.getCurrentContext();
+    const current = this.brokerContextService.getCurrentContext(record.broker);
     if (
-      current.environment !== record.brokerEnvironment
+      current.broker !== record.broker
+      || current.environment !== record.brokerEnvironment
       || current.accountHash !== record.brokerAccountHash
     ) {
       throw new Error(`[RECOVERY ${record.id}] Stored broker context ${reason}`);

@@ -1,8 +1,11 @@
 import { InputType, Field, Float, Int } from '@nestjs/graphql';
-import { Market } from '@prisma/client';
+import { Broker, Market } from '@prisma/client';
 
 @InputType()
 export class CreateWatchStockInput {
+  @Field(() => Broker, { defaultValue: Broker.KIS })
+  broker: Broker = Broker.KIS;
+
   @Field(() => Market)
   market: Market;
 

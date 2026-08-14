@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerOrderActionChannel,
   CancellationAttemptStatus,
   Market,
@@ -11,6 +12,7 @@ import { TradingSlackRecoveryActionsService } from './trading-slack-recovery-act
 describe('TradingSlackRecoveryActionsService', () => {
   const recoveryItem = (overrides: Record<string, unknown> = {}) => ({
     tradeRecordId: 'trade-1',
+    broker: Broker.KIS,
     lifecycle: 'SUBMISSION',
     market: Market.OVERSEAS,
     exchangeCode: 'NASD',
@@ -90,6 +92,7 @@ describe('TradingSlackRecoveryActionsService', () => {
   const tradePayload = (origin = true) => JSON.stringify({
     v: 1,
     tradeRecordId: 'trade-1',
+    broker: Broker.KIS,
     ...(origin
       ? { origin: { channel: 'C-ORIGINAL', messageTs: '100.1' } }
       : {}),
@@ -101,6 +104,7 @@ describe('TradingSlackRecoveryActionsService', () => {
   const candidatePayload = () => JSON.stringify({
     v: 1,
     tradeRecordId: 'trade-1',
+    broker: Broker.KIS,
     brokerOrderDate: '20260714',
     exchangeCode: 'nasd',
     orderNo: ' ORDER-1 ',
@@ -138,6 +142,7 @@ describe('TradingSlackRecoveryActionsService', () => {
     authorization.authorize.mockReturnValue('U123');
     recovery.listRecoveryItems.mockResolvedValue([recoveryItem()]);
     recovery.getCurrentContextPreview.mockReturnValue({
+      broker: Broker.KIS,
       environment: 'PROD',
       maskedAccount: '****1234-01',
       contextToken: 'opaque-context-token',
@@ -334,17 +339,19 @@ describe('TradingSlackRecoveryActionsService', () => {
     });
 
     expect(authorization.authorize).toHaveBeenCalledWith('U123');
-    expect(recovery.getCurrentContextPreview).toHaveBeenCalledTimes(1);
+    expect(recovery.getCurrentContextPreview).toHaveBeenCalledWith(Broker.KIS);
     expect(recovery.assignCurrentContext).not.toHaveBeenCalled();
     expect(presentation.openContextAssignmentModal).toHaveBeenCalledWith(
       'trigger-1',
       {
         v: 1,
         tradeRecordId: 'trade-1',
+        broker: Broker.KIS,
         contextToken: 'opaque-context-token',
         origin: { channel: 'C-CONTAINER', messageTs: '200.2' },
       },
       {
+        broker: Broker.KIS,
         environment: 'PROD',
         maskedAccount: '****1234-01',
         contextToken: 'opaque-context-token',

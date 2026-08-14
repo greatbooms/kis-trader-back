@@ -1,8 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingOrderFailureNotificationService', () => {
   const failedRecord = {
+    broker: Broker.TOSS,
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',
@@ -54,6 +56,7 @@ describe('TradingOrderFailureNotificationService', () => {
     expect(slackService.sendOrderFailureAlert).toHaveBeenCalledWith(
       expect.objectContaining({
         stockCode: 'TQQQ',
+        broker: Broker.TOSS,
         stage: 'SUBMISSION',
         brokerMessage: expect.stringContaining('EGW00201'),
         orderNo: undefined,

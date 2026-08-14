@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RiskManagementService } from './risk-management.service';
 import { PrismaService } from '../prisma.service';
+import { Broker } from '@prisma/client';
 
 describe('RiskManagementService', () => {
   let service: RiskManagementService;
@@ -35,7 +36,15 @@ describe('RiskManagementService', () => {
       mockPrisma.position.findMany.mockResolvedValue([]);
       mockPrisma.riskSnapshot.findFirst.mockResolvedValue(null);
 
-      const result = await service.evaluateRisk('DOMESTIC');
+      const result = await service.evaluateRisk(Broker.KIS, 'DOMESTIC');
+
+      expect(mockPrisma.position.findMany).toHaveBeenCalledWith({
+        where: { broker: Broker.KIS, market: 'DOMESTIC' },
+      });
+      expect(mockPrisma.riskSnapshot.findFirst).toHaveBeenCalledWith({
+        where: { broker: Broker.KIS, market: 'DOMESTIC' },
+        orderBy: { createdAt: 'desc' },
+      });
 
       expect(result.buyBlocked).toBe(false);
       expect(result.liquidateAll).toBe(false);
@@ -64,7 +73,7 @@ describe('RiskManagementService', () => {
       mockPrisma.position.findMany.mockResolvedValue(positions);
       mockPrisma.riskSnapshot.findFirst.mockResolvedValue(snapshot);
 
-      const result = await service.evaluateRisk('DOMESTIC');
+      const result = await service.evaluateRisk(Broker.TOSS, 'DOMESTIC');
 
       expect(result.buyBlocked).toBe(false);
       expect(result.liquidateAll).toBe(false);
@@ -73,6 +82,30 @@ describe('RiskManagementService', () => {
       expect(result.dailyPnlRate).toBeCloseTo(-0.05, 6);
       expect(result.drawdown).toBeCloseTo((5700 - 7000) / 7000, 6);
       expect(result.reasons).toHaveLength(0);
+    });
+  });
+
+  describe('saveRiskSnapshot', () => {
+    it('persists and calculates a snapshot only for the requested broker account', async () => {
+      mockPrisma.riskSnapshot.findFirst.mockResolvedValue(null);
+      mockPrisma.position.findMany.mockResolvedValue([{ broker: Broker.TOSS }]);
+      mockPrisma.riskSnapshot.upsert.mockResolvedValue({});
+
+      await service.saveRiskSnapshot(Broker.TOSS, 'OVERSEAS', 5000, 2000);
+
+      expect(mockPrisma.riskSnapshot.findFirst).toHaveBeenCalledWith({
+        where: { broker: Broker.TOSS, market: 'OVERSEAS' },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(mockPrisma.position.findMany).toHaveBeenCalledWith({
+        where: { broker: Broker.TOSS, market: 'OVERSEAS' },
+      });
+      expect(mockPrisma.riskSnapshot.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: {
+          broker_market_snapshotDate: expect.objectContaining({ broker: Broker.TOSS }),
+        },
+        create: expect.objectContaining({ broker: Broker.TOSS }),
+      }));
     });
   });
 

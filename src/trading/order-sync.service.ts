@@ -2,9 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Broker, Market } from '@prisma/client';
 import { BrokerPortRegistry } from '../broker/broker-port.registry';
+import type { BrokerPort } from '../common/types';
 import { BrokerOrderStatus, UnfilledOrder } from '../kis/types/kis-api.types';
 import { PrismaService } from '../prisma.service';
-import { OrderSyncOptions, OrderSyncWindow, PositionQuantitySnapshot } from './types';
+import {
+  BrokerScopedUnfilledOrder,
+  OrderSyncOptions,
+  OrderSyncWindow,
+  PositionQuantitySnapshot,
+} from './types';
 import { TradingOrderReconciliationService } from './trading-order-reconciliation.service';
 import { TradingAccountCashSyncService } from './trading-account-cash-sync.service';
 
@@ -12,7 +18,7 @@ import { TradingAccountCashSyncService } from './trading-account-cash-sync.servi
 export class OrderSyncService {
   private readonly logger = new Logger(OrderSyncService.name);
   private readonly isPaper: boolean;
-  private readonly lastSyncedAt = new Map<'DOMESTIC' | 'OVERSEAS', Date>();
+  private readonly lastSyncedAt = new Map<string, Date>();
 
   constructor(
     private orderReconciliationService: TradingOrderReconciliationService,
@@ -29,57 +35,88 @@ export class OrderSyncService {
     currentPositions: PositionQuantitySnapshot[],
     options: OrderSyncOptions = {},
   ): Promise<void> {
-    const window = await this.getOpenOrderWindow(market);
-    if (!window) return;
-    if (!this.shouldSyncNow(market, window, options)) return;
+    const ports = this.registry.getActive().filter(
+      (port) => !options.broker || port.broker === options.broker,
+    );
+    for (const port of ports) {
+      try {
+        await this.syncBrokerMarketOrders(port, market, currentPositions, options);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`[${port.broker} ${market}] Order sync failed: ${reason}`);
+      }
+    }
+  }
 
-    const brokerOrders = await this.getBrokerOrders(market, window.startDate, window.endDate);
-    const unfilledOrders = await this.mapUnfilledOrders(market, brokerOrders);
+  private async syncBrokerMarketOrders(
+    port: BrokerPort,
+    market: 'DOMESTIC' | 'OVERSEAS',
+    currentPositions: PositionQuantitySnapshot[],
+    options: OrderSyncOptions,
+  ): Promise<void> {
+    const window = await this.getOpenOrderWindow(port.broker, market);
+    if (!window) return;
+    if (!this.shouldSyncNow(port.broker, market, window, options)) return;
+
+    const brokerOrders = await port.getOrderExecutions(market as Market, window.startDate, window.endDate);
+    const unfilledOrders = await this.mapUnfilledOrders(port, market, brokerOrders);
 
     const result = await this.orderReconciliationService.reconcileOpenOrders(
+      port.broker,
       market,
-      currentPositions,
+      currentPositions.filter((position) => position.broker === port.broker),
       unfilledOrders,
       brokerOrders,
     );
     if (result.hasNewFill) {
       try {
-        await this.accountCashSync.refreshMarketCash(market);
+        await this.accountCashSync.refreshMarketCash(port.broker, market);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Cash refresh after ${market} fill failed: ${reason}`);
+        this.logger.warn(`[${port.broker} ${market}] Cash refresh after fill failed: ${reason}`);
       }
     }
-    this.lastSyncedAt.set(market, new Date());
+    this.lastSyncedAt.set(this.syncKey(port.broker, market), new Date());
   }
 
-  async getMarketUnfilledOrders(market: 'DOMESTIC' | 'OVERSEAS'): Promise<UnfilledOrder[]> {
-    const window = await this.getOpenOrderWindow(market);
-    if (!window) return [];
-
-    const brokerOrders = await this.getBrokerOrders(market, window.startDate, window.endDate);
-    return this.mapUnfilledOrders(market, brokerOrders);
-  }
-
-  private async getBrokerOrders(
+  async getMarketUnfilledOrders(
     market: 'DOMESTIC' | 'OVERSEAS',
-    startDate: string,
-    endDate: string,
-  ): Promise<BrokerOrderStatus[]> {
-    // Phase 3: active broker 루프로 확장
-    return this.registry.get(Broker.KIS).getOrderExecutions(market as Market, startDate, endDate);
+    broker?: Broker,
+  ): Promise<BrokerScopedUnfilledOrder[]> {
+    const scopedOrders: BrokerScopedUnfilledOrder[] = [];
+    const ports = this.registry.getActive().filter(
+      (port) => !broker || port.broker === broker,
+    );
+    for (const port of ports) {
+      try {
+        const window = await this.getOpenOrderWindow(port.broker, market);
+        if (!window) continue;
+        const brokerOrders = await port.getOrderExecutions(
+          market as Market,
+          window.startDate,
+          window.endDate,
+        );
+        const unfilledOrders = await this.mapUnfilledOrders(port, market, brokerOrders);
+        scopedOrders.push(...unfilledOrders.map((order) => ({ ...order, broker: port.broker })));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`[${port.broker} ${market}] Unfilled order sync failed: ${reason}`);
+      }
+    }
+    return scopedOrders;
   }
 
   private async mapUnfilledOrders(
+    port: BrokerPort,
     market: 'DOMESTIC' | 'OVERSEAS',
     brokerOrders: BrokerOrderStatus[],
   ): Promise<UnfilledOrder[]> {
     if (market === 'DOMESTIC') {
-      return this.registry.get(Broker.KIS).getUnfilledOrders(Market.DOMESTIC);
+      return port.getUnfilledOrders(Market.DOMESTIC);
     }
 
-    if (this.isPaper) {
-      this.logger.debug('Using overseas order execution inquiry as paper-mode unfilled fallback');
+    if (port.broker === Broker.KIS && this.isPaper) {
+      this.logger.debug('[KIS OVERSEAS] Using order execution inquiry as paper-mode unfilled fallback');
       return brokerOrders
         .filter((order) => order.remainingQuantity > 0)
         .map((order) => ({
@@ -92,14 +129,16 @@ export class OrderSyncService {
         }));
     }
 
-    return this.registry.get(Broker.KIS).getUnfilledOrders(Market.OVERSEAS);
+    return port.getUnfilledOrders(Market.OVERSEAS);
   }
 
   private async getOpenOrderWindow(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
   ): Promise<OrderSyncWindow | null> {
     const openRecords = await this.prisma.tradeRecord.findMany({
       where: {
+        broker,
         market: market as Market,
         status: { in: ['PENDING', 'PARTIAL'] },
         orderNo: { not: null },
@@ -123,19 +162,24 @@ export class OrderSyncService {
   }
 
   private shouldSyncNow(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     window: OrderSyncWindow,
     options: OrderSyncOptions,
   ): boolean {
     if (options.force) return true;
 
-    const lastSyncedAt = this.lastSyncedAt.get(market);
+    const lastSyncedAt = this.lastSyncedAt.get(this.syncKey(broker, market));
     if (!lastSyncedAt) return true;
 
     const now = Date.now();
     const ageMs = Math.max(0, now - window.newestCreatedAt.getTime());
     const intervalMs = this.getSyncIntervalMs(market, ageMs, window.openOrderCount);
     return now - lastSyncedAt.getTime() >= intervalMs;
+  }
+
+  private syncKey(broker: Broker, market: 'DOMESTIC' | 'OVERSEAS'): string {
+    return `${broker}:${market}`;
   }
 
   private getSyncIntervalMs(

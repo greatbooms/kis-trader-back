@@ -4,6 +4,7 @@ import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { BalanceItem } from '../kis/types/kis-api.types';
 import { TradingPositionRefreshService } from './trading-position-refresh.service';
 import { TradingPositionSyncService } from './trading-position-sync.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingPositionRefreshService', () => {
   let service: TradingPositionRefreshService;
@@ -44,10 +45,11 @@ describe('TradingPositionRefreshService', () => {
     port.getBalance.mockResolvedValue(snapshot);
     positionSync.syncPositions.mockResolvedValue(undefined);
 
-    const result = await service.refresh('DOMESTIC');
+    const result = await service.refresh(Broker.TOSS, 'DOMESTIC');
 
+    expect(registry.get).toHaveBeenCalledWith(Broker.TOSS);
     expect(port.getBalance).toHaveBeenCalledWith('DOMESTIC');
-    expect(positionSync.syncPositions).toHaveBeenCalledWith('DOMESTIC', snapshot);
+    expect(positionSync.syncPositions).toHaveBeenCalledWith(Broker.TOSS, 'DOMESTIC', snapshot);
     expect(result).toBe(snapshot);
   });
 
@@ -56,10 +58,10 @@ describe('TradingPositionRefreshService', () => {
     port.getBalance.mockResolvedValue(snapshot);
     positionSync.syncPositions.mockResolvedValue(undefined);
 
-    const result = await service.refresh('OVERSEAS');
+    const result = await service.refresh(Broker.KIS, 'OVERSEAS');
 
     expect(port.getBalance).toHaveBeenCalledWith('OVERSEAS');
-    expect(positionSync.syncPositions).toHaveBeenCalledWith('OVERSEAS', snapshot);
+    expect(positionSync.syncPositions).toHaveBeenCalledWith(Broker.KIS, 'OVERSEAS', snapshot);
     expect(result).toBe(snapshot);
   });
 
@@ -68,10 +70,10 @@ describe('TradingPositionRefreshService', () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     port.getBalance.mockRejectedValue(failure);
 
-    await expect(service.refresh('DOMESTIC')).rejects.toBe(failure);
+    await expect(service.refresh(Broker.TOSS, 'DOMESTIC')).rejects.toBe(failure);
 
     expect(warn).toHaveBeenCalledWith(
-      'Failed to refresh DOMESTIC positions: balance unavailable',
+      '[TOSS DOMESTIC] Failed to refresh positions: balance unavailable',
     );
     expect(positionSync.syncPositions).not.toHaveBeenCalled();
   });

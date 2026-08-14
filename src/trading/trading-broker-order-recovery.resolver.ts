@@ -1,5 +1,5 @@
 import { UnauthorizedException, UseGuards } from '@nestjs/common';
-import { BrokerOrderActionChannel } from '@prisma/client';
+import { Broker, BrokerOrderActionChannel } from '@prisma/client';
 import { Args, Context, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import {
@@ -28,8 +28,10 @@ export class TradingBrokerOrderRecoveryResolver {
   }
 
   @Query(() => BrokerContextPreviewType, { name: 'currentBrokerContextPreview' })
-  getCurrentContextPreview(): BrokerContextPreviewType {
-    return this.recoveryService.getCurrentContextPreview();
+  getCurrentContextPreview(
+    @Args('broker', { type: () => Broker }) broker: Broker,
+  ): BrokerContextPreviewType {
+    return this.recoveryService.getCurrentContextPreview(broker);
   }
 
   @Mutation(() => BrokerOrderCandidateInspectionType, {
