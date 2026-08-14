@@ -157,6 +157,36 @@ describe('OrderSyncService', () => {
     }));
   });
 
+  it('attempts all brokers but throws the first failure when fail-on-any is requested', async () => {
+    const toss = {
+      broker: Broker.TOSS,
+      getOrderExecutions: jest.fn().mockRejectedValue(new Error('TOSS unavailable')),
+      getUnfilledOrders: jest.fn(),
+    };
+    mockRegistry.getActive.mockReturnValueOnce([toss, mockKisPort]);
+    mockPrisma.tradeRecord.findMany.mockResolvedValue([
+      { createdAt: new Date('2026-04-08T00:30:00.000Z') },
+    ]);
+    mockKisDomestic.getOrderExecutions.mockResolvedValue([]);
+    mockKisDomestic.getUnfilledOrders.mockResolvedValue([]);
+    mockOrderReconciliationService.reconcileOpenOrders.mockResolvedValue({ hasNewFill: false });
+
+    await expect(service.syncMarketOrders('DOMESTIC', [
+      { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 },
+      { broker: Broker.TOSS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 8 },
+    ], { force: true, failOnAnyError: true })).rejects.toThrow('TOSS unavailable');
+
+    expect(toss.getOrderExecutions).toHaveBeenCalledTimes(1);
+    expect(mockKisDomestic.getOrderExecutions).toHaveBeenCalledTimes(1);
+    expect(mockOrderReconciliationService.reconcileOpenOrders).toHaveBeenCalledWith(
+      Broker.KIS,
+      'DOMESTIC',
+      [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+      [],
+      [],
+    );
+  });
+
   it('restricts an orchestrator-targeted sync and unfilled read to one broker', async () => {
     const toss = {
       broker: Broker.TOSS,

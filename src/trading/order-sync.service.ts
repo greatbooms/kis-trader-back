@@ -39,6 +39,7 @@ export class OrderSyncService {
       (port) => !options.broker || port.broker === options.broker,
     );
     const propagateFailure = Boolean(options.broker) || ports.length === 1;
+    const errors: unknown[] = [];
     for (const port of ports) {
       try {
         await this.syncBrokerMarketOrders(port, market, currentPositions, options);
@@ -46,8 +47,10 @@ export class OrderSyncService {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`[${port.broker} ${market}] Order sync failed: ${reason}`);
         if (propagateFailure) throw error;
+        errors.push(error);
       }
     }
+    if (options.failOnAnyError && errors.length > 0) throw errors[0];
   }
 
   private async syncBrokerMarketOrders(

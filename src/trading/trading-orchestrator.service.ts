@@ -635,7 +635,7 @@ export class TradingOrchestrator {
       await this.orderSyncService.syncMarketOrders(
         market,
         latestPositions.map((position) => this.toPositionSnapshot(position)),
-        { force: true },
+        { force: true, failOnAnyError: true },
       );
       return true;
     } catch (e) {

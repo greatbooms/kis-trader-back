@@ -784,7 +784,7 @@ describe('TradingOrchestrator', () => {
           quantity: 1,
         },
       ],
-      { force: true },
+      { force: true, failOnAnyError: true },
     );
     expect(mockSlackCommandsService.buildDailySummary).toHaveBeenCalledWith({
       summaryTitle: '국내장 매매 요약 | 2026-06-24',
@@ -848,6 +848,60 @@ describe('TradingOrchestrator', () => {
 
     await orchestrator.sendDomesticDailySummary();
 
+    expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
+    expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
+    expect(mockPrisma.appSetting.delete).toHaveBeenCalledWith({
+      where: { key: 'daily-summary-sent:DOMESTIC:KRX:CLOSE:2026-06-24' },
+    });
+
+    jest.useRealTimers();
+  });
+
+  it('does not send close daily summary and releases the claim when fail-on-any order sync reports one broker failure', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockPrisma.position.findMany.mockResolvedValueOnce([
+      {
+        broker: Broker.TOSS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 2,
+      },
+      {
+        broker: Broker.KIS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 1,
+      },
+    ]);
+    mockOrderSyncService.syncMarketOrders.mockImplementation(async (_market, _positions, options) => {
+      if (options?.failOnAnyError) throw new Error('TOSS order API unavailable');
+    });
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockOrderSyncService.syncMarketOrders).toHaveBeenCalledWith(
+      'DOMESTIC',
+      [
+        {
+          broker: Broker.TOSS,
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          quantity: 2,
+        },
+        {
+          broker: Broker.KIS,
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          quantity: 1,
+        },
+      ],
+      { force: true, failOnAnyError: true },
+    );
     expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
     expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
     expect(mockPrisma.appSetting.delete).toHaveBeenCalledWith({
@@ -948,7 +1002,7 @@ describe('TradingOrchestrator', () => {
           quantity: 37,
         },
       ],
-      { force: true },
+      { force: true, failOnAnyError: true },
     );
     expect(mockSlackCommandsService.buildDailySummary).toHaveBeenCalledWith({
       summaryTitle: '미국장 매매 요약 | 2026-06-24 거래일',

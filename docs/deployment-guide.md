@@ -78,21 +78,27 @@ Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20
 
 ### 멀티 브로커 migration 롤아웃
 
-`20260814163000_drop_legacy_brokerless_uniques`(migration 28)를 적용한 시점부터 pre-broker(pre-Phase-0/1) binary로의 rollback은 지원하지 않습니다. 운영 적용 순서는 반드시 다음 경계를 지킵니다.
+`20260814163000_drop_legacy_brokerless_uniques`(migration 28)는 **one-way boundary**입니다. 이 migration이 적용된 뒤에는 pre-broker(pre-Phase-0/1) binary rollback을 지원하지 않습니다.
 
-1. `TRADING_ENABLED=false`로 거래를 중지합니다.
+중요한 점은 현재 production boot 경로가 `yarn prisma migrate deploy && node dist/main` 이라서, `prisma/migrations`에 있는 migration은 배포 시 자동 적용된다는 것입니다. 그래서 migration 28은 평소에는 `prisma/deferred-migrations`에 두고 auto-migrate 대상에서 제외합니다.
+
+운영 적용은 **반드시 2-release flow**로 진행합니다.
+
+1. Release 1 전 `TRADING_ENABLED=false`로 거래를 중지합니다.
 2. 운영 DB를 백업합니다.
-3. migration 27 `20260814110203_add_broker_dimension`을 적용합니다.
-4. 새 binary를 배포합니다.
-5. stability window 동안 KIS 주문·동기화와 broker-scoped 데이터를 확인합니다.
-6. migration 28 `20260814163000_drop_legacy_brokerless_uniques`를 적용합니다.
-7. TOSS broker switch를 활성화합니다.
+3. Release 1에서는 migration 27 `20260814110203_add_broker_dimension`까지만 `prisma/migrations`에 둡니다.
+4. Release 1의 Phase 3 binary를 배포해 auto-migrate로 migration 27만 적용합니다. 이때 TOSS는 비활성 상태로 둡니다.
+5. Phase 3 stability window 동안 KIS-only 주문·동기화, broker-scoped 데이터, approval/recovery, cash dual-write를 확인합니다.
+6. 이 기간에는 migration 28을 계속 deferred 상태로 유지합니다.
+7. **이미 KIS에 보유한 종목을 TOSS에도 보유/등록하려는 Release 2 직전**에만 migration 28을 `prisma/migrations`로 승격합니다.
+8. Release 2를 배포해 다음 boot의 auto-migrate로 migration 28을 적용합니다.
+9. 그 다음에만 TOSS broker switch를 활성화합니다.
 
-| Binary | migration 27 전 | migration 27 적용, 28 전 | migration 28 적용 후 |
+| Binary | migration 27 전 | Release 1: migration 27 적용, 28 deferred | Release 2: migration 28 적용 후 |
 |---|---|---|---|
 | pre-broker (pre-Phase-0/1) | OK | OK | 지원하지 않음 |
 | Phase 0-2 | migration 27 필요 | OK | OK |
-| Phase 3 | migration 27 필요 | OK (동일 종목의 KIS/TOSS 동시 등록 전에는) | OK; 동일 종목을 두 broker에서 운용하려면 migration 28 필수 |
+| Phase 3 | migration 27 필요 | OK; KIS-only 안정화, 기존 KIS 보유 종목의 cross-broker 중복 등록은 아직 금지 | OK; 동일 종목을 KIS/TOSS 양쪽에 보유 가능 |
 
 Migration 28 이후 legacy unique index를 재생성해야 하는 비상 복구에서는 먼저 거래를 중지하고 DB를 백업합니다. 그 다음 `positions`, `watch_stocks`, `risk_snapshots`, `strategy_allocations`의 legacy key 기준 broker 간 중복을 병합·제거해야 합니다. 이 절차는 지원되는 pre-broker rollback이 아닙니다.
 
