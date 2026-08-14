@@ -7,8 +7,11 @@ import { KisBrokerAdapter } from '../kis/kis-broker.adapter';
 export class BrokerPortRegistry {
   private readonly ports: Map<Broker, BrokerPort>;
 
-  constructor(kis: KisBrokerAdapter) {
-    this.ports = new Map([[kis.broker, kis]]);
+  constructor(kis: KisBrokerAdapter, toss?: BrokerPort) {
+    this.ports = new Map([
+      [kis.broker, kis],
+      ...(toss ? [[toss.broker, toss] as [Broker, BrokerPort]] : []),
+    ]);
   }
 
   get(broker: Broker): BrokerPort {

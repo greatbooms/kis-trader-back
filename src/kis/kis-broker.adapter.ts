@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Broker, BrokerEnvironment, Market } from '@prisma/client';
-import { createHash } from 'crypto';
 import type { BrokerCancelRequest, BrokerPort } from '../common/types';
+import { hashBrokerAccount } from '../common/utils/broker-account-hash.util';
 import type { TradingSignal } from '../trading/types';
 import { KisDomesticService } from './kis-domestic.service';
 import { KisOverseasService } from './kis-overseas.service';
@@ -122,9 +122,7 @@ export class KisBrokerAdapter implements BrokerPort {
       environment: normalizedEnvironment === 'paper'
         ? BrokerEnvironment.PAPER
         : BrokerEnvironment.PROD,
-      accountHash: createHash('sha256')
-        .update(`${account.slice(0, 8)}${productCode.trim()}`)
-        .digest('hex'),
+      accountHash: hashBrokerAccount(`${account.slice(0, 8)}${productCode.trim()}`),
     };
   }
 }
