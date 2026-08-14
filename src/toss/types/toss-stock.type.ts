@@ -8,6 +8,8 @@ export type TossStockMarket =
   | 'US_ETC'
   | (string & {});
 
+export type TossCanonicalVenue = 'NASD' | 'NYSE' | 'AMEX';
+
 export interface TossStockInfo {
   symbol: string;
   name: string;

@@ -25,7 +25,7 @@ describe('TossBrokerService', () => {
     } as unknown as ConfigService;
     venueResolver = {
       resolveVenues: jest.fn(async (symbols: string[]) => new Map(
-        symbols.map((symbol) => [symbol, 'US']),
+        symbols.map((symbol) => [symbol, 'NASD']),
       )),
     };
     service = new TossBrokerService(
@@ -208,8 +208,17 @@ describe('TossBrokerService', () => {
       side: 'BUY',
       quantity: 3,
       price: 185.5,
-      exchangeCode: 'US',
+      exchangeCode: 'NASD',
     }]);
+  });
+
+  it('throws when getUnfilledOrders cannot resolve an overseas venue', async () => {
+    base.request.mockResolvedValue(ordersResponse([order()]));
+    venueResolver.resolveVenues.mockResolvedValue(new Map());
+
+    await expect(service.getUnfilledOrders(Market.OVERSEAS)).rejects.toThrow(
+      'Toss venue resolution failed for symbols: AAPL',
+    );
   });
 
   it('matches a stored NASD recovery tuple after enriching a Toss execution', async () => {
@@ -270,6 +279,19 @@ describe('TossBrokerService', () => {
       { stockCode: 'IBM', exchangeCode: 'NYSE' },
       { stockCode: 'SPY', exchangeCode: 'AMEX' },
     ]);
+  });
+
+  it('throws when getOrderExecutions cannot resolve an overseas venue', async () => {
+    base.request.mockImplementation((_group, options) => Promise.resolve(
+      ordersResponse(options.query.status === 'OPEN' ? [order()] : []),
+    ));
+    venueResolver.resolveVenues.mockResolvedValue(new Map());
+
+    await expect(service.getOrderExecutions(
+      Market.OVERSEAS,
+      '20260814',
+      '20260814',
+    )).rejects.toThrow('Toss venue resolution failed for symbols: AAPL');
   });
 
   it('returns KRX for domestic listings without overseas venue resolution', async () => {
@@ -410,7 +432,8 @@ describe('TossBrokerService', () => {
     expect(result.map((item) => item.orderNo)).toEqual(['page-1', 'page-2']);
   });
 
-  it('maps holdings and filters by market', async () => {
+  it('warns and falls back to US when getBalance cannot resolve an overseas venue', async () => {
+    venueResolver.resolveVenues.mockResolvedValue(new Map());
     base.request.mockResolvedValue({
       result: {
         totalPurchaseAmount: { krw: '6500000', usd: '1553' },
@@ -469,6 +492,7 @@ describe('TossBrokerService', () => {
       profitRate: 14.94,
       exchangeCode: 'US',
     }]);
+    expect(warn).toHaveBeenCalledWith('[TOSS AAPL] venue unresolved; using US fallback');
   });
 
   it('maps KRW and USD buying power through the plan ASSET group', async () => {

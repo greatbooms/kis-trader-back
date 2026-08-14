@@ -1,47 +1,54 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { TossBaseService } from './toss-base.service';
-import type { TossApiResponse, TossStockInfo, TossStockMarket } from './types';
+import type {
+  TossApiResponse,
+  TossCanonicalVenue,
+  TossStockInfo,
+  TossStockMarket,
+} from './types';
 
 const MAX_STOCKS_PER_REQUEST = 200;
 
 @Injectable()
 export class TossVenueResolverService {
-  private readonly logger = new Logger(TossVenueResolverService.name);
-  private readonly venueBySymbol = new Map<string, string>();
-  private readonly inFlightByBatch = new Map<string, Promise<void>>();
+  private readonly venueBySymbol = new Map<string, TossCanonicalVenue>();
+  private readonly inFlightBySymbol = new Map<string, Promise<void>>();
 
   constructor(private readonly base: TossBaseService) {}
 
-  async resolveVenues(symbols: string[]): Promise<Map<string, string>> {
+  async resolveVenues(symbols: string[]): Promise<Map<string, TossCanonicalVenue>> {
     const normalized = Array.from(new Set(
       symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean),
     ));
     const missing = normalized
-      .filter((symbol) => !this.venueBySymbol.has(symbol))
+      .filter((symbol) => (
+        !this.venueBySymbol.has(symbol) && !this.inFlightBySymbol.has(symbol)
+      ))
       .sort();
 
     for (let offset = 0; offset < missing.length; offset += MAX_STOCKS_PER_REQUEST) {
       const batch = missing.slice(offset, offset + MAX_STOCKS_PER_REQUEST);
-      const key = batch.join(',');
-      let inFlight = this.inFlightByBatch.get(key);
-      if (!inFlight) {
-        inFlight = this.resolveBatch(key, batch);
-        this.inFlightByBatch.set(key, inFlight);
-      }
-      await inFlight;
+      const inFlight = this.resolveBatch(batch);
+      for (const symbol of batch) this.inFlightBySymbol.set(symbol, inFlight);
     }
 
-    return new Map(normalized.map((symbol) => [
-      symbol,
-      this.venueBySymbol.get(symbol) ?? 'US',
-    ]));
+    await Promise.all(Array.from(new Set(
+      normalized.map((symbol) => this.inFlightBySymbol.get(symbol)).filter(Boolean),
+    )));
+
+    const resolved = new Map<string, TossCanonicalVenue>();
+    for (const symbol of normalized) {
+      const venue = this.venueBySymbol.get(symbol);
+      if (venue) resolved.set(symbol, venue);
+    }
+    return resolved;
   }
 
-  private async resolveBatch(key: string, symbols: string[]): Promise<void> {
+  private async resolveBatch(symbols: string[]): Promise<void> {
     try {
       await this.fetchBatch(symbols);
     } finally {
-      this.inFlightByBatch.delete(key);
+      for (const symbol of symbols) this.inFlightBySymbol.delete(symbol);
     }
   }
 
@@ -54,33 +61,25 @@ export class TossVenueResolverService {
         query: { symbols: symbols.join(',') },
       });
     } catch {
-      for (const symbol of symbols) {
-        this.logger.warn(`[TOSS ${symbol}] venue resolution failed; using US fallback`);
-      }
       return;
     }
 
-    const stockBySymbol = new Map<string, TossStockInfo>();
+    const requested = new Set(symbols);
     for (const stock of Array.isArray(response?.result) ? response.result : []) {
       const symbol = typeof stock?.symbol === 'string'
         ? stock.symbol.trim().toUpperCase()
         : '';
-      if (symbol) stockBySymbol.set(symbol, stock);
-    }
-    for (const symbol of symbols) {
-      const venue = this.mapVenue(stockBySymbol.get(symbol)?.market);
-      if (!venue) {
-        this.logger.warn(`[TOSS ${symbol}] venue unavailable; using US fallback`);
-        this.venueBySymbol.set(symbol, 'US');
-        continue;
+      const venue = this.mapVenue(stock?.market);
+      if (requested.has(symbol) && venue && !this.venueBySymbol.has(symbol)) {
+        this.venueBySymbol.set(symbol, venue);
       }
-      this.venueBySymbol.set(symbol, venue);
     }
   }
 
-  private mapVenue(market?: TossStockMarket): string | undefined {
+  private mapVenue(market?: TossStockMarket): TossCanonicalVenue | undefined {
     if (market === 'NASDAQ') return 'NASD';
-    if (market === 'NYSE' || market === 'AMEX') return market;
+    if (market === 'NYSE') return 'NYSE';
+    if (market === 'AMEX') return 'AMEX';
     return undefined;
   }
 }

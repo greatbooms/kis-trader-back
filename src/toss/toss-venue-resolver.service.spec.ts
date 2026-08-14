@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { TossBaseService } from './toss-base.service';
 import { TossVenueResolverService } from './toss-venue-resolver.service';
 import type { TossStockInfo, TossStockMarket } from './types';
@@ -6,16 +5,12 @@ import type { TossStockInfo, TossStockMarket } from './types';
 describe('TossVenueResolverService', () => {
   let base: { request: jest.Mock };
   let service: TossVenueResolverService;
-  let warn: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     base = { request: jest.fn() };
     service = new TossVenueResolverService(base as unknown as TossBaseService);
   });
-
-  afterEach(() => jest.restoreAllMocks());
 
   function stock(symbol: string, market: TossStockMarket): TossStockInfo {
     return {
@@ -30,6 +25,14 @@ describe('TossVenueResolverService', () => {
       currency: 'USD',
       sharesOutstanding: '1000000',
     };
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
   }
 
   it.each([
@@ -47,50 +50,84 @@ describe('TossVenueResolverService', () => {
     });
   });
 
-  it('warns and falls back to US for US_ETC', async () => {
-    base.request.mockResolvedValue({ result: [stock('OTCM', 'US_ETC')] });
+  it('does not cache non-canonical venue results', async () => {
+    base.request
+      .mockResolvedValueOnce({ result: [stock('OTCM', 'US_ETC')] })
+      .mockResolvedValueOnce({ result: [stock('OTCM', 'NASDAQ')] });
 
-    await expect(service.resolveVenues(['OTCM'])).resolves.toEqual(new Map([['OTCM', 'US']]));
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[TOSS OTCM\]/));
+    await expect(service.resolveVenues(['OTCM'])).resolves.toEqual(new Map());
+    await expect(service.resolveVenues(['OTCM'])).resolves.toEqual(new Map([['OTCM', 'NASD']]));
+    expect(base.request).toHaveBeenCalledTimes(2);
   });
 
-  it('warns and falls back to US when stock metadata resolution fails', async () => {
-    base.request.mockRejectedValue(new Error('stock metadata unavailable'));
+  it('coalesces overlapping symbols when the smaller batch completes first without downgrading cache', async () => {
+    const requests = new Map<string, ReturnType<typeof deferred<unknown>>>();
+    base.request.mockImplementation((_group, options) => {
+      const request = deferred<unknown>();
+      requests.set(options.query.symbols, request);
+      return request.promise;
+    });
 
-    await expect(service.resolveVenues(['AAPL'])).resolves.toEqual(new Map([['AAPL', 'US']]));
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[TOSS AAPL\]/));
+    const smaller = service.resolveVenues(['AAPL']);
+    const overlapping = service.resolveVenues(['AAPL', 'IBM']);
+
+    expect(base.request).toHaveBeenCalledTimes(2);
+    expect(Array.from(requests.keys())).toEqual(['AAPL', 'IBM']);
+    requests.get('AAPL')?.resolve({ result: [stock('AAPL', 'NASDAQ')] });
+    await expect(smaller).resolves.toEqual(new Map([['AAPL', 'NASD']]));
+    requests.get('IBM')?.resolve({ result: [stock('AAPL', 'US_ETC'), { market: 'NYSE' }] });
+    await expect(overlapping).resolves.toEqual(new Map([['AAPL', 'NASD']]));
+
+    await expect(service.resolveVenues(['AAPL'])).resolves.toEqual(new Map([['AAPL', 'NASD']]));
+    expect(base.request).toHaveBeenCalledTimes(2);
   });
 
-  it('warns and falls back to US for malformed stock metadata without failing the listing', async () => {
-    base.request.mockResolvedValue({ result: [{ market: 'NASDAQ' }] });
+  it('coalesces overlapping symbols when the larger request completes first without accepting extra symbols', async () => {
+    const requests = new Map<string, ReturnType<typeof deferred<unknown>>>();
+    base.request.mockImplementation((_group, options) => {
+      const request = deferred<unknown>();
+      requests.set(options.query.symbols, request);
+      return request.promise;
+    });
 
-    await expect(service.resolveVenues(['AAPL'])).resolves.toEqual(new Map([['AAPL', 'US']]));
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[TOSS AAPL\]/));
+    const smaller = service.resolveVenues(['AAPL']);
+    const overlapping = service.resolveVenues(['AAPL', 'IBM']);
+
+    requests.get('IBM')?.resolve({
+      result: [stock('IBM', 'NYSE'), stock('AAPL', 'AMEX')],
+    });
+    requests.get('AAPL')?.resolve({ result: [stock('AAPL', 'NASDAQ')] });
+
+    await expect(smaller).resolves.toEqual(new Map([['AAPL', 'NASD']]));
+    await expect(overlapping).resolves.toEqual(new Map([
+      ['AAPL', 'NASD'],
+      ['IBM', 'NYSE'],
+    ]));
+    expect(base.request).toHaveBeenCalledTimes(2);
+    expect(Array.from(requests.keys())).toEqual(['AAPL', 'IBM']);
   });
 
-  it('batches symbols, shares the in-flight batch, and caches it for later listings', async () => {
-    let resolveRequest!: (value: unknown) => void;
-    base.request.mockReturnValue(new Promise((resolve) => {
-      resolveRequest = resolve;
-    }));
-
-    const first = service.resolveVenues(['IBM', 'AAPL']);
-    const concurrent = service.resolveVenues(['AAPL', 'IBM']);
-    await Promise.resolve();
-
-    expect(base.request).toHaveBeenCalledTimes(1);
-    resolveRequest({ result: [stock('AAPL', 'NASDAQ'), stock('IBM', 'NYSE')] });
-    await expect(Promise.all([first, concurrent])).resolves.toEqual([
-      new Map([['IBM', 'NYSE'], ['AAPL', 'NASD']]),
-      new Map([['AAPL', 'NASD'], ['IBM', 'NYSE']]),
-    ]);
+  it('retries symbols omitted from a partial 200 response', async () => {
+    base.request
+      .mockResolvedValueOnce({ result: [stock('AAPL', 'NASDAQ')] })
+      .mockResolvedValueOnce({ result: [stock('IBM', 'NYSE')] });
 
     await expect(service.resolveVenues(['AAPL', 'IBM'])).resolves.toEqual(
-      new Map([['AAPL', 'NASD'], ['IBM', 'NYSE']]),
+      new Map([['AAPL', 'NASD']]),
     );
-    expect(base.request).toHaveBeenCalledTimes(1);
-    expect(base.request).toHaveBeenCalledWith('STOCK', expect.objectContaining({
-      query: { symbols: 'AAPL,IBM' },
+    await expect(service.resolveVenues(['IBM'])).resolves.toEqual(new Map([['IBM', 'NYSE']]));
+    expect(base.request).toHaveBeenNthCalledWith(2, 'STOCK', expect.objectContaining({
+      query: { symbols: 'IBM' },
     }));
+  });
+
+  it('leaves a failed lookup unresolved so a later call retries it', async () => {
+    base.request
+      .mockRejectedValueOnce(new Error('stock metadata unavailable'))
+      .mockResolvedValueOnce({ result: [stock('AAPL', 'NASDAQ')] });
+
+    await expect(service.resolveVenues(['AAPL'])).resolves.toEqual(new Map());
+    await expect(service.resolveVenues(['AAPL'])).resolves.toEqual(new Map([['AAPL', 'NASD']]));
+    expect(base.request).toHaveBeenCalledTimes(2);
   });
 });

@@ -124,7 +124,7 @@ export class TossBrokerService implements BrokerPort {
         price: order.orderPrice || 0,
         exchangeCode: order.exchangeCode,
       }));
-    return this.enrichVenues(unfilled, market);
+    return this.enrichVenues(unfilled, market, 'THROW');
   }
 
   async getOrderExecutions(
@@ -144,7 +144,7 @@ export class TossBrokerService implements BrokerPort {
       const mapped = this.mapOrder(order);
       byOrderId.set(mapped.orderNo, mapped);
     }
-    return this.enrichVenues(Array.from(byOrderId.values()), market);
+    return this.enrichVenues(Array.from(byOrderId.values()), market, 'THROW');
   }
 
   async getBalance(market: Market): Promise<BalanceItem[]> {
@@ -153,7 +153,7 @@ export class TossBrokerService implements BrokerPort {
       path: '/api/v1/holdings',
       accountScoped: true,
     });
-    return this.enrichVenues(this.mapHoldings(response.result, market), market);
+    return this.enrichVenues(this.mapHoldings(response.result, market), market, 'US');
   }
 
   async getDomesticBuyableAmount(): Promise<DomesticBuyableAmount> {
@@ -201,6 +201,7 @@ export class TossBrokerService implements BrokerPort {
       balance: await this.enrichVenues(
         this.mapHoldings(holdings.result, Market.OVERSEAS),
         Market.OVERSEAS,
+        'US',
       ),
       cashBalances: [{ currencyCode: 'USD', currencyName: '', amount: 0 }],
     };
@@ -377,13 +378,39 @@ export class TossBrokerService implements BrokerPort {
   private async enrichVenues<T extends { stockCode: string; exchangeCode?: string }>(
     items: T[],
     market: Market,
+    unresolvedPolicy: 'THROW' | 'US',
   ): Promise<T[]> {
     if (market !== Market.OVERSEAS || items.length === 0) return items;
-    const venues = await this.venueResolver.resolveVenues(items.map((item) => item.stockCode));
-    return items.map((item) => ({
-      ...item,
-      exchangeCode: venues.get(item.stockCode.trim().toUpperCase()) ?? 'US',
-    }));
+    const symbols = items.map((item) => item.stockCode.trim().toUpperCase());
+    let venues = new Map<string, string>();
+    try {
+      venues = await this.venueResolver.resolveVenues(symbols);
+    } catch {
+      // Resolver errors become the caller-specific fail-closed or best-effort policy below.
+    }
+    const unresolved = Array.from(new Set(
+      symbols.filter((symbol) => !this.isCanonicalVenue(venues.get(symbol))),
+    ));
+    if (unresolved.length > 0 && unresolvedPolicy === 'THROW') {
+      throw new Error(`Toss venue resolution failed for symbols: ${unresolved.map(
+        (symbol) => this.sanitizeSymbol(symbol),
+      ).join(', ')}`);
+    }
+    for (const symbol of unresolved) {
+      this.logger.warn(`[TOSS ${this.sanitizeSymbol(symbol)}] venue unresolved; using US fallback`);
+    }
+    return items.map((item) => {
+      const venue = venues.get(item.stockCode.trim().toUpperCase());
+      return { ...item, exchangeCode: this.isCanonicalVenue(venue) ? venue : 'US' };
+    });
+  }
+
+  private isCanonicalVenue(value: unknown): value is 'NASD' | 'NYSE' | 'AMEX' {
+    return value === 'NASD' || value === 'NYSE' || value === 'AMEX';
+  }
+
+  private sanitizeSymbol(value: string): string {
+    return value.replace(/[^A-Z0-9.-]/g, '?');
   }
 
   private mutationFailure(error: unknown): OrderResult {
