@@ -627,7 +627,7 @@ export class TradingOrchestrator {
 
   private async syncLatestMarketStateBeforeDailySummary(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
     try {
-      await this.marketStateSync.syncMarketPortfolioOnly(market);
+      await this.marketStateSync.syncMarketPortfolioOnly(market, { failOnAnyError: true });
       const latestPositions = await this.prisma.position.findMany({
         where: { market: market as Market },
       });

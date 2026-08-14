@@ -37,6 +37,6 @@
 
 1. Release 1: migration 27까지만 자동 적용되는 Phase 3 binary 배포(TOSS 비활성)
 2. 안정화 확인
-3. Release 2: 이 디렉토리의 migration을 `prisma/migrations/`로 승격한 뒤 배포
+3. Release 2: `prisma/schema.prisma`에서 legacy brokerless `@@unique` 4개를 제거하고, 이 디렉토리의 migration을 `prisma/migrations/`로 같은 release에 승격한 뒤 배포
 
 Release 2 이후에는 pre-broker binary rollback을 지원하지 않는다.

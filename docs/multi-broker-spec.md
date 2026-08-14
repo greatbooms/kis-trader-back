@@ -180,7 +180,7 @@ GraphQL/프론트: WatchStock CRUD input/object에 `broker` 필드 추가(기본
 4. Release 1의 Phase 3 binary를 배포해 auto-migrate로 migration 27만 적용한다. 이때 TOSS는 비활성 상태로 둔다.
 5. Phase 3 stability window 동안 KIS-only 주문, broker-scoped sync, approval/recovery, cash dual-write를 확인한다.
 6. 이 시점에도 migration 28은 계속 deferred 상태로 둔다.
-7. **동일 종목을 KIS와 TOSS에 동시에 보유/등록하기 직전**, Release 2에서 migration 28을 `prisma/migrations`로 승격한다.
+7. **동일 종목을 KIS와 TOSS에 동시에 보유/등록하기 직전**, Release 2에서 `prisma/schema.prisma`의 legacy brokerless `@@unique` 4개를 제거하고 migration 28을 `prisma/migrations`로 같은 release에 승격한다.
 8. Release 2를 배포해 다음 boot의 auto-migrate로 migration 28을 적용한다.
 9. 그 다음에만 TOSS를 enable 하고, 이미 KIS에 들고 있던 종목의 cross-broker 중복 등록을 허용한다.
 

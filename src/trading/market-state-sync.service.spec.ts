@@ -221,6 +221,19 @@ describe('MarketStateSyncService holiday checks', () => {
     );
   });
 
+  it('propagates a KIS-only portfolio sync failure by default', async () => {
+    const kis = {
+      broker: Broker.KIS,
+      getBalance: jest.fn().mockRejectedValue(new Error('KIS unavailable')),
+    };
+    const positionSync = { syncPositions: jest.fn() };
+    (service as any).registry = { getActive: jest.fn().mockReturnValue([kis]) };
+    (service as any).positionSyncService = positionSync;
+
+    await expect(service.syncMarketPortfolioOnly('DOMESTIC')).rejects.toThrow('KIS unavailable');
+    expect(positionSync.syncPositions).not.toHaveBeenCalled();
+  });
+
   it('warns and continues to the next active broker when a portfolio lookup fails', async () => {
     const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
     const kis = {
@@ -245,6 +258,33 @@ describe('MarketStateSyncService holiday checks', () => {
       Broker.TOSS,
       'OVERSEAS',
       tossBalance,
+    );
+  });
+
+  it('attempts every active broker then rejects when strict portfolio sync sees a broker failure', async () => {
+    const kisBalance = [{ stockCode: '005930' }];
+    const kis = {
+      broker: Broker.KIS,
+      getBalance: jest.fn().mockResolvedValue(kisBalance),
+    };
+    const toss = {
+      broker: Broker.TOSS,
+      getBalance: jest.fn().mockRejectedValue(new Error('TOSS unavailable')),
+    };
+    const positionSync = { syncPositions: jest.fn().mockResolvedValue(undefined) };
+    (service as any).registry = { getActive: jest.fn().mockReturnValue([kis, toss]) };
+    (service as any).positionSyncService = positionSync;
+
+    await expect(
+      service.syncMarketPortfolioOnly('OVERSEAS', { failOnAnyError: true }),
+    ).rejects.toThrow('TOSS unavailable');
+
+    expect(kis.getBalance).toHaveBeenCalledWith('OVERSEAS');
+    expect(toss.getBalance).toHaveBeenCalledWith('OVERSEAS');
+    expect(positionSync.syncPositions).toHaveBeenCalledWith(
+      Broker.KIS,
+      'OVERSEAS',
+      kisBalance,
     );
   });
 

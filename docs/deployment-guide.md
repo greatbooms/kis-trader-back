@@ -90,7 +90,7 @@ Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20
 4. Release 1의 Phase 3 binary를 배포해 auto-migrate로 migration 27만 적용합니다. 이때 TOSS는 비활성 상태로 둡니다.
 5. Phase 3 stability window 동안 KIS-only 주문·동기화, broker-scoped 데이터, approval/recovery, cash dual-write를 확인합니다.
 6. 이 기간에는 migration 28을 계속 deferred 상태로 유지합니다.
-7. **이미 KIS에 보유한 종목을 TOSS에도 보유/등록하려는 Release 2 직전**에만 migration 28을 `prisma/migrations`로 승격합니다.
+7. **이미 KIS에 보유한 종목을 TOSS에도 보유/등록하려는 Release 2 직전**에만 `prisma/schema.prisma`의 legacy brokerless `@@unique` 4개를 제거하고 migration 28을 `prisma/migrations`로 같은 release에 승격합니다.
 8. Release 2를 배포해 다음 boot의 auto-migrate로 migration 28을 적용합니다.
 9. 그 다음에만 TOSS broker switch를 활성화합니다.
 

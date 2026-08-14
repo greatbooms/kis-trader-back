@@ -857,6 +857,44 @@ describe('TradingOrchestrator', () => {
     jest.useRealTimers();
   });
 
+  it('does not build close daily summary and releases the claim when strict portfolio sync reports one broker failure', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
+    mockSlackService.isEnabled.mockReturnValue(true);
+    mockMarketStateSync.syncMarketPortfolioOnly.mockImplementation(async (_market, options) => {
+      if (options?.failOnAnyError) throw new Error('TOSS portfolio API unavailable');
+    });
+    mockPrisma.position.findMany.mockResolvedValue([
+      {
+        broker: Broker.KIS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 1,
+      },
+      {
+        broker: Broker.TOSS,
+        market: 'DOMESTIC',
+        exchangeCode: 'KRX',
+        stockCode: '005930',
+        quantity: 2,
+      },
+    ]);
+
+    await orchestrator.sendDomesticDailySummary();
+
+    expect(mockMarketStateSync.syncMarketPortfolioOnly).toHaveBeenCalledWith(
+      'DOMESTIC',
+      { failOnAnyError: true },
+    );
+    expect(mockSlackCommandsService.buildDailySummary).not.toHaveBeenCalled();
+    expect(mockSlackService.sendDailySummary).not.toHaveBeenCalled();
+    expect(mockPrisma.appSetting.delete).toHaveBeenCalledWith({
+      where: { key: 'daily-summary-sent:DOMESTIC:KRX:CLOSE:2026-06-24' },
+    });
+
+    jest.useRealTimers();
+  });
+
   it('does not send close daily summary and releases the claim when fail-on-any order sync reports one broker failure', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-06-24T06:40:00Z')); // 15:40 KST
     mockSlackService.isEnabled.mockReturnValue(true);

@@ -21,6 +21,7 @@ export { GridMeanReversionStrategyParams } from './grid-mean-reversion-strategy-
 export { BrokerScopedUnfilledOrder, PositionQuantitySnapshot } from './order-reconciliation.type';
 export { OrderReconciliationResult } from './order-reconciliation-result.type';
 export { OrderSyncOptions } from './order-sync-options.type';
+export { PortfolioSyncOptions } from './portfolio-sync-options.type';
 export { OrderSyncWindow } from './order-sync-window.type';
 export { DailySummaryScope } from './daily-summary-scope.type';
 export { BrokerContext } from './broker-context.type';

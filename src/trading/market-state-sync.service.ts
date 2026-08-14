@@ -7,7 +7,7 @@ import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { HolidayItem, UnfilledOrder } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP, MarketHours, getMarketHours } from '../kis/types/kis-config.types';
-import { BrokerScopedUnfilledOrder, PositionQuantitySnapshot } from './types';
+import { BrokerScopedUnfilledOrder, PortfolioSyncOptions, PositionQuantitySnapshot } from './types';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 import { OrderSyncService } from './order-sync.service';
 import { TradingOrderCancellationService } from './trading-order-cancellation.service';
@@ -115,15 +115,26 @@ export class MarketStateSyncService {
     );
   }
 
-  async syncMarketPortfolioOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    for (const port of this.registry.getActive()) {
+  async syncMarketPortfolioOnly(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    options: PortfolioSyncOptions = {},
+  ): Promise<void> {
+    const ports = this.registry.getActive();
+    const failures: unknown[] = [];
+
+    for (const port of ports) {
       try {
         const balance = await port.getBalance(market as Market);
         await this.positionSyncService.syncPositions(port.broker, market, balance);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`[${port.broker} ${market}] Portfolio sync failed: ${reason}`);
+        failures.push(error);
       }
+    }
+
+    if ((options.failOnAnyError || ports.length === 1) && failures.length > 0) {
+      throw failures[0];
     }
   }
 
