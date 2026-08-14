@@ -127,7 +127,9 @@ OAuth2 Client Credentials는 상태 없는 재발급이 가능하고 AUTH 그룹
 | `TOSS_CLIENT_SECRET` | `toss.clientSecret` | 토스 오픈API Client Secret |
 | `TOSS_ACCOUNT_NO` | `toss.accountNo` | 계좌번호 (`X-Tossinvest-Account` 헤더 값) |
 
-Phase 2에서 `configuration.ts`에 매핑 추가. 그 전에는 이 변수들을 읽는 코드가 없으므로 `.env`에 미리 넣어도 무해하고, 없어도 부팅에 영향 없다. 계좌 API 호출 시 `X-Tossinvest-Account` 헤더 필수.
+Phase 2에서 `configuration.ts`에 매핑 추가. 그 전에는 이 변수들을 읽는 코드가 없으므로 `.env`에 미리 넣어도 무해하고, 없어도 부팅에 영향 없다.
+
+**계좌 헤더 (Phase 2 구현 중 확정)**: `X-Tossinvest-Account` 헤더 값은 계좌번호가 아니라 `GET /api/v1/accounts` 응답의 정수 `accountSeq`다 (OpenAPI 1.2.14 실측). `TOSS_ACCOUNT_NO`는 사람이 아는 안정 식별자로 유지하고, 어댑터가 최초 계좌 API 사용 시 `/accounts`에서 `accountNo` 일치 계좌를 찾아 `accountSeq`를 in-memory 캐시한다. 일치 계좌가 없거나 `accountNo` 미설정 시 fail-closed throw. `getBrokerContext().accountHash`는 안정성을 위해 `accountNo` 기준 해시를 유지한다.
 
 ## 3. 신규 모듈: `src/toss/`
 
