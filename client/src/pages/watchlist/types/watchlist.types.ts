@@ -1,9 +1,10 @@
-import type { Market, StockSearchResult } from '@/graphql/generated'
+import type { Broker, Market, StockSearchResult } from '@/graphql/generated'
 
 // ── 관심종목 도메인 타입 ──
 
 export interface WatchStockItem {
   id: string
+  broker: Broker
   stockName: string
   stockCode: string
   market: string
@@ -25,6 +26,7 @@ export interface StrategyOption {
 }
 
 export interface AddWatchStockInput {
+  broker: Broker
   market: Market
   stockCode: string
   stockName: string

@@ -144,7 +144,10 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-medium">{trade.stockName}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-medium">{trade.stockName}</div>
+                            <Badge variant="outline">{trade.broker}</Badge>
+                          </div>
                           <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
                           <div className="mt-1 text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
                         </div>
@@ -218,7 +221,10 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                           <TableCell className="align-top py-2 text-xs whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
                           <TableCell className="align-top py-2 min-w-0">
                             <div className="font-medium truncate">{trade.stockName}</div>
-                            <div className="text-xs text-muted-foreground truncate">{trade.stockCode}</div>
+                            <div className="flex items-center gap-1">
+                              <div className="text-xs text-muted-foreground truncate">{trade.stockCode}</div>
+                              <Badge variant="outline">{trade.broker}</Badge>
+                            </div>
                           </TableCell>
                           <TableCell className="align-top py-2">
                             <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>

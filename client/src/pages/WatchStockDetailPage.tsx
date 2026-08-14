@@ -160,6 +160,8 @@ export function WatchStockDetailPage() {
         ? {
             stockCode: stock.stockCode,
             exchangeCode: stock.exchangeCode,
+            market: stock.market,
+            broker: stock.broker,
             limit: 20,
           }
         : undefined,
@@ -380,6 +382,7 @@ export function WatchStockDetailPage() {
           <Badge variant={stock.isActive ? 'success' : 'outline'}>
             {stock.isActive ? '활성' : '비활성'}
           </Badge>
+          <Badge variant="outline">{stock.broker}</Badge>
           {stock.strategyName && <Badge variant="info">{stock.strategyName}</Badge>}
           {stock.isActive && stock.strategyName && (
             <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
@@ -675,7 +678,10 @@ export function WatchStockDetailPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <CardTitle>오늘 실행 미리보기</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle>오늘 실행 미리보기</CardTitle>
+                <Badge variant="outline">{stock.broker}</Badge>
+              </div>
               <div className="flex items-end gap-2">
                 <div>
                   <label className="text-xs text-muted-foreground">가정 원금 (선택)</label>
@@ -920,6 +926,7 @@ export function WatchStockDetailPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
                         <div className="flex gap-2">
+                          <Badge variant="outline">{trade.broker}</Badge>
                           <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
                             {trade.side === 'BUY' ? '매수' : '매도'}
                           </Badge>
@@ -971,9 +978,12 @@ export function WatchStockDetailPage() {
                       <TableRow key={trade.id}>
                         <TableCell className="align-top whitespace-nowrap pr-3">{formatDate(trade.createdAt)}</TableCell>
                         <TableCell className="align-top whitespace-nowrap pr-3">
-                          <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
-                            {trade.side === 'BUY' ? '매수' : '매도'}
-                          </Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="outline">{trade.broker}</Badge>
+                            <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
+                              {trade.side === 'BUY' ? '매수' : '매도'}
+                            </Badge>
+                          </div>
                         </TableCell>
                         <TableCell className="align-top whitespace-nowrap pr-3">
                           {(() => {

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
-import { type Market, type StockSearchResult } from '@/graphql/generated'
+import { type Broker, type Market, type StockSearchResult } from '@/graphql/generated'
 import { StockSearchInput } from '@/components/StockSearchInput'
 import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
@@ -15,6 +15,7 @@ import type { AddWatchStockModalProps } from './types'
 
 export function AddWatchStockModal({ strategies, onSave, onClose }: AddWatchStockModalProps) {
   const [step, setStep] = useState(1)
+  const [broker, setBroker] = useState<Broker>('KIS')
   const [country, setCountry] = useState('')
   const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null)
   const [strategyName, setStrategyName] = useState('')
@@ -76,6 +77,7 @@ export function AddWatchStockModal({ strategies, onSave, onClose }: AddWatchStoc
       }
 
       await onSave({
+        broker,
         market: (selectedStock.market as Market) || selectedCountry?.market || 'DOMESTIC',
         stockCode: selectedStock.stockCode,
         stockName: selectedStock.stockName,
@@ -108,6 +110,14 @@ export function AddWatchStockModal({ strategies, onSave, onClose }: AddWatchStoc
         </div>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">증권사</label>
+            <Select value={broker} onChange={(e) => setBroker(e.target.value as Broker)}>
+              <option value="KIS">KIS</option>
+              <option value="TOSS">TOSS</option>
+            </Select>
+          </div>
+
           {/* Step 1: 국가 선택 */}
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">

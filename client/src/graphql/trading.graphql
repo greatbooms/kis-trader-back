@@ -27,6 +27,7 @@ query GetMarketRegime($input: MarketRegimeFilterInput!) {
 
 fragment BrokerOrderRecoveryItemFields on BrokerOrderRecoveryItemType {
   tradeRecordId
+  broker
   lifecycle
   market
   exchangeCode
@@ -63,8 +64,9 @@ query GetBrokerOrderRecoveryItems {
   }
 }
 
-query GetCurrentBrokerContextPreview {
-  currentBrokerContextPreview {
+query GetCurrentBrokerContextPreview($broker: Broker!) {
+  currentBrokerContextPreview(broker: $broker) {
+    broker
     environment
     maskedAccount
     contextToken

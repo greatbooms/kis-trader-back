@@ -130,7 +130,7 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
               <SummaryMetricCard
                 icon={<Wallet className="h-4 w-4 text-muted-foreground" />}
                 label="주문가능"
-                tooltip="KIS 주문가능금액입니다. 매도재사용 가능금액이 반영될 수 있습니다."
+                tooltip="증권사 주문가능금액입니다. 매도재사용 가능금액이 반영될 수 있습니다."
                 value={formatCurrencyByCode(scopedSummary.orderableCashBalance, scopedSummary.currencyCode)}
                 subValue={`출금가능 ${formatCurrencyByCode(scopedSummary.withdrawableCashBalance, scopedSummary.currencyCode)}`}
               />

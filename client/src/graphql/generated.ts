@@ -59,8 +59,11 @@ export type AuthPayload = {
   success: Scalars["Boolean"]["output"];
 };
 
+export type Broker = "KIS" | "TOSS";
+
 export type BrokerContextPreviewType = {
   __typename?: "BrokerContextPreviewType";
+  broker: Broker;
   contextToken: Scalars["String"]["output"];
   environment: BrokerEnvironment;
   maskedAccount: Scalars["String"]["output"];
@@ -104,6 +107,7 @@ export type BrokerOrderCandidateType = {
 
 export type BrokerOrderRecoveryItemType = {
   __typename?: "BrokerOrderRecoveryItemType";
+  broker: Broker;
   brokerContextAssigned: Scalars["Boolean"]["output"];
   brokerContextMatchesCurrent?: Maybe<Scalars["Boolean"]["output"]>;
   brokerOrderDate?: Maybe<Scalars["String"]["output"]>;
@@ -208,6 +212,7 @@ export type CreateSimulationInput = {
 };
 
 export type CreateWatchStockInput = {
+  broker?: Broker;
   exchangeCode: Scalars["String"]["input"];
   market: Market;
   maxCycles?: InputMaybe<Scalars["Int"]["input"]>;
@@ -249,6 +254,7 @@ export type LoginInput = {
 };
 
 export type ManualSellInput = {
+  broker?: InputMaybe<Broker>;
   exchangeCode: Scalars["String"]["input"];
   market: Scalars["String"]["input"];
   /** 매도 수량 (미지정 시 전량) */
@@ -449,6 +455,7 @@ export type OverseasQuoteInput = {
 export type PositionType = {
   __typename?: "PositionType";
   avgPrice: Scalars["Float"]["output"];
+  broker: Broker;
   currentPrice: Scalars["Float"]["output"];
   exchangeCode: Scalars["String"]["output"];
   id: Scalars["ID"]["output"];
@@ -498,6 +505,10 @@ export type Query = {
   watchStock?: Maybe<WatchStockType>;
   watchStockExecutionLogs: Array<WatchStockExecutionLogType>;
   watchStocks: Array<WatchStockType>;
+};
+
+export type QueryCurrentBrokerContextPreviewArgs = {
+  broker: Broker;
 };
 
 export type QueryMarketRegimeArgs = {
@@ -947,6 +958,7 @@ export type TechnicalRatingsType = {
 };
 
 export type TradeFilterInput = {
+  broker?: InputMaybe<Broker>;
   dateFrom?: InputMaybe<Scalars["String"]["input"]>;
   dateTo?: InputMaybe<Scalars["String"]["input"]>;
   exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
@@ -959,6 +971,7 @@ export type TradeFilterInput = {
 
 export type TradeRecordType = {
   __typename?: "TradeRecordType";
+  broker: Broker;
   brokerMessage?: Maybe<Scalars["String"]["output"]>;
   cancellationMessage?: Maybe<Scalars["String"]["output"]>;
   cancellationStatus?: Maybe<CancellationAttemptStatus>;
@@ -999,6 +1012,7 @@ export type UpdateSimulationStatusInput = {
 };
 
 export type UpdateWatchStockInput = {
+  broker?: InputMaybe<Broker>;
   cycle?: InputMaybe<Scalars["Int"]["input"]>;
   exchangeCode?: InputMaybe<Scalars["String"]["input"]>;
   isActive?: InputMaybe<Scalars["Boolean"]["input"]>;
@@ -1090,6 +1104,7 @@ export type WatchStockExecutionPreviewSignalType = {
 
 export type WatchStockType = {
   __typename?: "WatchStockType";
+  broker: Broker;
   createdAt: Scalars["DateTime"]["output"];
   cycle: Scalars["Float"]["output"];
   exchangeCode: Scalars["String"]["output"];
@@ -1565,6 +1580,7 @@ export type GetTradesQuery = {
   trades: Array<{
     __typename?: "TradeRecordType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -1595,6 +1611,7 @@ export type GetTradeQuery = {
   trade?: {
     __typename?: "TradeRecordType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -1625,6 +1642,7 @@ export type GetPositionsQuery = {
   positions: Array<{
     __typename?: "PositionType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -1951,6 +1969,7 @@ export type GetMarketRegimeQuery = {
 export type BrokerOrderRecoveryItemFieldsFragment = {
   __typename?: "BrokerOrderRecoveryItemType";
   tradeRecordId: string;
+  broker: Broker;
   lifecycle: string;
   market: Market;
   exchangeCode: string;
@@ -1990,6 +2009,7 @@ export type GetBrokerOrderRecoveryItemsQuery = {
   brokerOrderRecoveryItems: Array<{
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2022,13 +2042,14 @@ export type GetBrokerOrderRecoveryItemsQuery = {
 };
 
 export type GetCurrentBrokerContextPreviewQueryVariables = Exact<{
-  [key: string]: never;
+  broker: Broker;
 }>;
 
 export type GetCurrentBrokerContextPreviewQuery = {
   __typename?: "Query";
   currentBrokerContextPreview: {
     __typename?: "BrokerContextPreviewType";
+    broker: Broker;
     environment: BrokerEnvironment;
     maskedAccount: string;
     contextToken: string;
@@ -2047,6 +2068,7 @@ export type InspectBrokerOrderCandidatesMutation = {
     recoveryItem: {
       __typename?: "BrokerOrderRecoveryItemType";
       tradeRecordId: string;
+      broker: Broker;
       lifecycle: string;
       market: Market;
       exchangeCode: string;
@@ -2107,6 +2129,7 @@ export type AssignCurrentBrokerContextMutation = {
   assignCurrentBrokerContext: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2147,6 +2170,7 @@ export type LinkBrokerOrderCandidateMutation = {
   linkBrokerOrderCandidate: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2187,6 +2211,7 @@ export type ConfirmBrokerOrderNotSubmittedMutation = {
   confirmBrokerOrderNotSubmitted: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2227,6 +2252,7 @@ export type ConfirmBrokerOrderMatchesExistingMutation = {
   confirmBrokerOrderMatchesExisting: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2267,6 +2293,7 @@ export type InspectUnknownCancellationMutation = {
   inspectUnknownCancellation: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2307,6 +2334,7 @@ export type ConfirmCancellationNotAcceptedMutation = {
   confirmCancellationNotAccepted: {
     __typename?: "BrokerOrderRecoveryItemType";
     tradeRecordId: string;
+    broker: Broker;
     lifecycle: string;
     market: Market;
     exchangeCode: string;
@@ -2347,6 +2375,7 @@ export type GetWatchStocksQuery = {
   watchStocks: Array<{
     __typename?: "WatchStockType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -2375,6 +2404,7 @@ export type GetWatchStockQuery = {
   watchStock?: {
     __typename?: "WatchStockType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -2427,6 +2457,7 @@ export type CreateWatchStockMutation = {
   createWatchStock: {
     __typename?: "WatchStockType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -2454,6 +2485,7 @@ export type UpdateWatchStockMutation = {
   updateWatchStock: {
     __typename?: "WatchStockType";
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -2574,6 +2606,7 @@ export type ConvertWatchStockToInfiniteBuyV4Mutation = {
 export const BrokerOrderRecoveryItemFieldsFragmentDoc = gql`
   fragment BrokerOrderRecoveryItemFields on BrokerOrderRecoveryItemType {
     tradeRecordId
+    broker
     lifecycle
     market
     exchangeCode
@@ -4332,6 +4365,7 @@ export const GetTradesDocument = gql`
   query GetTrades($input: TradeFilterInput) {
     trades(input: $input) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -4443,6 +4477,7 @@ export const GetTradeDocument = gql`
   query GetTrade($id: ID!) {
     trade(id: $id) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -4555,6 +4590,7 @@ export const GetPositionsDocument = gql`
   query GetPositions($input: PositionsFilterInput) {
     positions(input: $input) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -5809,8 +5845,9 @@ export type GetBrokerOrderRecoveryItemsSuspenseQueryHookResult = ReturnType<
   typeof useGetBrokerOrderRecoveryItemsSuspenseQuery
 >;
 export const GetCurrentBrokerContextPreviewDocument = gql`
-  query GetCurrentBrokerContextPreview {
-    currentBrokerContextPreview {
+  query GetCurrentBrokerContextPreview($broker: Broker!) {
+    currentBrokerContextPreview(broker: $broker) {
+      broker
       environment
       maskedAccount
       contextToken
@@ -5830,14 +5867,22 @@ export const GetCurrentBrokerContextPreviewDocument = gql`
  * @example
  * const { data, loading, error } = useGetCurrentBrokerContextPreviewQuery({
  *   variables: {
+ *      broker: // value for 'broker'
  *   },
  * });
  */
 export function useGetCurrentBrokerContextPreviewQuery(
-  baseOptions?: ApolloReactHooks.QueryHookOptions<
+  baseOptions: ApolloReactHooks.QueryHookOptions<
     GetCurrentBrokerContextPreviewQuery,
     GetCurrentBrokerContextPreviewQueryVariables
-  >,
+  > &
+    (
+      | {
+          variables: GetCurrentBrokerContextPreviewQueryVariables;
+          skip?: boolean;
+        }
+      | { skip: boolean }
+    ),
 ) {
   const options = { ...defaultOptions, ...baseOptions };
   return ApolloReactHooks.useQuery<
@@ -6226,6 +6271,7 @@ export const GetWatchStocksDocument = gql`
   query GetWatchStocks($input: WatchStocksFilterInput) {
     watchStocks(input: $input) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -6337,6 +6383,7 @@ export const GetWatchStockDocument = gql`
   query GetWatchStock($id: ID!) {
     watchStock(id: $id) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -6563,6 +6610,7 @@ export const CreateWatchStockDocument = gql`
   mutation CreateWatchStock($input: CreateWatchStockInput!) {
     createWatchStock(input: $input) {
       id
+      broker
       market
       exchangeCode
       stockCode
@@ -6617,6 +6665,7 @@ export const UpdateWatchStockDocument = gql`
   mutation UpdateWatchStock($id: ID!, $input: UpdateWatchStockInput!) {
     updateWatchStock(id: $id, input: $input) {
       id
+      broker
       market
       exchangeCode
       stockCode

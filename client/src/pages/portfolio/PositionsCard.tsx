@@ -62,6 +62,7 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
       const { data: result } = await manualSell({
         variables: {
           input: {
+            broker: pos.broker,
             stockCode: pos.stockCode,
             market: pos.market,
             exchangeCode: pos.exchangeCode,
@@ -106,7 +107,10 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
                   <div key={pos.id} className="rounded-lg border border-border p-4 space-y-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="font-medium">{pos.stockName}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium">{pos.stockName}</div>
+                          <Badge variant="outline">{pos.broker}</Badge>
+                        </div>
                         <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
                       </div>
                       <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
@@ -199,7 +203,10 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
                       <TableRow key={pos.id}>
                         <TableCell className="align-top min-w-0">
                           <div className="font-medium truncate">{pos.stockName}</div>
-                          <div className="text-xs text-muted-foreground truncate">{pos.stockCode}</div>
+                          <div className="flex items-center gap-1">
+                            <div className="text-xs text-muted-foreground truncate">{pos.stockCode}</div>
+                            <Badge variant="outline">{pos.broker}</Badge>
+                          </div>
                         </TableCell>
                         <TableCell className="align-top">
                           <Badge variant={pos.market === 'DOMESTIC' ? 'default' : 'info'}>
