@@ -7,6 +7,7 @@
 - `configuration.ts` — `process.env` → 설정 트리 변환. 다음 네임스페이스 제공:
   - `port` — HTTP 포트 (기본 3000)
   - `kis.*` — KIS API (`appKey`, `appSecret`, `accountNo`, `prodCode`, `env: 'paper' | 'prod'`, `debugRawBalance`)
+  - `toss.*` — 토스증권 Open API (`clientId`, `clientSecret`, `accountNo`)
   - `openDart.apiKey` — OpenDART (한국 공시)
   - `sec.userAgent` — SEC EDGAR (이메일 포함 UA 필수)
   - `fred.apiKey` — FRED (St. Louis Fed)

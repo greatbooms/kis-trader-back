@@ -28,3 +28,31 @@ describe('slack.approverUserIds', () => {
     expect(configuration().slack.approverUserIds).toEqual(['U123', 'U456', 'U789']);
   });
 });
+
+describe('toss', () => {
+  afterEach(() => {
+    delete process.env.TOSS_CLIENT_ID;
+    delete process.env.TOSS_CLIENT_SECRET;
+    delete process.env.TOSS_ACCOUNT_NO;
+  });
+
+  it('defaults credentials and account to empty strings', () => {
+    expect(configuration().toss).toEqual({
+      clientId: '',
+      clientSecret: '',
+      accountNo: '',
+    });
+  });
+
+  it('maps Toss environment variables', () => {
+    process.env.TOSS_CLIENT_ID = 'client-id';
+    process.env.TOSS_CLIENT_SECRET = 'client-secret';
+    process.env.TOSS_ACCOUNT_NO = 'account-no';
+
+    expect(configuration().toss).toEqual({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountNo: 'account-no',
+    });
+  });
+});
