@@ -45,7 +45,10 @@ describe('TossAuthService', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       'https://openapi.tossinvest.com/oauth2/token',
       expect.any(URLSearchParams),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10_000,
+      },
     );
     expect(String(mockedAxios.post.mock.calls[0][1])).toBe(
       'grant_type=client_credentials&client_id=client-id&client_secret=client-secret',
@@ -98,14 +101,18 @@ describe('TossAuthService', () => {
     expect(mockedAxios.post).toHaveBeenCalledTimes(2);
   });
 
-  it('throws a sanitized error and allows a later retry', async () => {
+  it('clears a timed-out issuance and retries successfully on the next call', async () => {
     mockedAxios.post
-      .mockRejectedValueOnce(new Error('request exposed client-secret'))
+      .mockRejectedValueOnce(Object.assign(
+        new Error('timeout exposed client-secret'),
+        { code: 'ETIMEDOUT' },
+      ))
       .mockResolvedValueOnce(tokenResponse('token-2'));
 
     const error = await service.getAccessToken().catch((reason) => reason);
     expect(error).toEqual(new Error('Toss OAuth2 token request failed'));
     expect(error.message).not.toContain('client-secret');
     await expect(service.getAccessToken()).resolves.toBe('token-2');
+    expect(mockedAxios.post).toHaveBeenCalledTimes(2);
   });
 });

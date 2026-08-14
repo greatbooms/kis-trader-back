@@ -42,7 +42,10 @@ export class TossAuthService {
       const response = await axios.post<TossTokenResponse>(
         `${TOSS_BASE_URL}/oauth2/token`,
         body,
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 10_000,
+        },
       );
       const token = response.data?.access_token?.trim();
       const expiresIn = response.data?.expires_in;

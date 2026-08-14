@@ -16,7 +16,8 @@ const GROUP_INTERVAL_MS: Record<TossApiGroup, number> = {
   ACCOUNT: 1_000,
   ASSET: 200,
   ORDER: 100,
-  ORDER_INFO: 170,
+  ORDER_INFO: 340, // D10: 정합 확인 전까지 장중 3 TPS 기준을 종일 적용한다.
+  STOCK: 200,
   MARKET_DATA: 67,
 };
 

@@ -4,6 +4,7 @@ export type TossApiGroup =
   | 'ASSET'
   | 'ORDER'
   | 'ORDER_INFO'
+  | 'STOCK'
   | 'MARKET_DATA';
 
 export interface TossRequestOptions {

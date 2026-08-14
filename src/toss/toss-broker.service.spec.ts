@@ -1,14 +1,18 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Broker, BrokerEnvironment, Market } from '@prisma/client';
+import { TradingBrokerOrderMatcherService } from '../trading/trading-broker-order-matcher.service';
 import { TossBaseService } from './toss-base.service';
 import { TossBrokerService } from './toss-broker.service';
 import { TossMutationError } from './toss-mutation.error';
+import { TossVenueResolverService } from './toss-venue-resolver.service';
 import type { TossOrder } from './types/toss-order.type';
 
 describe('TossBrokerService', () => {
   let service: TossBrokerService;
   let base: { request: jest.Mock };
+  let config: ConfigService;
+  let venueResolver: { resolveVenues: jest.Mock };
   let warn: jest.SpyInstance;
 
   beforeEach(() => {
@@ -16,10 +20,19 @@ describe('TossBrokerService', () => {
     warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
     base = { request: jest.fn() };
-    const config = {
+    config = {
       get: jest.fn((key: string) => key === 'toss.accountNo' ? 'account-seq' : undefined),
     } as unknown as ConfigService;
-    service = new TossBrokerService(base as unknown as TossBaseService, config);
+    venueResolver = {
+      resolveVenues: jest.fn(async (symbols: string[]) => new Map(
+        symbols.map((symbol) => [symbol, 'US']),
+      )),
+    };
+    service = new TossBrokerService(
+      base as unknown as TossBaseService,
+      config,
+      venueResolver as unknown as TossVenueResolverService,
+    );
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -197,6 +210,119 @@ describe('TossBrokerService', () => {
       price: 185.5,
       exchangeCode: 'US',
     }]);
+  });
+
+  it('matches a stored NASD recovery tuple after enriching a Toss execution', async () => {
+    base.request.mockImplementation((_group, options) => Promise.resolve(
+      ordersResponse(options.query.status === 'OPEN' ? [order()] : []),
+    ));
+    venueResolver.resolveVenues.mockResolvedValue(new Map([['AAPL', 'NASD']]));
+    const matcher = new TradingBrokerOrderMatcherService(
+      {
+        getCurrentContext: jest.fn(() => ({
+          environment: BrokerEnvironment.PROD,
+          accountHash: 'stable-account-hash',
+        })),
+      } as never,
+      { get: jest.fn(() => service) } as never,
+    );
+
+    const candidates = await matcher.findSubmissionCandidates({
+      tradeRecordId: 'stored-toss-order',
+      broker: Broker.TOSS,
+      market: Market.OVERSEAS,
+      exchangeCode: 'NASD',
+      stockCode: 'AAPL',
+      side: 'BUY',
+      quantity: 5,
+      submissionStartedAt: new Date('2026-08-14T00:30:01.000Z'),
+      brokerEnvironment: BrokerEnvironment.PROD,
+      brokerAccountHash: 'stable-account-hash',
+    });
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        orderNo: 'order-1',
+        stockCode: 'AAPL',
+        exchangeCode: 'NASD',
+      }),
+    ]);
+  });
+
+  it('enriches NYSE and AMEX executions with canonical venues', async () => {
+    base.request.mockImplementation((_group, options) => Promise.resolve(
+      ordersResponse(options.query.status === 'OPEN'
+        ? [order({ orderId: 'nyse', symbol: 'IBM' }), order({ orderId: 'amex', symbol: 'SPY' })]
+        : []),
+    ));
+    venueResolver.resolveVenues.mockResolvedValue(new Map([
+      ['IBM', 'NYSE'],
+      ['SPY', 'AMEX'],
+    ]));
+
+    const executions = await service.getOrderExecutions(
+      Market.OVERSEAS,
+      '20260814',
+      '20260814',
+    );
+
+    expect(executions.map(({ stockCode, exchangeCode }) => ({ stockCode, exchangeCode }))).toEqual([
+      { stockCode: 'IBM', exchangeCode: 'NYSE' },
+      { stockCode: 'SPY', exchangeCode: 'AMEX' },
+    ]);
+  });
+
+  it('returns KRX for domestic listings without overseas venue resolution', async () => {
+    base.request.mockResolvedValue(ordersResponse([
+      order({ orderId: 'domestic', symbol: '005930', currency: 'KRW' }),
+    ]));
+
+    await expect(service.getUnfilledOrders(Market.DOMESTIC)).resolves.toEqual([
+      expect.objectContaining({ stockCode: '005930', exchangeCode: 'KRX' }),
+    ]);
+    expect(venueResolver.resolveVenues).not.toHaveBeenCalled();
+  });
+
+  it('reuses batched stock metadata on a second listing call', async () => {
+    const integrationBase = {
+      request: jest.fn((_group, options) => {
+        if (options.path === '/api/v1/stocks') {
+          return Promise.resolve({
+            result: [{
+              symbol: 'AAPL',
+              name: 'Apple Inc.',
+              englishName: 'Apple Inc.',
+              isinCode: 'US0378331005',
+              market: 'NASDAQ',
+              securityType: 'STOCK',
+              isCommonShare: true,
+              status: 'ACTIVE',
+              currency: 'USD',
+              sharesOutstanding: '1000000',
+            }],
+          });
+        }
+        return Promise.resolve(ordersResponse([order()]));
+      }),
+    };
+    const actualResolver = new TossVenueResolverService(
+      integrationBase as unknown as TossBaseService,
+    );
+    const broker = new TossBrokerService(
+      integrationBase as unknown as TossBaseService,
+      config,
+      actualResolver,
+    );
+
+    await expect(broker.getUnfilledOrders(Market.OVERSEAS)).resolves.toEqual([
+      expect.objectContaining({ stockCode: 'AAPL', exchangeCode: 'NASD' }),
+    ]);
+    await expect(broker.getUnfilledOrders(Market.OVERSEAS)).resolves.toEqual([
+      expect.objectContaining({ stockCode: 'AAPL', exchangeCode: 'NASD' }),
+    ]);
+    expect(integrationBase.request.mock.calls.filter(([, options]) => (
+      options.path === '/api/v1/stocks'
+    ))).toHaveLength(1);
   });
 
   it('maps every specified Toss order status', async () => {

@@ -15,6 +15,7 @@ import { BrokerMutationError } from '../common/broker-mutation.error';
 import { hashBrokerAccount } from '../common/utils/broker-account-hash.util';
 import type { TradingSignal } from '../trading/types';
 import { TossBaseService } from './toss-base.service';
+import { TossVenueResolverService } from './toss-venue-resolver.service';
 import type {
   TossAccount,
   TossApiResponse,
@@ -41,6 +42,7 @@ export class TossBrokerService implements BrokerPort {
   constructor(
     private readonly base: TossBaseService,
     private readonly config: ConfigService,
+    private readonly venueResolver: TossVenueResolverService,
   ) {}
 
   async submitOrder(signal: TradingSignal): Promise<OrderResult> {
@@ -110,7 +112,7 @@ export class TossBrokerService implements BrokerPort {
 
   async getUnfilledOrders(market: Market): Promise<UnfilledOrder[]> {
     const orders = await this.readOrders('OPEN');
-    return orders
+    const unfilled = orders
       .filter((order) => this.matchesMarket(order.currency, market))
       .map((order) => this.mapOrder(order))
       .filter((order) => order.remainingQuantity > 0)
@@ -122,6 +124,7 @@ export class TossBrokerService implements BrokerPort {
         price: order.orderPrice || 0,
         exchangeCode: order.exchangeCode,
       }));
+    return this.enrichVenues(unfilled, market);
   }
 
   async getOrderExecutions(
@@ -141,7 +144,7 @@ export class TossBrokerService implements BrokerPort {
       const mapped = this.mapOrder(order);
       byOrderId.set(mapped.orderNo, mapped);
     }
-    return Array.from(byOrderId.values());
+    return this.enrichVenues(Array.from(byOrderId.values()), market);
   }
 
   async getBalance(market: Market): Promise<BalanceItem[]> {
@@ -150,7 +153,7 @@ export class TossBrokerService implements BrokerPort {
       path: '/api/v1/holdings',
       accountScoped: true,
     });
-    return this.mapHoldings(response.result, market);
+    return this.enrichVenues(this.mapHoldings(response.result, market), market);
   }
 
   async getDomesticBuyableAmount(): Promise<DomesticBuyableAmount> {
@@ -195,7 +198,10 @@ export class TossBrokerService implements BrokerPort {
     this.number(exchangeRate.result?.rate, 'Toss exchange rate');
 
     return {
-      balance: this.mapHoldings(holdings.result, Market.OVERSEAS),
+      balance: await this.enrichVenues(
+        this.mapHoldings(holdings.result, Market.OVERSEAS),
+        Market.OVERSEAS,
+      ),
       cashBalances: [{ currencyCode: 'USD', currencyName: '', amount: 0 }],
     };
   }
@@ -366,6 +372,18 @@ export class TossBrokerService implements BrokerPort {
       throw new Error('Unexpected Toss buying-power currency');
     }
     return this.number(response.result.cashBuyingPower, 'Toss cash buying power');
+  }
+
+  private async enrichVenues<T extends { stockCode: string; exchangeCode?: string }>(
+    items: T[],
+    market: Market,
+  ): Promise<T[]> {
+    if (market !== Market.OVERSEAS || items.length === 0) return items;
+    const venues = await this.venueResolver.resolveVenues(items.map((item) => item.stockCode));
+    return items.map((item) => ({
+      ...item,
+      exchangeCode: venues.get(item.stockCode.trim().toUpperCase()) ?? 'US',
+    }));
   }
 
   private mutationFailure(error: unknown): OrderResult {
