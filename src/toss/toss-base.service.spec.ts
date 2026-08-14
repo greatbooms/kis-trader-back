@@ -114,6 +114,17 @@ describe('TossBaseService', () => {
     expect(mockedAxios.request).toHaveBeenCalledTimes(1);
   });
 
+  it('matches a dashed configured account number to an undashed API account number', async () => {
+    accountNo = '151-01-123456';
+    mockedAxios.request.mockResolvedValue({
+      data: {
+        result: [{ accountNo: '15101123456', accountSeq: 42, accountType: 'BROKERAGE' }],
+      },
+    });
+
+    await expect(settle(service.resolveAccountSeq())).resolves.toBe(42);
+  });
+
   it('shares one account resolution request between concurrent callers', async () => {
     mockedAxios.request.mockResolvedValue({
       data: {
@@ -162,10 +173,13 @@ describe('TossBaseService', () => {
     );
   });
 
-  it('fails closed when toss.accountNo is unset', async () => {
-    accountNo = '  ';
+  it.each([undefined, '  ', '---'])('fails closed when toss.accountNo has no digits (%p)', async (value) => {
+    accountNo = value;
 
-    await expect(service.resolveAccountSeq()).rejects.toThrow('Toss account resolution failed');
+    const errorPromise = service.resolveAccountSeq().catch((error) => error);
+    const error = await settle(errorPromise);
+
+    expect(error).toEqual(new Error('Toss account resolution failed'));
     expect(mockedAxios.request).not.toHaveBeenCalled();
   });
 
@@ -188,6 +202,23 @@ describe('TossBaseService', () => {
         result: [
           { accountNo: '12345678901', accountSeq: 7, accountType: 'BROKERAGE' },
           { accountNo: '12345678901', accountSeq: 8, accountType: 'BROKERAGE' },
+        ],
+      },
+    });
+
+    const errorPromise = service.resolveAccountSeq().catch((error) => error);
+    const error = await settle(errorPromise);
+
+    expect(error).toEqual(new Error('Toss account resolution failed'));
+  });
+
+  it('fails closed when two API account numbers collide after digit normalization', async () => {
+    accountNo = '151-01-123456';
+    mockedAxios.request.mockResolvedValue({
+      data: {
+        result: [
+          { accountNo: '15101123456', accountSeq: 7, accountType: 'BROKERAGE' },
+          { accountNo: '151-01-123456', accountSeq: 8, accountType: 'BROKERAGE' },
         ],
       },
     });

@@ -107,7 +107,7 @@ export class TossBaseService {
   }
 
   private async fetchAccountSeq(): Promise<number> {
-    const accountNo = this.config.get<string>('toss.accountNo')?.trim();
+    const accountNo = this.config.get<string>('toss.accountNo')?.replace(/\D/g, '');
     if (!accountNo) throw new Error('Toss account resolution failed');
 
     const response = await this.request<TossApiResponse<TossAccount[]>>('ACCOUNT', {
@@ -116,7 +116,10 @@ export class TossBaseService {
     });
     if (!Array.isArray(response.result)) throw new Error('Toss account resolution failed');
 
-    const matches = response.result.filter((account) => account.accountNo === accountNo);
+    const matches = response.result.filter((account) => (
+      typeof account.accountNo === 'string'
+      && account.accountNo.replace(/\D/g, '') === accountNo
+    ));
     if (matches.length !== 1 || !Number.isInteger(matches[0].accountSeq)) {
       throw new Error('Toss account resolution failed');
     }
