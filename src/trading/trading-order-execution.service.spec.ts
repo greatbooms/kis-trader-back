@@ -1,19 +1,68 @@
 import { Logger } from '@nestjs/common';
-import { Market, OrderStatus, OrderType, Side } from '@prisma/client';
-import { TradingBrokerOrderSubmissionService } from './trading-broker-order-submission.service';
+import { Broker, Market, OrderStatus, OrderType, Side } from '@prisma/client';
 import { TradingOrderExecutionService } from './trading-order-execution.service';
 
 describe('TradingOrderExecutionService', () => {
-  const submissionGateway = (domestic: unknown = {}, overseas: unknown = {}) => (
-    new TradingBrokerOrderSubmissionService(domestic as never, overseas as never)
-  );
+  const submissionGateway = (domestic: any = {}, overseas: any = {}) => ({
+    isActive: jest.fn().mockReturnValue(true),
+    submit: jest.fn((signal) => {
+      if (signal.market === Market.DOMESTIC) {
+        return signal.side === Side.BUY
+          ? domestic.orderBuy(signal.stockCode, signal.quantity, signal.price, signal.orderDivision)
+          : domestic.orderSell(signal.stockCode, signal.quantity, signal.price, signal.orderDivision);
+      }
+      return signal.side === Side.BUY
+        ? overseas.orderBuy(
+          signal.exchangeCode,
+          signal.stockCode,
+          signal.quantity,
+          signal.price || 0,
+          signal.orderDivision,
+        )
+        : overseas.orderSell(
+          signal.exchangeCode,
+          signal.stockCode,
+          signal.quantity,
+          signal.price || 0,
+          signal.orderDivision,
+        );
+    }),
+  });
   const noopFailureNotifier = () => ({ notify: jest.fn().mockResolvedValue(undefined) });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
+  it('fails closed before admission when an automatic signal has no broker', async () => {
+    const guard = { admit: jest.fn() };
+    const positionRefresh = { refresh: jest.fn() };
+    const service = new TradingOrderExecutionService(
+      {} as never,
+      { submit: jest.fn() } as never,
+      { isEnabled: jest.fn().mockReturnValue(true) } as never,
+      { getCurrentContext: jest.fn() } as never,
+      guard as never,
+      positionRefresh as never,
+      {} as never,
+      noopFailureNotifier() as never,
+    );
+
+    await expect(service.execute({
+      market: 'DOMESTIC',
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      side: 'BUY',
+      quantity: 1,
+      reason: 'missing broker',
+    })).resolves.toBe(false);
+
+    expect(guard.admit).not.toHaveBeenCalled();
+    expect(positionRefresh.refresh).not.toHaveBeenCalled();
+  });
+
   it('persists and submits the canonical instrument returned by the admission guard', async () => {
+    const positionRefresh = { refresh: jest.fn().mockResolvedValue([]) };
     const tx = {
       tradeRecord: {
         create: jest.fn().mockResolvedValue({ id: 'trade-canonical' }),
@@ -52,18 +101,20 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.TOSS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
         }),
       } as never,
       guard as never,
-      { refresh: jest.fn().mockResolvedValue([]) } as never,
+      positionRefresh as never,
       { markSubmissionUnknown: jest.fn() } as never,
       noopFailureNotifier() as never,
     );
 
     await expect(service.execute({
+      broker: Broker.TOSS,
       market: 'OVERSEAS',
       exchangeCode: ' nasd ',
       stockCode: ' aapl ',
@@ -75,12 +126,14 @@ describe('TradingOrderExecutionService', () => {
 
     expect(tx.tradeRecord.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        broker: Broker.TOSS,
         market: Market.OVERSEAS,
         exchangeCode: 'NASD',
         stockCode: 'AAPL',
       }),
     });
     expect(overseas.orderBuy).toHaveBeenCalledWith('NASD', 'AAPL', 1, 250, undefined);
+    expect(positionRefresh.refresh).toHaveBeenCalledWith(Broker.TOSS, 'OVERSEAS');
   });
 
   it('cancels the claimed intent when the broker account changes immediately before POST', async () => {
@@ -101,9 +154,9 @@ describe('TradingOrderExecutionService', () => {
     const brokerContext = {
       getCurrentContext: jest
         .fn()
-        .mockReturnValueOnce({ environment: 'PROD', accountHash: 'account-a' })
-        .mockReturnValueOnce({ environment: 'PROD', accountHash: 'account-a' })
-        .mockReturnValueOnce({ environment: 'PROD', accountHash: 'account-b' }),
+        .mockReturnValueOnce({ broker: Broker.KIS, environment: 'PROD', accountHash: 'account-a' })
+        .mockReturnValueOnce({ broker: Broker.KIS, environment: 'PROD', accountHash: 'account-a' })
+        .mockReturnValueOnce({ broker: Broker.KIS, environment: 'PROD', accountHash: 'account-b' }),
     };
     const service = new TradingOrderExecutionService(
       prisma as never,
@@ -125,6 +178,7 @@ describe('TradingOrderExecutionService', () => {
       side: 'BUY',
       quantity: 1,
       price: 70_000,
+      broker: Broker.KIS,
       reason: 'context switch safety',
     })).resolves.toBe(false);
 
@@ -140,7 +194,7 @@ describe('TradingOrderExecutionService', () => {
       data: {
         status: OrderStatus.CANCELLED,
         submissionStartedAt: null,
-        brokerMessage: 'KIS 계좌 변경으로 주문 취소',
+        brokerMessage: '브로커 컨텍스트 변경으로 주문 취소',
       },
     });
     expect(domestic.orderBuy).not.toHaveBeenCalled();
@@ -174,6 +228,7 @@ describe('TradingOrderExecutionService', () => {
       liveSwitch as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PROD',
           accountHash: 'account-a',
         }),
@@ -193,6 +248,7 @@ describe('TradingOrderExecutionService', () => {
       side: 'BUY',
       quantity: 1,
       price: 70_000,
+      broker: Broker.KIS,
       reason: 'live switch safety',
     })).resolves.toBe(false);
 
@@ -211,6 +267,83 @@ describe('TradingOrderExecutionService', () => {
       },
     });
     expect(domestic.orderBuy).not.toHaveBeenCalled();
+  });
+
+  it('cancels the exact automatic submission claim when its broker becomes inactive before POST', async () => {
+    const tx = {
+      tradeRecord: {
+        create: jest.fn().mockResolvedValue({ id: 'trade-broker-disabled' }),
+      },
+    };
+    const prisma = {
+      tradeRecord: {
+        updateMany: jest
+          .fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 1 }),
+      },
+    };
+    const orderSubmission = {
+      isActive: jest.fn()
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false),
+      submit: jest.fn().mockResolvedValue({
+        outcome: 'ACCEPTED',
+        success: true,
+        orderNo: 'must-not-submit',
+        brokerOrderDate: '20260714',
+        orderTime: '101112',
+        message: 'accepted',
+      }),
+    };
+    const recovery = { markSubmissionUnknown: jest.fn() };
+    const service = new TradingOrderExecutionService(
+      prisma as never,
+      orderSubmission as never,
+      { isEnabled: jest.fn().mockReturnValue(true) } as never,
+      {
+        getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.TOSS,
+          environment: 'PROD',
+          accountHash: 'account-a',
+        }),
+      } as never,
+      {
+        admit: jest.fn().mockImplementation(async (_key, createWithTx) => createWithTx(tx)),
+      } as never,
+      { refresh: jest.fn().mockResolvedValue([]) } as never,
+      recovery as never,
+      noopFailureNotifier() as never,
+    );
+
+    await expect(service.execute({
+      market: 'DOMESTIC',
+      exchangeCode: 'KRX',
+      stockCode: '005930',
+      side: 'BUY',
+      quantity: 1,
+      price: 70_000,
+      broker: Broker.TOSS,
+      reason: 'broker kill switch safety',
+    })).resolves.toBe(false);
+
+    const submissionStartedAt = prisma.tradeRecord.updateMany.mock.calls[0][0].data
+      .submissionStartedAt;
+    expect(prisma.tradeRecord.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: 'trade-broker-disabled',
+        status: OrderStatus.SUBMITTING,
+        submissionStartedAt,
+      },
+      data: {
+        status: OrderStatus.CANCELLED,
+        submissionStartedAt: null,
+        brokerMessage: '브로커 비활성화로 주문 취소',
+      },
+    });
+    expect(orderSubmission.submit).not.toHaveBeenCalled();
+    expect(recovery.markSubmissionUnknown).not.toHaveBeenCalled();
   });
 
   it('creates an automatic intent as SUBMITTING with broker context before submission claim', async () => {
@@ -236,6 +369,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -256,6 +390,7 @@ describe('TradingOrderExecutionService', () => {
           side: 'BUY',
           quantity: 1,
           price: 70_000,
+          broker: Broker.KIS,
           reason: 'ordinary buy',
         },
         'daily-dca',
@@ -266,6 +401,7 @@ describe('TradingOrderExecutionService', () => {
 
     expect(guard.admit).toHaveBeenCalledWith(
       {
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -326,6 +462,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -346,12 +483,14 @@ describe('TradingOrderExecutionService', () => {
           side: 'BUY',
           quantity: 1,
           price: 70_000,
+          broker: Broker.KIS,
           reason: 'ordinary buy',
         },
         'daily-dca',
         {
           watchStock: {
             id: 'ws-accepted',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -426,6 +565,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -447,12 +587,14 @@ describe('TradingOrderExecutionService', () => {
           stockCode: '005930',
           side: 'BUY',
           quantity: 1,
+          broker: Broker.KIS,
           reason: 'ordinary buy',
         },
         'daily-dca',
         {
           watchStock: {
             id: 'ws-rejected',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -521,6 +663,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -539,11 +682,13 @@ describe('TradingOrderExecutionService', () => {
       stockCode: '005930',
       side: 'BUY' as const,
       quantity: 1,
+      broker: Broker.KIS,
       reason: 'ordinary buy',
     };
     const rejectedContext = {
       watchStock: {
         id: 'ws-rejected',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -594,6 +739,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -613,10 +759,12 @@ describe('TradingOrderExecutionService', () => {
       stockCode: '005930',
       side: 'BUY',
       quantity: 1,
+      broker: Broker.KIS,
       reason: 'ordinary buy',
     }, 'daily-dca', {
       watchStock: {
         id: 'ws-audit-failure',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -667,6 +815,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -686,10 +835,12 @@ describe('TradingOrderExecutionService', () => {
       stockCode: '005930',
       side: 'BUY',
       quantity: 1,
+      broker: Broker.KIS,
       reason: 'ordinary buy',
     }, 'daily-dca', {
       watchStock: {
         id: 'ws-admission-log-failure',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -702,7 +853,7 @@ describe('TradingOrderExecutionService', () => {
     expect(prisma.tradeRecord.updateMany).toHaveBeenCalledTimes(2);
     expect(recovery.markSubmissionUnknown).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      '[005930] Failed to write admitted-order mirror: admission audit unavailable',
+      '[KIS 005930] Failed to write admitted-order mirror: admission audit unavailable',
     );
     warnSpy.mockRestore();
   });
@@ -736,6 +887,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -757,12 +909,14 @@ describe('TradingOrderExecutionService', () => {
           stockCode: '005930',
           side: 'BUY',
           quantity: 1,
+          broker: Broker.KIS,
           reason: 'ordinary buy',
         },
         'daily-dca',
         {
           watchStock: {
             id: 'ws-unknown',
+            broker: Broker.KIS,
             market: 'DOMESTIC',
             exchangeCode: 'KRX',
             stockCode: '005930',
@@ -821,6 +975,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -840,6 +995,7 @@ describe('TradingOrderExecutionService', () => {
       stockCode: '005930',
       side: 'BUY',
       quantity: 1,
+      broker: Broker.KIS,
       reason: 'ordinary buy',
     }, 'daily-dca')).resolves.toBe(false);
 
@@ -886,6 +1042,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -907,6 +1064,7 @@ describe('TradingOrderExecutionService', () => {
           stockCode: '005930',
           side: 'BUY',
           quantity: 1,
+          broker: Broker.KIS,
           reason: 'ordinary buy',
         },
         'daily-dca',
@@ -918,6 +1076,7 @@ describe('TradingOrderExecutionService', () => {
     expect(domestic.orderBuy).toHaveBeenCalledTimes(1);
     expect(prisma.tradeRecord.updateMany).toHaveBeenCalledTimes(4);
     expect(recovery.warnAcceptedOrderPersistenceFailure).toHaveBeenCalledWith({
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       stockCode: '005930',
       tradeRecordId: 'trade-db-failure',
@@ -943,6 +1102,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -958,6 +1118,7 @@ describe('TradingOrderExecutionService', () => {
     const ctx = {
       watchStock: {
         id: 'ws-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -980,6 +1141,7 @@ describe('TradingOrderExecutionService', () => {
         side: 'BUY',
         quantity: 1,
         price: 54.6,
+        broker: Broker.KIS,
         reason: 'Buy1',
         orderDivision: '00',
       },
@@ -1036,6 +1198,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -1057,6 +1220,7 @@ describe('TradingOrderExecutionService', () => {
         side: 'SELL',
         quantity: 2,
         price: 70,
+        broker: Broker.KIS,
         reason: 'Take profit 2',
         metadata: { phase: 'take-profit-2' },
       },
@@ -1064,6 +1228,7 @@ describe('TradingOrderExecutionService', () => {
       {
         watchStock: {
           id: 'ws-second-target',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -1117,6 +1282,7 @@ describe('TradingOrderExecutionService', () => {
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'account-hash',
           maskedAccount: '****1234-01',
@@ -1138,6 +1304,7 @@ describe('TradingOrderExecutionService', () => {
         side: 'SELL',
         quantity: 2,
         price: 70,
+        broker: Broker.KIS,
         reason: 'Take profit 2',
         metadata: { phase: 'take-profit-2' },
       },
@@ -1145,6 +1312,7 @@ describe('TradingOrderExecutionService', () => {
       {
         watchStock: {
           id: 'ws-second-target-failure',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -1168,7 +1336,7 @@ describe('TradingOrderExecutionService', () => {
     expect(positionRefresh.refresh).not.toHaveBeenCalled();
     expect(overseas.orderSell).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TQQQ] Failed to persist second-target attempted state: strategy state unavailable',
+      '[KIS TQQQ] Failed to persist second-target attempted state: strategy state unavailable',
     );
     warnSpy.mockRestore();
   });

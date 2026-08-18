@@ -1,4 +1,5 @@
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
+import { Broker } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicators } from '../types';
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
@@ -24,6 +25,7 @@ describe('MomentumBreakoutStrategy — 당일 사이클 트레이스', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-mom-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

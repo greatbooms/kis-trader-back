@@ -76,6 +76,34 @@ Synology 배포 컨테이너는 host network를 사용합니다. 앱은 `PORT=20
 
 `TRADING_ENABLED=false`인 동안에도 인증된 GraphQL/웹 복구와 허용된 Slack 복구는 동작합니다. 새 주문·취소 POST와 거래 cron만 차단됩니다.
 
+### 멀티 브로커 migration 롤아웃
+
+`20260814163000_drop_legacy_brokerless_uniques`(migration 28)는 **one-way boundary**입니다. 이 migration이 적용된 뒤에는 pre-broker(pre-Phase-0/1) binary rollback을 지원하지 않습니다.
+
+중요한 점은 현재 production boot 경로가 `yarn prisma migrate deploy && node dist/main` 이라서, `prisma/migrations`에 있는 migration은 배포 시 자동 적용된다는 것입니다. 그래서 migration 28은 평소에는 `prisma/deferred-migrations`에 두고 auto-migrate 대상에서 제외합니다.
+
+운영 적용은 **반드시 2-release flow**로 진행합니다.
+
+1. Release 1 전 `TRADING_ENABLED=false`로 거래를 중지합니다.
+2. 운영 DB를 백업합니다.
+3. Release 1에서는 migration 27 `20260814110203_add_broker_dimension`까지만 `prisma/migrations`에 둡니다.
+4. Release 1의 Phase 3 binary를 배포해 auto-migrate로 migration 27만 적용합니다. 이때 TOSS는 비활성 상태로 둡니다.
+5. Phase 3 stability window 동안 KIS-only 주문·동기화, broker-scoped 데이터, approval/recovery, cash dual-write를 확인합니다.
+6. 이 기간에는 migration 28을 계속 deferred 상태로 유지합니다.
+7. **이미 KIS에 보유한 종목을 TOSS에도 보유/등록하려는 Release 2 직전**에만 `prisma/schema.prisma`의 legacy brokerless `@@unique` 4개를 제거하고 migration 28을 `prisma/migrations`로 같은 release에 승격합니다.
+8. Release 2를 배포해 다음 boot의 auto-migrate로 migration 28을 적용합니다.
+9. 그 다음에만 TOSS broker switch를 활성화합니다.
+
+| Binary | migration 27 전 | Release 1: migration 27 적용, 28 deferred | Release 2: migration 28 적용 후 |
+|---|---|---|---|
+| pre-broker (pre-Phase-0/1) | OK | OK | 지원하지 않음 |
+| Phase 0-2 | migration 27 필요 | OK | OK |
+| Phase 3 | migration 27 필요 | OK; KIS-only 안정화, 기존 KIS 보유 종목의 cross-broker 중복 등록은 아직 금지 | OK; 동일 종목을 KIS/TOSS 양쪽에 보유 가능 |
+
+Migration 28 이후 legacy unique index를 재생성해야 하는 비상 복구에서는 먼저 거래를 중지하고 DB를 백업합니다. 그 다음 `positions`, `watch_stocks`, `risk_snapshots`, `strategy_allocations`의 legacy key 기준 broker 간 중복을 병합·제거해야 합니다. 이 절차는 지원되는 pre-broker rollback이 아닙니다.
+
+Binary rollback 전에는 legacy `account_status_cache` row가 최신 KIS 잔고인지 확인하고 필요하면 재시드합니다. Phase 3 호환 기간에는 KIS refresh가 broker-scoped row와 legacy row를 같은 transaction에서 갱신하지만, Phase 2 binary가 더 이상 rollback target이 아니어서 dual-write를 제거한 뒤에는 수동 재시드가 필수입니다. TOSS cash는 legacy row에 기록하지 않습니다.
+
 ## NAS 사전 준비
 
 필수:

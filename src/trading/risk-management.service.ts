@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { RiskState } from './types';
-import { Market, Prisma } from '@prisma/client';
+import { Broker, Market, Prisma } from '@prisma/client';
 
 @Injectable()
 export class RiskManagementService {
@@ -10,12 +10,12 @@ export class RiskManagementService {
   constructor(private prisma: PrismaService) {}
 
   /** 리스크 상태 평가 */
-  async evaluateRisk(market: 'DOMESTIC' | 'OVERSEAS'): Promise<RiskState> {
+  async evaluateRisk(broker: Broker, market: 'DOMESTIC' | 'OVERSEAS'): Promise<RiskState> {
     const reasons: string[] = [];
 
     // 포지션 조회
     const positions = await this.prisma.position.findMany({
-      where: { market: market as Market },
+      where: { broker, market: market as Market },
     });
 
     const positionCount = positions.length;
@@ -30,7 +30,7 @@ export class RiskManagementService {
 
     // 최근 RiskSnapshot을 이용해 시장별 상태 지표만 계산
     const latestSnapshot = await this.prisma.riskSnapshot.findFirst({
-      where: { market: market as Market },
+      where: { broker, market: market as Market },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -60,7 +60,7 @@ export class RiskManagementService {
     };
 
     if (reasons.length > 0) {
-      this.logger.warn(`Risk state [${market}]: ${reasons.join(', ')}`);
+      this.logger.warn(`Risk state [${broker} ${market}]: ${reasons.join(', ')}`);
     }
 
     return riskState;
@@ -77,6 +77,7 @@ export class RiskManagementService {
 
   /** 일별 리스크 스냅샷 저장 */
   async saveRiskSnapshot(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     portfolioValue: number,
     cashBalance: number,
@@ -85,7 +86,7 @@ export class RiskManagementService {
 
     // 이전 피크 값
     const prevSnapshot = await this.prisma.riskSnapshot.findFirst({
-      where: { market: market as Market },
+      where: { broker, market: market as Market },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -99,7 +100,7 @@ export class RiskManagementService {
     const drawdown = peakValue > 0 ? (portfolioValue - peakValue) / peakValue : 0;
 
     const positions = await this.prisma.position.findMany({
-      where: { market: market as Market },
+      where: { broker, market: market as Market },
     });
 
     const totalValue = portfolioValue + cashBalance;
@@ -108,12 +109,14 @@ export class RiskManagementService {
     try {
       await this.prisma.riskSnapshot.upsert({
         where: {
-          market_snapshotDate: {
+          broker_market_snapshotDate: {
+            broker,
             market: market as Market,
             snapshotDate: today,
           },
         },
         create: {
+          broker,
           market: market as Market,
           snapshotDate: today,
           portfolioValue: new Prisma.Decimal(portfolioValue),
@@ -137,7 +140,7 @@ export class RiskManagementService {
         },
       });
     } catch (e) {
-      this.logger.error(`Failed to save risk snapshot: ${e.message}`);
+      this.logger.error(`[${broker} ${market}] Failed to save risk snapshot: ${e.message}`);
     }
   }
 }

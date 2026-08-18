@@ -1,4 +1,5 @@
 import { ValueFactorStrategy } from './value-factor.strategy';
+import { Broker } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicators, StockFundamentals } from '../types';
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
@@ -14,6 +15,7 @@ describe('ValueFactorStrategy — Realistic Trace', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-vf-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

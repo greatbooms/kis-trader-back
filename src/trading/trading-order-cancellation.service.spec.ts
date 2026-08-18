@@ -1,17 +1,39 @@
 import { TradingOrderCancellationService } from './trading-order-cancellation.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingOrderCancellationService', () => {
+  const registry = (domestic: any, overseas: any) => {
+    const port = {
+      cancelOrder: jest.fn((request) => request.market === 'DOMESTIC'
+        ? domestic.cancelOrder(request.orderNo, request.stockCode, request.qty)
+        : overseas.cancelOrder(
+          request.exchangeCode,
+          request.orderNo,
+          request.stockCode,
+          request.qty,
+          request.price,
+        )),
+    };
+    return {
+      get: jest.fn().mockReturnValue(port),
+      isActive: jest.fn().mockReturnValue(true),
+      requireActive: jest.fn().mockReturnValue(port),
+    };
+  };
+
   const currentBrokerContext = () => ({
-    getCurrentContext: jest.fn().mockReturnValue({
+    getCurrentContext: jest.fn((broker) => ({
+      broker,
       environment: 'PROD',
       accountHash: 'current-account-hash',
       maskedAccount: '****1234-01',
-    }),
+    })),
     matchesCurrentContext: jest.fn().mockReturnValue(true),
   });
 
   const tradeRecord = (overrides: Record<string, unknown> = {}) => ({
     id: 'trade-1',
+    broker: 'KIS',
     brokerEnvironment: 'PROD',
     brokerAccountHash: 'current-account-hash',
     market: 'DOMESTIC',
@@ -49,14 +71,14 @@ describe('TradingOrderCancellationService', () => {
     const recovery = { claimCancellation: jest.fn() };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      overseas as never,
+      registry(domestic, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(service.cancelUnfilledOrder(
+      Broker.KIS,
       market as 'DOMESTIC' | 'OVERSEAS',
       {
         orderNo: 'broker-order',
@@ -75,6 +97,40 @@ describe('TradingOrderCancellationService', () => {
     expect(overseas.cancelOrder).not.toHaveBeenCalled();
   });
 
+  it.each([Broker.KIS, Broker.TOSS])(
+    'fails closed before automatic cancellation lookup when %s is inactive',
+    async (broker) => {
+      const prisma = {
+        tradeRecord: { findFirst: jest.fn() },
+      };
+      const domestic = { cancelOrder: jest.fn() };
+      const overseas = { cancelOrder: jest.fn() };
+      const recovery = { claimCancellation: jest.fn() };
+      const brokerRegistry = registry(domestic, overseas);
+      brokerRegistry.isActive.mockReturnValue(false);
+      const service = new TradingOrderCancellationService(
+        prisma as never,
+        brokerRegistry as never,
+        { isEnabled: jest.fn().mockReturnValue(true) } as never,
+        currentBrokerContext() as never,
+        recovery as never,
+      );
+
+      await expect(service.cancelUnfilledOrder(broker, 'DOMESTIC', {
+        orderNo: 'broker-order',
+        stockCode: '005930',
+        quantity: 2,
+        price: 70_000,
+        side: 'BUY',
+      })).resolves.toBe(false);
+
+      expect(prisma.tradeRecord.findFirst).not.toHaveBeenCalled();
+      expect(recovery.claimCancellation).not.toHaveBeenCalled();
+      expect(brokerRegistry.requireActive).not.toHaveBeenCalled();
+      expect(domestic.cancelOrder).not.toHaveBeenCalled();
+    },
+  );
+
   it('normalizes an overseas unfilled order before the exact local tuple lookup', async () => {
     const prisma = {
       tradeRecord: {
@@ -87,14 +143,13 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      {} as never,
-      overseas as never,
+      registry({}, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('OVERSEAS', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'OVERSEAS', {
       orderNo: ' broker-order ',
       stockCode: ' aapl ',
       exchangeCode: ' nasd ',
@@ -105,6 +160,7 @@ describe('TradingOrderCancellationService', () => {
 
     expect(prisma.tradeRecord.findFirst).toHaveBeenCalledWith({
       where: {
+        broker: Broker.KIS,
         brokerEnvironment: 'PROD',
         brokerAccountHash: 'current-account-hash',
         market: 'OVERSEAS',
@@ -116,6 +172,47 @@ describe('TradingOrderCancellationService', () => {
       },
     });
     expect(overseas.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it('never selects a same-tuple TOSS record from KIS unfilled order data', async () => {
+    const tossRecord = tradeRecord({ id: 'toss-collision', broker: Broker.TOSS });
+    const prisma = {
+      tradeRecord: {
+        findFirst: jest.fn().mockImplementation(({ where }) => (
+          where.broker === Broker.KIS ? null : tossRecord
+        )),
+      },
+    };
+    const kis = { cancelOrder: jest.fn() };
+    const toss = { cancelOrder: jest.fn().mockResolvedValue({ outcome: 'ACCEPTED' }) };
+    const brokerRegistry = {
+      get: jest.fn((broker) => broker === Broker.KIS ? kis : toss),
+      isActive: jest.fn().mockReturnValue(true),
+      requireActive: jest.fn((broker) => broker === Broker.KIS ? kis : toss),
+    };
+    const recovery = { claimCancellation: jest.fn() };
+    const service = new TradingOrderCancellationService(
+      prisma as never,
+      brokerRegistry as never,
+      { isEnabled: jest.fn().mockReturnValue(true) } as never,
+      currentBrokerContext() as never,
+      recovery as never,
+    );
+
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
+      orderNo: 'broker-order',
+      stockCode: '005930',
+      quantity: 2,
+      price: 70_000,
+      side: 'BUY',
+    })).resolves.toBe(false);
+
+    expect(prisma.tradeRecord.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ broker: Broker.KIS }),
+    });
+    expect(recovery.claimCancellation).not.toHaveBeenCalled();
+    expect(kis.cancelOrder).not.toHaveBeenCalled();
+    expect(toss.cancelOrder).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -154,14 +251,13 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('DOMESTIC', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
       orderNo: 'broker-order',
       stockCode: '005930',
       quantity: 2,
@@ -201,14 +297,13 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('DOMESTIC', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
       orderNo: 'broker-order',
       stockCode: '005930',
       quantity: 2,
@@ -233,15 +328,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'broker-order',
         stockCode: '005930',
         quantity: 2,
@@ -250,12 +344,13 @@ describe('TradingOrderCancellationService', () => {
       }),
     ).resolves.toBe(false);
 
-    expect(recovery.claimCancellation).toHaveBeenCalledWith('trade-1');
+    expect(recovery.claimCancellation).toHaveBeenCalledWith('trade-1', Broker.KIS);
     expect(domestic.cancelOrder).not.toHaveBeenCalled();
   });
 
   it.each([
     ['claim status', { cancellationStatus: 'REJECTED' }],
+    ['broker', { broker: Broker.TOSS }],
     ['broker environment', { brokerEnvironment: 'PAPER' }],
     ['broker account', { brokerAccountHash: 'other-account-hash' }],
     ['market', { market: 'OVERSEAS' }],
@@ -293,18 +388,18 @@ describe('TradingOrderCancellationService', () => {
     const recovery = {
       claimCancellation: jest.fn().mockResolvedValue(true),
       releaseCancellationClaim: jest.fn().mockResolvedValue(true),
+      markCancellationUnknown: jest.fn(),
       markCancellationAccepted: jest.fn().mockResolvedValue(true),
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('DOMESTIC', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
       orderNo: 'broker-order',
       stockCode: '005930',
       quantity: 2,
@@ -313,10 +408,11 @@ describe('TradingOrderCancellationService', () => {
     })).resolves.toBe(false);
 
     expect(prisma.tradeRecord.findUnique).toHaveBeenCalledWith({
-      where: { id: 'trade-race' },
+      where: { id: 'trade-race', broker: Broker.KIS },
     });
     expect(recovery.releaseCancellationClaim).toHaveBeenCalledWith(
       'trade-race',
+      Broker.KIS,
       '취소 대상 주문 정보 변경',
     );
     expect(domestic.cancelOrder).not.toHaveBeenCalled();
@@ -337,21 +433,21 @@ describe('TradingOrderCancellationService', () => {
     const recovery = {
       claimCancellation: jest.fn().mockResolvedValue(true),
       releaseCancellationClaim: jest.fn().mockResolvedValue(true),
+      markCancellationUnknown: jest.fn(),
     };
     const liveSwitch = {
       isEnabled: jest.fn().mockReturnValueOnce(true).mockReturnValueOnce(false),
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       liveSwitch as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'broker-order',
         stockCode: '005930',
         quantity: 2,
@@ -362,9 +458,57 @@ describe('TradingOrderCancellationService', () => {
 
     expect(recovery.releaseCancellationClaim).toHaveBeenCalledWith(
       'trade-switch-off',
+      Broker.KIS,
       '실거래 비활성화로 자동 주문 취소 중단',
     );
     expect(domestic.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it('releases a won automatic cancellation claim when its broker becomes inactive before POST', async () => {
+    const record = tradeRecord({ id: 'trade-broker-disabled', broker: Broker.TOSS });
+    const prisma = {
+      tradeRecord: {
+        findFirst: jest.fn().mockResolvedValue(record),
+        findUnique: jest.fn().mockResolvedValue({
+          ...record,
+          cancellationStatus: 'SUBMITTING',
+        }),
+      },
+    };
+    const domestic = { cancelOrder: jest.fn() };
+    const recovery = {
+      claimCancellation: jest.fn().mockResolvedValue(true),
+      releaseCancellationClaim: jest.fn().mockResolvedValue(true),
+      markCancellationUnknown: jest.fn(),
+    };
+    const brokerRegistry = registry(domestic, {});
+    brokerRegistry.isActive
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    const service = new TradingOrderCancellationService(
+      prisma as never,
+      brokerRegistry as never,
+      { isEnabled: jest.fn().mockReturnValue(true) } as never,
+      currentBrokerContext() as never,
+      recovery as never,
+    );
+
+    await expect(service.cancelUnfilledOrder(Broker.TOSS, 'DOMESTIC', {
+      orderNo: 'broker-order',
+      stockCode: '005930',
+      quantity: 2,
+      price: 70_000,
+      side: 'BUY',
+    })).resolves.toBe(false);
+
+    expect(recovery.releaseCancellationClaim).toHaveBeenCalledWith(
+      'trade-broker-disabled',
+      Broker.TOSS,
+      '브로커 비활성화로 자동 주문 취소 중단',
+    );
+    expect(brokerRegistry.requireActive).not.toHaveBeenCalled();
+    expect(domestic.cancelOrder).not.toHaveBeenCalled();
+    expect(recovery.markCancellationUnknown).not.toHaveBeenCalled();
   });
 
   it('releases a won claim when the broker context changes before POST', async () => {
@@ -395,14 +539,13 @@ describe('TradingOrderCancellationService', () => {
     brokerContext.matchesCurrentContext.mockReturnValue(false);
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('DOMESTIC', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
       orderNo: 'broker-order',
       stockCode: '005930',
       quantity: 2,
@@ -411,11 +554,13 @@ describe('TradingOrderCancellationService', () => {
     })).resolves.toBe(false);
 
     expect(brokerContext.matchesCurrentContext).toHaveBeenCalledWith(
+      Broker.KIS,
       claimedRecord.brokerEnvironment,
       claimedRecord.brokerAccountHash,
     );
     expect(recovery.releaseCancellationClaim).toHaveBeenCalledWith(
       'trade-context-drift',
+      Broker.KIS,
       '브로커 컨텍스트 변경으로 자동 주문 취소 중단',
     );
     expect(domestic.cancelOrder).not.toHaveBeenCalled();
@@ -450,14 +595,13 @@ describe('TradingOrderCancellationService', () => {
     });
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
     );
 
-    await expect(service.cancelUnfilledOrder('DOMESTIC', {
+    await expect(service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
       orderNo: 'broker-order',
       stockCode: '005930',
       quantity: 2,
@@ -467,6 +611,7 @@ describe('TradingOrderCancellationService', () => {
 
     expect(recovery.releaseCancellationClaim).toHaveBeenCalledWith(
       'trade-context-error',
+      Broker.KIS,
       '브로커 컨텍스트 확인 실패로 자동 주문 취소 중단',
     );
     expect(domestic.cancelOrder).not.toHaveBeenCalled();
@@ -496,15 +641,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'broker-order',
         stockCode: '005930',
         quantity: 2,
@@ -517,6 +661,7 @@ describe('TradingOrderCancellationService', () => {
     expect(domestic.cancelOrder).toHaveBeenCalledWith('broker-order', '005930', 2);
     expect(recovery.markCancellationAccepted).toHaveBeenCalledWith(
       'trade-accepted',
+      Broker.KIS,
       '취소 접수',
     );
   });
@@ -545,15 +690,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'broker-order',
         stockCode: '005930',
         quantity: 2,
@@ -565,6 +709,7 @@ describe('TradingOrderCancellationService', () => {
     expect(domestic.cancelOrder).toHaveBeenCalledTimes(1);
     expect(recovery.markCancellationRejected).toHaveBeenCalledWith(
       'trade-rejected',
+      Broker.KIS,
       '취소 거부',
     );
   });
@@ -599,15 +744,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      {} as never,
-      overseas as never,
+      registry({}, overseas) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('OVERSEAS', {
+      service.cancelUnfilledOrder(Broker.KIS, 'OVERSEAS', {
         orderNo: 'broker-order',
         stockCode: 'TQQQ',
         exchangeCode: 'NASD',
@@ -620,6 +764,7 @@ describe('TradingOrderCancellationService', () => {
     expect(overseas.cancelOrder).toHaveBeenCalledTimes(1);
     expect(recovery.markCancellationUnknown).toHaveBeenCalledWith(
       'trade-unknown',
+      Broker.KIS,
       'transport timeout',
     );
   });
@@ -644,15 +789,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       currentBrokerContext() as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'broker-order',
         stockCode: '005930',
         quantity: 2,
@@ -664,6 +808,7 @@ describe('TradingOrderCancellationService', () => {
     expect(domestic.cancelOrder).toHaveBeenCalledTimes(1);
     expect(recovery.markCancellationUnknown).toHaveBeenCalledWith(
       'trade-thrown',
+      Broker.KIS,
       'socket closed',
     );
   });
@@ -693,15 +838,14 @@ describe('TradingOrderCancellationService', () => {
     };
     const service = new TradingOrderCancellationService(
       prisma as never,
-      domestic as never,
-      {} as never,
+      registry(domestic, {}) as never,
       { isEnabled: jest.fn().mockReturnValue(true) } as never,
       brokerContext as never,
       recovery as never,
     );
 
     await expect(
-      service.cancelUnfilledOrder('DOMESTIC', {
+      service.cancelUnfilledOrder(Broker.KIS, 'DOMESTIC', {
         orderNo: 'shared-order',
         stockCode: '005930',
         quantity: 2,
@@ -712,6 +856,7 @@ describe('TradingOrderCancellationService', () => {
 
     expect(prisma.tradeRecord.findFirst).toHaveBeenCalledWith({
       where: {
+        broker: Broker.KIS,
         brokerEnvironment: 'PROD',
         brokerAccountHash: 'current-account-hash',
         market: 'DOMESTIC',

@@ -1,32 +1,40 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Market, Prisma } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { Broker, Market, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { BalanceItem } from '../kis/types/kis-api.types';
 
 @Injectable()
 export class TradingPositionSyncService {
-  private readonly logger = new Logger(TradingPositionSyncService.name);
-
   constructor(private prisma: PrismaService) {}
 
   /** 포지션 동기화 (DB) */
   async syncPositions(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     items: BalanceItem[],
   ): Promise<void> {
+    if (market === 'OVERSEAS') {
+      const unresolved = items.find((item) => !item.exchangeCode || item.exchangeCode === 'US');
+      if (unresolved) {
+        throw new Error(`Unresolved overseas venue for ${broker} ${unresolved.stockCode}`);
+      }
+    }
+
     for (const item of items) {
       // totalInvested = quantity × avgPrice
       const totalInvested = item.quantity * item.avgPrice;
 
       await this.prisma.position.upsert({
         where: {
-          market_exchangeCode_stockCode: {
+          broker_market_exchangeCode_stockCode: {
+            broker,
             market: market as Market,
             exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
             stockCode: item.stockCode,
           },
         },
         create: {
+          broker,
           market: market as Market,
           exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
           stockCode: item.stockCode,
@@ -52,14 +60,18 @@ export class TradingPositionSyncService {
     }
 
     // 보유하지 않는 포지션 삭제
-    const stockCodes = items.map((i) => i.stockCode);
+    const heldPositions = items.map((item) => ({
+      exchangeCode: item.exchangeCode ?? (market === 'DOMESTIC' ? 'KRX' : ''),
+      stockCode: item.stockCode,
+    }));
     await this.prisma.position.deleteMany({
-      where: stockCodes.length > 0
+      where: heldPositions.length > 0
         ? {
+          broker,
           market: market as Market,
-          stockCode: { notIn: stockCodes },
+          NOT: { OR: heldPositions },
         }
-        : { market: market as Market },
+        : { broker, market: market as Market },
     });
   }
 }

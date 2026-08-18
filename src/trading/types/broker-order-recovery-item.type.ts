@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerEnvironment,
   CancellationAttemptStatus,
   Market,
@@ -11,6 +12,7 @@ import { BrokerOrderRecoveryLifecycle } from './broker-order-recovery-lifecycle.
 
 export interface BrokerOrderRecoveryItem {
   tradeRecordId: string;
+  broker: Broker;
   lifecycle: BrokerOrderRecoveryLifecycle;
   market: Market;
   exchangeCode: string;

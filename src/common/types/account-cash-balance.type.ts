@@ -1,4 +1,7 @@
+import { Broker } from '@prisma/client';
+
 export interface AccountCashBalance {
+  broker?: Broker;
   market: 'DOMESTIC' | 'OVERSEAS';
   currencyCode: string;
   currencyName?: string;

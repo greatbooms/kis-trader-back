@@ -14,6 +14,7 @@
 - `kis-overseas-balance.service.ts` — 해외 보유 종목·통화 잔고 조회, present/standard fallback 상태와 잔고 row 정규화를 전담
 - `kis-domestic.service.ts` — 국내(KRX) 시세/주문/잔고/재무. paper 환경 전용 처리(일부 API 미지원 → fallback). `getDailyPrices` / `getPrice` / `getOrder*` / `getBalance` / `getUnfilledOrders` / `getOrderExecutions` / `getHolidays` 등
 - `kis-overseas.service.ts` — 해외(NASD/NYSE/AMEX/SEHK/SHAA/SZAA/TKSE/HASE/VNSE) 시세·주문·랭킹 API와 주문 이력/잔고 서비스 위임을 담당
+- `kis-broker.adapter.ts` — 주문·취소·체결·미체결·잔고·주문가능금액을 공통 `BrokerPort` 계약으로 변환. 시장 데이터 호출은 포함하지 않는다.
 - `types/kis-api.types.ts` — 응답 타입 (DTO)
 - `types/kis-config.types.ts` — `KIS_BASE_URLS`, `KisEnv`, 거래소 enum, 주문 TR_ID 매핑
 
@@ -23,6 +24,7 @@
 - `PrismaService` — 토큰 영속화
 
 ## 주의사항 / 비자명한 규칙
+- 거래 도메인의 주문·계좌 호출은 `KisBrokerAdapter`를 등록한 `BrokerPortRegistry`를 경유한다. 시세·일봉·휴장일은 기존 KIS 서비스를 직접 사용한다.
 - **Rate limit는 `kis-base.service.ts`가 일괄 관리**: 직렬화된 Promise 큐. 호출자에서 별도 throttle 추가 금지 (이중 지연)
   - **실전 요청 간격**: prod의 실제 axios 시작은 공용 FIFO에서 최소 100ms 간격, paper는 300ms 간격. 인증 헤더/token 준비가 끝난 뒤 gate를 통과하며 GET retry도 매 시도마다 gate를 다시 거친다.
 - **주문 순서 보존**: GET/POST 우선순위 큐를 두지 않는다. 주문 필수 조회 → broker context/live switch 검증 → 단일 POST → reconciliation 순서를 유지한다.

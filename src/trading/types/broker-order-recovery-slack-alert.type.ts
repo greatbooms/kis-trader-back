@@ -1,8 +1,9 @@
-import { Market, Side } from '@prisma/client';
+import { Broker, Market, Side } from '@prisma/client';
 import { BrokerOrderRecoveryLifecycle } from './broker-order-recovery-lifecycle.type';
 
 export interface BrokerOrderRecoverySlackAlert {
   tradeRecordId: string;
+  broker: Broker;
   lifecycle: BrokerOrderRecoveryLifecycle;
   market: Market;
   exchangeCode: string;

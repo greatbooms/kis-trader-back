@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  Broker,
   CancellationAttemptStatus,
   Market,
   OrderStatus,
   TradeRecord,
 } from '@prisma/client';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { UnfilledOrder } from '../kis/types/kis-api.types';
 import { OVERSEAS_ORDER_TR_IDS } from '../kis/types/kis-config.types';
 import { OrderResult } from '../kis/types';
@@ -22,14 +22,14 @@ export class TradingOrderCancellationService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private readonly liveSwitch: TradingLiveSwitchService,
     private readonly brokerContext: TradingBrokerContextService,
     private readonly recoveryService: TradingBrokerOrderRecoveryService,
   ) {}
 
   async cancelUnfilledOrder(
+    broker: Broker,
     market: 'DOMESTIC' | 'OVERSEAS',
     order: UnfilledOrder,
   ): Promise<boolean> {
@@ -37,11 +37,13 @@ export class TradingOrderCancellationService {
 
     const normalizedOrder = this.normalizeUnfilledOrder(market, order);
     if (!normalizedOrder) return false;
+    if (!this.registry.isActive(broker)) return false;
 
-    const context = this.brokerContext.getCurrentContext();
+    const context = this.brokerContext.getCurrentContext(broker);
     const exchangeCode = normalizedOrder.exchangeCode as string;
     const record = await this.prisma.tradeRecord.findFirst({
       where: {
+        broker,
         brokerEnvironment: context.environment,
         brokerAccountHash: context.accountHash,
         market: market as Market,
@@ -67,15 +69,16 @@ export class TradingOrderCancellationService {
       || normalizedOrder.quantity !== record.quantity - executedQuantity
     ) return false;
 
-    const claimed = await this.recoveryService.claimCancellation(record.id);
+    const claimed = await this.recoveryService.claimCancellation(record.id, broker);
     if (!claimed) return false;
 
     const claimedRecord = await this.prisma.tradeRecord.findUnique({
-      where: { id: record.id },
+      where: { id: record.id, broker },
     });
     if (!this.isSameClaimedCancellationTarget(record, claimedRecord)) {
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        broker,
         '취소 대상 주문 정보 변경',
       );
       return false;
@@ -84,6 +87,7 @@ export class TradingOrderCancellationService {
     if (!this.liveSwitch.isEnabled()) {
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        broker,
         '실거래 비활성화로 자동 주문 취소 중단',
       );
       return false;
@@ -91,15 +95,17 @@ export class TradingOrderCancellationService {
     let matchesCurrentContext: boolean;
     try {
       matchesCurrentContext = this.brokerContext.matchesCurrentContext(
+        broker,
         claimedRecord.brokerEnvironment,
         claimedRecord.brokerAccountHash,
       );
     } catch (error) {
       this.logger.warn(
-        `[${claimedRecord.stockCode}] Broker context recheck failed: ${this.errorMessage(error)}`,
+        `[${broker} ${claimedRecord.stockCode}] Broker context recheck failed: ${this.errorMessage(error)}`,
       );
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        broker,
         '브로커 컨텍스트 확인 실패로 자동 주문 취소 중단',
       );
       return false;
@@ -107,30 +113,58 @@ export class TradingOrderCancellationService {
     if (!matchesCurrentContext) {
       await this.recoveryService.releaseCancellationClaim(
         record.id,
+        broker,
         '브로커 컨텍스트 변경으로 자동 주문 취소 중단',
+      );
+      return false;
+    }
+    if (!this.registry.isActive(broker)) {
+      await this.recoveryService.releaseCancellationClaim(
+        record.id,
+        broker,
+        '브로커 비활성화로 자동 주문 취소 중단',
       );
       return false;
     }
 
     let result: OrderResult;
     try {
-      result = await this.submit(market, normalizedOrder);
+      result = await this.registry.requireActive(broker).cancelOrder({
+        market: claimedRecord.market,
+        exchangeCode: normalizedOrder.exchangeCode || '',
+        orderNo: normalizedOrder.orderNo,
+        stockCode: normalizedOrder.stockCode,
+        qty: normalizedOrder.quantity,
+        price: normalizedOrder.price,
+      });
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${normalizedOrder.stockCode}] Cancellation outcome is unknown: ${message}`);
-      await this.recoveryService.markCancellationUnknown(record.id, message);
+      this.logger.warn(`[${broker} ${normalizedOrder.stockCode}] Cancellation outcome is unknown: ${message}`);
+      await this.recoveryService.markCancellationUnknown(record.id, broker, message);
       return false;
     }
     if (result.outcome === 'REJECTED') {
-      await this.recoveryService.markCancellationRejected(record.id, result.message);
+      await this.recoveryService.markCancellationRejected(
+        record.id,
+        broker,
+        result.message,
+      );
       return false;
     }
     if (result.outcome !== 'ACCEPTED') {
-      await this.recoveryService.markCancellationUnknown(record.id, result.message);
+      await this.recoveryService.markCancellationUnknown(
+        record.id,
+        broker,
+        result.message,
+      );
       return false;
     }
 
-    await this.recoveryService.markCancellationAccepted(record.id, result.message);
+    await this.recoveryService.markCancellationAccepted(
+      record.id,
+      broker,
+      result.message,
+    );
     return true;
   }
 
@@ -140,6 +174,7 @@ export class TradingOrderCancellationService {
     context: BrokerContext,
   ): boolean {
     return record.orderNo?.trim() === order.orderNo
+      && record.broker === context.broker
       && this.isValidBrokerOrderDate(record.brokerOrderDate)
       && record.brokerEnvironment === context.environment
       && record.brokerAccountHash === context.accountHash;
@@ -163,6 +198,7 @@ export class TradingOrderCancellationService {
     claimed: TradeRecord | null,
   ): claimed is TradeRecord {
     return claimed !== null
+      && claimed.broker === initial.broker
       && claimed.cancellationStatus === CancellationAttemptStatus.SUBMITTING
       && claimed.brokerEnvironment === initial.brokerEnvironment
       && claimed.brokerAccountHash === initial.brokerAccountHash
@@ -216,21 +252,6 @@ export class TradingOrderCancellationService {
       stockCode: order.stockCode.trim().toUpperCase(),
       exchangeCode: market === 'DOMESTIC' ? 'KRX' : suppliedExchange,
     };
-  }
-
-  private submit(
-    market: 'DOMESTIC' | 'OVERSEAS',
-    order: UnfilledOrder,
-  ): Promise<OrderResult> {
-    return market === 'DOMESTIC'
-      ? this.kisDomestic.cancelOrder(order.orderNo, order.stockCode, order.quantity)
-      : this.kisOverseas.cancelOrder(
-        order.exchangeCode || '',
-        order.orderNo,
-        order.stockCode,
-        order.quantity,
-        order.price,
-      );
   }
 
   private errorMessage(error: unknown): string {

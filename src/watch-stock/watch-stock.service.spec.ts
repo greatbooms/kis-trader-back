@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Broker } from '@prisma/client';
 import { WatchStockService } from './watch-stock.service';
 import { PrismaService } from '../prisma.service';
+import { CreateWatchStockInput } from './dto';
 
 describe('WatchStockService', () => {
   let service: WatchStockService;
@@ -89,9 +91,71 @@ describe('WatchStockService', () => {
   });
 
   describe('findCurrentCycleMap', () => {
+    it('keeps same-symbol KIS and TOSS cycles isolated by broker', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        {
+          broker: Broker.KIS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          totalInvested: 1000,
+        },
+        {
+          broker: Broker.TOSS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          totalInvested: 2000,
+        },
+      ]);
+
+      const result = await service.findCurrentCycleMap([
+        {
+          id: 'kis',
+          broker: Broker.KIS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 4000,
+          cycle: 0,
+          maxCycles: 40,
+        },
+        {
+          id: 'toss',
+          broker: Broker.TOSS,
+          market: 'OVERSEAS',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          strategyName: 'infinite-buy',
+          quota: 4000,
+          cycle: 0,
+          maxCycles: 40,
+        },
+      ] as any);
+
+      expect(result).toEqual(new Map([['kis', 10], ['toss', 20]]));
+      expect(mockPrisma.position.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ' },
+            { broker: Broker.TOSS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ' },
+          ],
+        },
+        select: {
+          broker: true,
+          market: true,
+          exchangeCode: true,
+          stockCode: true,
+          totalInvested: true,
+        },
+      });
+    });
+
     it('should calculate fractional cycle for cycle-based strategies from total invested', async () => {
       mockPrisma.position.findMany.mockResolvedValue([
         {
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -102,6 +166,7 @@ describe('WatchStockService', () => {
       const result = await service.findCurrentCycleMap([
         {
           id: '1',
+          broker: Broker.KIS,
           market: 'OVERSEAS' as any,
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -119,6 +184,7 @@ describe('WatchStockService', () => {
       const result = await service.findCurrentCycleMap([
         {
           id: '1',
+          broker: Broker.KIS,
           market: 'OVERSEAS' as any,
           exchangeCode: 'NASD',
           stockCode: 'AAPL',
@@ -135,8 +201,46 @@ describe('WatchStockService', () => {
   });
 
   describe('create', () => {
+    it('defaults omitted GraphQL broker input to KIS', () => {
+      expect((new CreateWatchStockInput() as any).broker).toBe(Broker.KIS);
+    });
+
+    it('allows the same symbol once per broker', async () => {
+      mockPrisma.watchStock.findFirst.mockResolvedValue(null);
+      mockPrisma.watchStock.create
+        .mockResolvedValueOnce({ id: 'kis' })
+        .mockResolvedValueOnce({ id: 'toss' });
+      const stock = {
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'ProShares UltraPro QQQ',
+      };
+
+      await service.create({ ...stock, broker: Broker.KIS } as any);
+      await service.create({ ...stock, broker: Broker.TOSS } as any);
+
+      expect(mockPrisma.watchStock.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ' },
+        select: { id: true },
+      });
+      expect(mockPrisma.watchStock.findFirst).toHaveBeenNthCalledWith(2, {
+        where: { broker: Broker.TOSS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ' },
+        select: { id: true },
+      });
+      expect(mockPrisma.watchStock.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ data: expect.objectContaining({ broker: Broker.KIS }) }),
+      );
+      expect(mockPrisma.watchStock.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ data: expect.objectContaining({ broker: Broker.TOSS }) }),
+      );
+    });
+
     it('should create a new watch stock with required fields', async () => {
       const input = {
+        broker: Broker.KIS,
         market: 'DOMESTIC' as any,
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -159,6 +263,7 @@ describe('WatchStockService', () => {
 
     it('should create with all optional fields', async () => {
       const input = {
+        broker: Broker.KIS,
         market: 'OVERSEAS' as any,
         exchangeCode: 'NASD',
         stockCode: 'AAPL',
@@ -186,6 +291,7 @@ describe('WatchStockService', () => {
 
     it('should throw a friendly error when the stock is already registered', async () => {
       const input = {
+        broker: Broker.KIS,
         market: 'DOMESTIC' as any,
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -200,6 +306,7 @@ describe('WatchStockService', () => {
 
     it('should translate unique constraint errors into a friendly message', async () => {
       const input = {
+        broker: Broker.KIS,
         market: 'DOMESTIC' as any,
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -217,6 +324,7 @@ describe('WatchStockService', () => {
     beforeEach(() => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: '1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -262,9 +370,34 @@ describe('WatchStockService', () => {
       expect(callArgs.data.quota).toBeUndefined();
     });
 
+    it.each([
+      [Broker.KIS, Broker.TOSS],
+      [Broker.TOSS, Broker.KIS],
+    ])('rejects a %s to %s broker change before carrying strategy state', async (currentBroker, nextBroker) => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: '1',
+        broker: currentBroker,
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 4000,
+        maxCycles: 40,
+        strategyParams: { accumulatedQuota: 100 },
+      });
+
+      await expect(service.update('1', { broker: nextBroker, quota: 8000 })).rejects.toThrow(
+        '기존 관심종목을 삭제한 뒤 새 브로커로 다시 등록하세요',
+      );
+
+      expect(mockPrisma.position.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+    });
+
     it('should rebase infinite-buy cycle and accumulated quota when quota changes', async () => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: '1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -292,9 +425,40 @@ describe('WatchStockService', () => {
       });
     });
 
+    it('rebases a TOSS watch stock from only the TOSS position', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({
+        id: 'toss-watch',
+        broker: Broker.TOSS,
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        strategyName: 'infinite-buy',
+        quota: 4000,
+        maxCycles: 40,
+        strategyParams: null,
+      });
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 1000 });
+      mockPrisma.watchStock.update.mockResolvedValue({ id: 'toss-watch' });
+
+      await service.update('toss-watch', { quota: 8000 });
+
+      expect(mockPrisma.position.findUnique).toHaveBeenCalledWith({
+        where: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.TOSS,
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+          },
+        },
+        select: { totalInvested: true },
+      });
+    });
+
     it('should not rebase non-infinite-buy quota updates', async () => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: '1',
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -319,6 +483,7 @@ describe('WatchStockService', () => {
     describe('V4 quota → 장부 잔금 동기화 (D10)', () => {
       const v4WatchStock = {
         id: '1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -455,6 +620,7 @@ describe('WatchStockService', () => {
   describe('convertToInfiniteBuyV4', () => {
     const baseWatchStock = {
       id: '1',
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NASD',
       stockCode: 'TQQQ',
@@ -480,6 +646,25 @@ describe('WatchStockService', () => {
       expect(result.warnings).toEqual([]);
       expect(result.applied).toBe(false);
       expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+    });
+
+    it('seeds a TOSS V4 conversion from only the TOSS position', async () => {
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ ...baseWatchStock, broker: Broker.TOSS });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      await service.convertToInfiniteBuyV4('1', true);
+
+      expect(mockPrisma.position.findUnique).toHaveBeenCalledWith({
+        where: {
+          broker_market_exchangeCode_stockCode: {
+            broker: Broker.TOSS,
+            market: 'OVERSEAS',
+            exchangeCode: 'NASD',
+            stockCode: 'TQQQ',
+          },
+        },
+        select: { totalInvested: true, quantity: true },
+      });
     });
 
     it('should seed turn/cashRemaining from an existing position in the front half with no warnings', async () => {
@@ -616,6 +801,18 @@ describe('WatchStockService', () => {
       mockPrisma.position.findUnique.mockResolvedValue(null);
 
       await expect(service.convertToInfiniteBuyV4('1', false)).rejects.toThrow('전환 도중 전략이 변경되어 중단합니다');
+      expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses conversion when the broker unit changes after position seeding', async () => {
+      mockPrisma.watchStock.findUnique
+        .mockResolvedValueOnce(baseWatchStock)
+        .mockResolvedValueOnce({ ...baseWatchStock, broker: Broker.TOSS });
+      mockPrisma.position.findUnique.mockResolvedValue({ totalInvested: 100000, quantity: 30 });
+
+      await expect(service.convertToInfiniteBuyV4('1', false)).rejects.toThrow(
+        '전환 도중 관심종목 식별자가 변경되어 중단합니다',
+      );
       expect(mockPrisma.watchStock.update).not.toHaveBeenCalled();
     });
   });

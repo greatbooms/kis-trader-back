@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ApprovalStatus,
+  Broker,
   Market,
   OrderStatus,
   OrderType,
@@ -60,6 +61,10 @@ export class TradingSellApprovalService {
     orderType: OrderType,
   ): Promise<boolean> {
     signal = this.normalizeApprovalSignal(signal);
+    if (!signal.broker) {
+      this.logger.warn(`[UNKNOWN ${signal.stockCode}] Broker is required before sell approval admission`);
+      return false;
+    }
     const avgPrice = this.asFiniteNumber(
       ctx?.position?.avgPrice,
       signal.price,
@@ -80,11 +85,12 @@ export class TradingSellApprovalService {
     const requestedAt = new Date();
 
     await this.expireDueApprovalPairs(signal, requestedAt);
-    const brokerContext = this.brokerContext.getCurrentContext();
+    const brokerContext = this.brokerContext.getCurrentContext(signal.broker);
     let admitted;
     try {
       admitted = await this.orderGuard.admit(
         {
+          broker: signal.broker,
           market: signal.market,
           exchangeCode: signal.exchangeCode,
           stockCode: signal.stockCode,
@@ -93,6 +99,7 @@ export class TradingSellApprovalService {
         async (tx) => {
           const recentNotification = await tx.stopLossApproval.findFirst({
             where: {
+              tradeRecord: { broker: signal.broker },
               market: signal.market as Market,
               exchangeCode: signal.exchangeCode,
               stockCode: signal.stockCode,
@@ -117,6 +124,7 @@ export class TradingSellApprovalService {
 
           const record = await tx.tradeRecord.create({
             data: {
+              broker: signal.broker,
               market: signal.market as Market,
               exchangeCode: signal.exchangeCode,
               stockCode: signal.stockCode,
@@ -179,6 +187,7 @@ export class TradingSellApprovalService {
       let deliveryReceivedAt: Date | null = null;
       try {
         slackResult = await this.slackService.sendStopLossApproval({
+          broker: signal.broker,
           approvalId: existingApproval.id,
           tradeRecordId,
           stockCode: signal.stockCode,
@@ -200,7 +209,7 @@ export class TradingSellApprovalService {
         deliveryReceivedAt = new Date();
       } catch (error) {
         this.logger.warn(
-          `[${signal.stockCode}] Sell approval Slack delivery failed: ${this.errorMessage(error)}`,
+          `[${signal.broker} ${signal.stockCode}] Sell approval Slack delivery failed: ${this.errorMessage(error)}`,
         );
       }
 
@@ -263,11 +272,11 @@ export class TradingSellApprovalService {
 
     if (slackApprovalSent) {
       this.logger.log(
-        `[${signal.stockCode}] Sell approval delivered; awaiting administrator decision`,
+        `[${signal.broker} ${signal.stockCode}] Sell approval delivered; awaiting administrator decision`,
       );
     } else {
       this.logger.warn(
-        `[${signal.stockCode}] Sell approval delivery failed: approval EXPIRED, trade CANCELLED`,
+        `[${signal.broker} ${signal.stockCode}] Sell approval delivery failed: approval EXPIRED, trade CANCELLED`,
       );
     }
     return false;
@@ -276,6 +285,7 @@ export class TradingSellApprovalService {
   async logApprovedOrderSubmission(
     record: {
       id: string;
+      broker: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -286,7 +296,8 @@ export class TradingSellApprovalService {
   ): Promise<void> {
     const watchStock = await this.prisma.watchStock.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,
@@ -483,6 +494,7 @@ export class TradingSellApprovalService {
     await this.prisma.$transaction(async (tx) => {
       const dueApprovals = await tx.stopLossApproval.findMany({
         where: {
+          tradeRecord: { broker: signal.broker },
           market: signal.market as Market,
           exchangeCode: signal.exchangeCode,
           stockCode: signal.stockCode,
@@ -528,6 +540,7 @@ export class TradingSellApprovalService {
   private async reloadPendingApproval(signal: TradingSignal): Promise<boolean> {
     const pendingApproval = await this.prisma.stopLossApproval.findFirst({
       where: {
+        tradeRecord: { broker: signal.broker },
         market: signal.market as Market,
         exchangeCode: signal.exchangeCode,
         stockCode: signal.stockCode,
@@ -564,7 +577,7 @@ export class TradingSellApprovalService {
       });
     } catch (error) {
       this.logger.warn(
-        `[${ctx.watchStock.stockCode}] Sell approval execution log failed: ${this.errorMessage(error)}`,
+        `[${ctx.watchStock.broker} ${ctx.watchStock.stockCode}] Sell approval execution log failed: ${this.errorMessage(error)}`,
       );
     }
   }

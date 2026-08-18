@@ -25,7 +25,8 @@
     "client:codegen": "cd client && yarn codegen",
     "build:all": "yarn client:build && yarn build",
     "backtest": "set -a; source .env.dev; set +a; ts-node -r dotenv/config src/backtest/runner/backtest-cli.ts dotenv_config_path=.env.dev",
-    "backtest:prod": "set -a; source .env.prod; set +a; ts-node -r dotenv/config src/backtest/runner/backtest-cli.ts dotenv_config_path=.env.prod"
+    "backtest:prod": "set -a; source .env.prod; set +a; ts-node -r dotenv/config src/backtest/runner/backtest-cli.ts dotenv_config_path=.env.prod",
+    "toss:smoke": "ts-node -r dotenv/config scripts/toss-smoke.ts"
   },
   "keywords": [],
   "author": "",

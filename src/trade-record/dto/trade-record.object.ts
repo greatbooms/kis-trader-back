@@ -1,6 +1,7 @@
 import { ObjectType, Field, Float, Int, ID, registerEnumType } from '@nestjs/graphql';
 import {
   CancellationAttemptStatus,
+  Broker,
   Market,
   Side,
   OrderType,
@@ -15,6 +16,9 @@ registerEnumType(OrderStatus, { name: 'OrderStatus' });
 export class TradeRecordType {
   @Field(() => ID)
   id: string;
+
+  @Field(() => Broker)
+  broker: Broker;
 
   @Field(() => Market)
   market: Market;

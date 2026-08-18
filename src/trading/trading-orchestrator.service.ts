@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  Broker,
   CancellationAttemptStatus,
   Market,
   OrderStatus,
@@ -8,6 +9,7 @@ import {
   Side,
   WatchStockExecutionEventType,
 } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { TradingService } from './trading.service';
 import { MarketAnalysisService } from './market-analysis.service';
 import { MarketRegimeService } from './market-regime.service';
@@ -19,8 +21,9 @@ import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { getMarketHours } from '../kis/types/kis-config.types';
-import { StockPriceResult, UnfilledOrder } from '../kis/types/kis-api.types';
+import { StockPriceResult } from '../kis/types/kis-api.types';
 import {
+  BrokerScopedUnfilledOrder,
   StockStrategyContext,
   StockFundamentals,
   WatchStockConfig,
@@ -60,11 +63,10 @@ export class TradingOrchestrator {
   private readonly logger = new Logger(TradingOrchestrator.name);
   private readonly tradingEnabled: boolean;
 
-  // 루프 중복 실행 방지용 mutex
-  private isDomesticRunning = false;
-  private isOverseasRunning = false;
+  // broker×market 실행 단위별 중복 주문 방지 mutex
+  private readonly runningBrokerMarkets = new Set<string>();
 
-  // 리스크 알림 중복 방지 (market → 마지막 알림 날짜)
+  // 리스크 알림 중복 방지 (broker×market → 마지막 알림 날짜)
   private lastRiskAlertDate: Record<string, string> = {};
 
   constructor(
@@ -77,6 +79,7 @@ export class TradingOrchestrator {
     private marketStateSync: MarketStateSyncService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private prisma: PrismaService,
     private configService: ConfigService,
     private marketDataCache: MarketDataCacheService,
@@ -90,49 +93,39 @@ export class TradingOrchestrator {
 
   async executeDomestic(): Promise<void> {
     if (!this.marketStateSync.isMarketOpen('KRX')) return;
-    if (this.isDomesticRunning) return;
-    this.isDomesticRunning = true;
 
     try {
       if (await this.marketStateSync.isHoliday('DOMESTIC')) return;
       await this.executeMarket('DOMESTIC', 'KRX');
     } catch (e) {
       this.logger.error(`Trading domestic error: ${e.message}`);
-    } finally {
-      this.isDomesticRunning = false;
     }
   }
 
   async executeOverseas(): Promise<void> {
-    if (this.isOverseasRunning) return;
-    this.isOverseasRunning = true;
-
     try {
       const watchStocks = await this.prisma.watchStock.findMany({
         where: { market: Market.OVERSEAS, isActive: true, NOT: { strategyName: null } },
       });
-
-      const byExchange = new Map<string, typeof watchStocks>();
-      for (const w of watchStocks) {
-        const ex = w.exchangeCode;
-        if (!byExchange.has(ex)) byExchange.set(ex, []);
-        byExchange.get(ex)!.push(w);
-      }
-
-      for (const [exchangeCode, stocks] of byExchange) {
-        if (!this.marketStateSync.isMarketOpen(exchangeCode)) continue;
-        if (await this.marketStateSync.isExchangeHoliday(exchangeCode)) continue;
-        await this.executeMarket('OVERSEAS', exchangeCode, stocks);
-      }
+      await this.executeBrokerGroups('OVERSEAS', watchStocks, async (broker, stocks) => {
+        const byExchange = new Map<string, typeof stocks>();
+        for (const stock of stocks) {
+          if (!byExchange.has(stock.exchangeCode)) byExchange.set(stock.exchangeCode, []);
+          byExchange.get(stock.exchangeCode)!.push(stock);
+        }
+        for (const [exchangeCode, exchangeStocks] of byExchange) {
+          if (!this.marketStateSync.isMarketOpen(exchangeCode)) continue;
+          if (await this.marketStateSync.isExchangeHoliday(exchangeCode)) continue;
+          await this.executeBrokerMarket('OVERSEAS', exchangeCode, broker, exchangeStocks);
+        }
+      });
     } catch (e) {
       this.logger.error(`Trading overseas error: ${e.message}`);
-    } finally {
-      this.isOverseasRunning = false;
     }
   }
 
   isBusy(): boolean {
-    return this.isDomesticRunning || this.isOverseasRunning;
+    return this.runningBrokerMarkets.size > 0;
   }
 
   /** 시장 레짐 판별 (cron 트리거용) */
@@ -188,6 +181,10 @@ export class TradingOrchestrator {
       return { success: false, message: '전략이 설정되지 않은 관심종목입니다.' };
     }
 
+    if (!this.registry.isActive(watchStock.broker)) {
+      return { success: false, message: `${watchStock.broker} 브로커가 비활성화되어 수동 실행할 수 없습니다.` };
+    }
+
     const strategy = this.strategyRegistry.getStrategy(watchStock.strategyName);
     if (!strategy) {
       return { success: false, message: `알 수 없는 전략입니다: ${watchStock.strategyName}` };
@@ -203,6 +200,7 @@ export class TradingOrchestrator {
 
     const openOrder = await this.prisma.tradeRecord.findFirst({
       where: {
+        broker: watchStock.broker,
         market: watchStock.market,
         exchangeCode: watchStock.exchangeCode,
         stockCode: watchStock.stockCode,
@@ -247,6 +245,7 @@ export class TradingOrchestrator {
     const todayRange = this.getKstDayRange();
     const existingTrade = await this.prisma.tradeRecord.findFirst({
       where: {
+        broker: watchStock.broker,
         market: watchStock.market,
         exchangeCode: watchStock.exchangeCode,
         stockCode: watchStock.stockCode,
@@ -408,19 +407,64 @@ export class TradingOrchestrator {
 
     if (watchStocks.length === 0) return;
 
+    await this.executeBrokerGroups(
+      market,
+      watchStocks,
+      (broker, stocks) => this.executeBrokerMarket(market, exchangeCode, broker, stocks),
+    );
+  }
+
+  private async executeBrokerGroups(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    watchStocks: any[],
+    execute: (broker: Broker, stocks: any[]) => Promise<void>,
+  ): Promise<void> {
+    const active = new Set(this.registry.getActive().map((port) => port.broker));
+    const byBroker = new Map<Broker, any[]>();
+    for (const stock of watchStocks) {
+      if (!stock.broker || !active.has(stock.broker)) continue;
+      if (stock.broker === Broker.TOSS && !this.tradingEnabled) continue;
+      if (!byBroker.has(stock.broker)) byBroker.set(stock.broker, []);
+      byBroker.get(stock.broker)!.push(stock);
+    }
+
+    for (const [broker, stocks] of byBroker) {
+      const key = `${broker}:${market}`;
+      if (this.runningBrokerMarkets.has(key)) continue;
+      this.runningBrokerMarkets.add(key);
+      try {
+        await execute(broker, stocks);
+      } catch (e) {
+        this.logger.warn(`[${broker} ${market}] Trading group failed: ${e.message}`);
+      } finally {
+        this.runningBrokerMarkets.delete(key);
+      }
+    }
+  }
+
+  private async executeBrokerMarket(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    exchangeCode: string,
+    broker: Broker,
+    watchStocks: any[],
+  ): Promise<void> {
+
     // 2. 공통 데이터 한 번만 조회
     const regime = await this.marketRegimeService.getRegime(market, exchangeCode);
-    const riskState = await this.riskManagement.evaluateRisk(market);
+    const riskState = await this.riskManagement.evaluateRisk(broker, market);
 
     // 리스크 경고 Slack 알림 (같은 시장은 하루 1회만)
     const alertDate = this.getKSTDate();
-    if (riskState.reasons.length > 0 && this.slackService?.isEnabled() && this.lastRiskAlertDate[market] !== alertDate) {
-      this.lastRiskAlertDate[market] = alertDate;
+    const riskAlertKey = `${broker}:${market}`;
+    if (riskState.reasons.length > 0 && this.slackService?.isEnabled() && this.lastRiskAlertDate[riskAlertKey] !== alertDate) {
+      this.lastRiskAlertDate[riskAlertKey] = alertDate;
       const latestSnapshot = await this.prisma.riskSnapshot.findFirst({
-        where: { market: market as Market },
+        where: { broker, market: market as Market },
         orderBy: { createdAt: 'desc' },
       });
+      const crossBrokerExposures = await this.getCrossBrokerExposures(market);
       this.slackService.sendRiskAlert({
+        broker,
         market,
         riskType: riskState.liquidateAll ? 'MDD_LIQUIDATE' : 'MDD_BUY_BLOCK',
         reasons: riskState.reasons,
@@ -433,6 +477,7 @@ export class TradingOrchestrator {
           dailyPnlRate: riskState.dailyPnlRate,
           positionCount: riskState.positionCount,
           investedRate: riskState.investedRate,
+          crossBrokerExposures,
         },
       });
     }
@@ -440,16 +485,16 @@ export class TradingOrchestrator {
     const marketCondition = await this.marketAnalysis.getMarketCondition(exchangeCode);
 
     const positions = await this.prisma.position.findMany({
-      where: { market: market as Market },
+      where: { broker, market: market as Market },
     });
 
     await this.orderSyncService.syncMarketOrders(
       market,
       positions.map((position) => this.toPositionSnapshot(position)),
-      { force: true },
+      { force: true, broker },
     );
 
-    const unfilledOrders = await this.marketStateSync.getUnfilledOrders(market);
+    const unfilledOrders = await this.marketStateSync.getUnfilledOrders(market, broker);
 
     const totalPortfolioValue = positions.reduce(
       (sum, p) => sum + Number(p.quantity) * Number(p.currentPrice),
@@ -511,7 +556,7 @@ export class TradingOrchestrator {
       const state = strategyStates.get(strategyName);
       const strategy = state?.strategy;
       if (!strategy) {
-        this.logger.warn(`Unknown strategy: ${strategyName}`);
+        this.logger.warn(`[${broker} ${market}] Unknown strategy: ${strategyName}`);
         continue;
       }
 
@@ -545,7 +590,7 @@ export class TradingOrchestrator {
           });
           if (context) contexts.push(context);
         } catch (e) {
-          this.logger.error(`Error building context for ${ws.stockCode}: ${e.message}`);
+          this.logger.error(`[${ws.broker} ${ws.stockCode}] Error building context: ${e.message}`);
         }
       }
 
@@ -559,12 +604,12 @@ export class TradingOrchestrator {
     let cashAvailable = 0;
     try {
       if (market === 'DOMESTIC') {
-        const buyable = await this.kisDomestic.getBuyableAmount();
+        const buyable = await this.registry.get(broker).getDomesticBuyableAmount();
         cashAvailable = buyable.cashAvailable;
       } else {
         const firstStock = watchStocks[0];
         if (firstStock) {
-          const buyable = await this.kisOverseas.getBuyableAmount(
+          const buyable = await this.registry.get(broker).getOverseasBuyableAmount(
             firstStock.exchangeCode,
             firstStock.stockCode,
             1,
@@ -572,15 +617,17 @@ export class TradingOrchestrator {
           cashAvailable = buyable.foreignCurrencyAvailable;
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      this.logger.warn(`[${broker} ${market}] Failed to read cash for risk snapshot: ${e.message}`);
+    }
 
-    await this.riskManagement.saveRiskSnapshot(market, totalPortfolioValue, cashAvailable);
+    await this.riskManagement.saveRiskSnapshot(broker, market, totalPortfolioValue, cashAvailable);
 
   }
 
   private async syncLatestMarketStateBeforeDailySummary(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
     try {
-      await this.marketStateSync.syncMarketPortfolioOnly(market);
+      await this.marketStateSync.syncMarketPortfolioOnly(market, { failOnAnyError: true });
       const latestPositions = await this.prisma.position.findMany({
         where: { market: market as Market },
       });
@@ -588,13 +635,49 @@ export class TradingOrchestrator {
       await this.orderSyncService.syncMarketOrders(
         market,
         latestPositions.map((position) => this.toPositionSnapshot(position)),
-        { force: true },
+        { force: true, failOnAnyError: true },
       );
       return true;
     } catch (e) {
       this.logger.warn(`Failed to sync latest ${market} state before daily summary: ${e.message}`);
       return false;
     }
+  }
+
+  private async getCrossBrokerExposures(market: 'DOMESTIC' | 'OVERSEAS') {
+    const positions = await this.prisma.position.findMany({
+      where: { market: market as Market },
+    });
+    const byStock = new Map<string, {
+      exchangeCode: string;
+      stockCode: string;
+      brokerValues: Map<Broker, number>;
+    }>();
+    for (const position of positions) {
+      const key = `${position.exchangeCode}:${position.stockCode}`;
+      if (!byStock.has(key)) {
+        byStock.set(key, {
+          exchangeCode: position.exchangeCode,
+          stockCode: position.stockCode,
+          brokerValues: new Map(),
+        });
+      }
+      const brokerValues = byStock.get(key)!.brokerValues;
+      const value = Number(position.quantity) * Number(position.currentPrice);
+      brokerValues.set(position.broker, (brokerValues.get(position.broker) ?? 0) + value);
+    }
+    return Array.from(byStock.values(), ({ exchangeCode, stockCode, brokerValues }) => {
+      const brokers = Array.from(brokerValues, ([positionBroker, value]) => ({
+        broker: positionBroker,
+        value,
+      }));
+      return {
+        exchangeCode,
+        stockCode,
+        totalValue: brokers.reduce((sum, item) => sum + item.value, 0),
+        brokers,
+      };
+    });
   }
 
   async sendDomesticDailySummary(): Promise<void> {
@@ -639,13 +722,16 @@ export class TradingOrchestrator {
         return;
       }
 
-      const summary = await this.tradingSlackCommandsService.buildDailySummary({
-        summaryTitle: scope.summaryTitle,
-        market: scope.market,
-        exchangeCodes: scope.exchangeCodes,
-        tradeStart: scope.tradeStart,
-        tradeEnd: scope.tradeEnd,
-      });
+      const summary = {
+        ...await this.tradingSlackCommandsService.buildDailySummary({
+          summaryTitle: scope.summaryTitle,
+          market: scope.market,
+          exchangeCodes: scope.exchangeCodes,
+          tradeStart: scope.tradeStart,
+          tradeEnd: scope.tradeEnd,
+        }),
+        crossBrokerExposures: await this.getCrossBrokerExposures(scope.market),
+      };
 
       const hasHeldPositions = (summary.marketSummaries?.length ?? 0) > 0;
       const hasSessionTrades = summary.todayBuyCount > 0 || summary.todaySellCount > 0;
@@ -703,7 +789,7 @@ export class TradingOrchestrator {
     marketRegime: any;
     riskState: any;
     today: string;
-    unfilledOrders: UnfilledOrder[];
+    unfilledOrders: BrokerScopedUnfilledOrder[];
     caches: {
       investorTrade: Map<string, Promise<any[] | undefined>>;
       dividendSchedule: Map<string, Promise<any[] | undefined>>;
@@ -722,11 +808,16 @@ export class TradingOrchestrator {
     // 종목별 미체결 주문 → continuous 전략의 중복 주문 방지 플래그
     const stockOpenOrders = unfilledOrders.filter(
       (order) =>
-        order.stockCode === ws.stockCode
+        order.broker === ws.broker
+        && order.stockCode === ws.stockCode
         && (!order.exchangeCode || order.exchangeCode === ws.exchangeCode),
     );
 
-    const pos = positions.find((p) => p.stockCode === ws.stockCode);
+    const pos = positions.find(
+      (p) => p.broker === ws.broker
+        && p.exchangeCode === ws.exchangeCode
+        && p.stockCode === ws.stockCode,
+    );
 
     const stockIndicators = await this.marketAnalysis.getStockIndicators(
       market, ws.exchangeCode, ws.stockCode, price.currentPrice,
@@ -738,27 +829,35 @@ export class TradingOrchestrator {
     let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
       try {
-        const buyable = await this.kisDomestic.getBuyableAmount();
+        const buyable = await this.registry
+          .get(ws.broker)
+          .getDomesticBuyableAmount();
         buyableAmount = buyable.cashAvailable;
         buyableMeta = {
-          source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
+          source: ws.broker === Broker.KIS
+            ? 'KIS_DOMESTIC_BUYABLE_AMOUNT'
+            : 'TOSS_DOMESTIC_BUYABLE_AMOUNT',
         };
       } catch (e) {
-        this.logger.warn(`Failed to get domestic buyable amount: ${e.message}`);
+        this.logger.warn(`[${ws.broker} ${ws.stockCode}] Failed to get domestic buyable amount: ${e.message}`);
       }
     } else {
       try {
-        const buyable = await this.kisOverseas.getBuyableAmount(
-          ws.exchangeCode, ws.stockCode, price.currentPrice,
-        );
+        const buyable = await this.registry
+          .get(ws.broker)
+          .getOverseasBuyableAmount(
+            ws.exchangeCode, ws.stockCode, price.currentPrice,
+          );
         buyableAmount = buyable.foreignCurrencyAvailable;
         buyableMeta = {
-          source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+          source: ws.broker === Broker.KIS
+            ? 'KIS_OVERSEAS_INQUIRE_PSAMOUNT'
+            : 'TOSS_OVERSEAS_BUYABLE_AMOUNT',
           maxQuantity: buyable.maxQuantity,
           priceUsed: price.currentPrice,
         };
       } catch (e) {
-        this.logger.warn(`Failed to get buyable amount for ${ws.stockCode}: ${e.message}`);
+        this.logger.warn(`[${ws.broker} ${ws.stockCode}] Failed to get buyable amount: ${e.message}`);
       }
     }
 
@@ -769,6 +868,7 @@ export class TradingOrchestrator {
     const [todayTrades, unresolvedIntents] = await Promise.all([
       this.prisma.tradeRecord.findMany({
         where: {
+          broker: ws.broker,
           market: market as Market,
           exchangeCode: ws.exchangeCode,
           stockCode: ws.stockCode,
@@ -780,6 +880,7 @@ export class TradingOrchestrator {
       }),
       this.prisma.tradeRecord.findMany({
         where: {
+          broker: ws.broker,
           market: market as Market,
           exchangeCode: ws.exchangeCode,
           stockCode: ws.stockCode,
@@ -815,6 +916,7 @@ export class TradingOrchestrator {
 
     const watchStockConfig: WatchStockConfig = {
       id: ws.id,
+      broker: ws.broker,
       market,
       exchangeCode: ws.exchangeCode,
       stockCode: ws.stockCode,
@@ -930,6 +1032,7 @@ export class TradingOrchestrator {
   private async buildManualExecutionContext(
     ws: {
       id: string;
+      broker: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -948,13 +1051,13 @@ export class TradingOrchestrator {
 
     const marketCondition = await this.marketAnalysis.getMarketCondition(ws.exchangeCode);
     const regime = await this.marketRegimeService.getRegime(market, ws.exchangeCode);
-    const riskState = await this.riskManagement.evaluateRisk(market);
+    const riskState = await this.riskManagement.evaluateRisk(ws.broker, market);
 
     // 수동 실행 전 최신 포지션 동기화
     await this.marketStateSync.syncMarketPortfolioOnly(market);
 
     const positions = await this.prisma.position.findMany({
-      where: { market: ws.market },
+      where: { broker: ws.broker, market: ws.market },
     });
 
     const totalPortfolioValue = positions.reduce(
@@ -966,7 +1069,11 @@ export class TradingOrchestrator {
       ? await this.kisDomestic.getPrice(ws.stockCode)
       : await this.kisOverseas.getPrice(ws.exchangeCode, ws.stockCode);
 
-    const pos = positions.find((p) => p.stockCode === ws.stockCode && p.exchangeCode === ws.exchangeCode);
+    const pos = positions.find(
+      (p) => p.broker === ws.broker
+        && p.stockCode === ws.stockCode
+        && p.exchangeCode === ws.exchangeCode,
+    );
 
     const stockIndicators = await this.marketAnalysis.getStockIndicators(
       market,
@@ -980,20 +1087,28 @@ export class TradingOrchestrator {
     let buyableAmount = 0;
     let buyableMeta: StockStrategyContext['buyableMeta'] | undefined;
     if (market === 'DOMESTIC') {
-      const buyable = await this.kisDomestic.getBuyableAmount();
+      const buyable = await this.registry
+        .get(ws.broker)
+        .getDomesticBuyableAmount();
       buyableAmount = buyable.cashAvailable;
       buyableMeta = {
-        source: 'KIS_DOMESTIC_BUYABLE_AMOUNT',
+        source: ws.broker === Broker.KIS
+          ? 'KIS_DOMESTIC_BUYABLE_AMOUNT'
+          : 'TOSS_DOMESTIC_BUYABLE_AMOUNT',
       };
     } else {
-      const buyable = await this.kisOverseas.getBuyableAmount(
+      const buyable = await this.registry
+        .get(ws.broker)
+        .getOverseasBuyableAmount(
         ws.exchangeCode,
         ws.stockCode,
         price.currentPrice,
       );
       buyableAmount = buyable.foreignCurrencyAvailable;
       buyableMeta = {
-        source: 'KIS_OVERSEAS_INQUIRE_PSAMOUNT',
+        source: ws.broker === Broker.KIS
+          ? 'KIS_OVERSEAS_INQUIRE_PSAMOUNT'
+          : 'TOSS_OVERSEAS_BUYABLE_AMOUNT',
         maxQuantity: buyable.maxQuantity,
         priceUsed: price.currentPrice,
       };
@@ -1057,6 +1172,7 @@ export class TradingOrchestrator {
     return {
       watchStock: {
         id: ws.id,
+        broker: ws.broker,
         market,
         exchangeCode: ws.exchangeCode,
         stockCode: ws.stockCode,
@@ -1163,12 +1279,13 @@ export class TradingOrchestrator {
   private async filterUnfilledOrdersForWatchStocks(
     market: 'DOMESTIC' | 'OVERSEAS',
     watchStocks: Array<{
+      broker: Broker;
       exchangeCode: string;
       stockCode: string;
       strategyName: string | null;
     }>,
-    orders: UnfilledOrder[],
-  ): Promise<UnfilledOrder[]> {
+    orders: BrokerScopedUnfilledOrder[],
+  ): Promise<BrokerScopedUnfilledOrder[]> {
     const orderNos = orders
       .map((order) => order.orderNo)
       .filter((orderNo): orderNo is string => Boolean(orderNo));
@@ -1201,10 +1318,16 @@ export class TradingOrchestrator {
               .filter(
                 (
                   watchStock,
-                ): watchStock is { exchangeCode: string; stockCode: string; strategyName: string } =>
+                ): watchStock is {
+                  broker: Broker;
+                  exchangeCode: string;
+                  stockCode: string;
+                  strategyName: string;
+                } =>
                   Boolean(watchStock.strategyName),
               )
               .map((watchStock) => ({
+                broker: watchStock.broker,
                 exchangeCode: watchStock.exchangeCode,
                 stockCode: watchStock.stockCode,
                 strategyName: watchStock.strategyName,
@@ -1213,17 +1336,18 @@ export class TradingOrchestrator {
         ],
       },
       select: {
+        broker: true,
         orderNo: true,
       },
     });
 
-    const cancelableOrderNos = new Set(
+    const cancelableOrders = new Set(
       openRecords
-        .map((record) => record.orderNo)
-        .filter((orderNo): orderNo is string => Boolean(orderNo)),
+        .filter((record) => Boolean(record.orderNo))
+        .map((record) => `${record.broker}:${record.orderNo}`),
     );
 
-    return orders.filter((order) => cancelableOrderNos.has(order.orderNo));
+    return orders.filter((order) => cancelableOrders.has(`${order.broker}:${order.orderNo}`));
   }
 
   // ========== 재무 데이터 조회 ==========
@@ -1491,12 +1615,14 @@ export class TradingOrchestrator {
   }
 
   private toPositionSnapshot(position: {
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
     quantity: number;
   }): PositionQuantitySnapshot {
     return {
+      broker: position.broker,
       market: position.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: position.exchangeCode,
       stockCode: position.stockCode,

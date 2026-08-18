@@ -11,6 +11,7 @@ export type SellApprovalWorkflowReason =
   | 'NO_HOLDING'
   | 'SUBMISSION_CLAIM_LOST'
   | 'BROKER_CONTEXT_MISMATCH'
+  | 'BROKER_DISABLED'
   | 'BROKER_REJECTED'
   | 'BROKER_UNKNOWN'
   | 'STATE_CHANGED'

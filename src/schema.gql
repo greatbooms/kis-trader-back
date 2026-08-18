@@ -45,9 +45,15 @@ type MarketRegimeType {
 }
 
 type BrokerContextPreviewType {
+  broker: Broker!
   environment: BrokerEnvironment!
   maskedAccount: String!
   contextToken: String!
+}
+
+enum Broker {
+  KIS
+  TOSS
 }
 
 enum BrokerEnvironment {
@@ -81,6 +87,7 @@ enum Side {
 
 type BrokerOrderRecoveryItemType {
   tradeRecordId: ID!
+  broker: Broker!
   lifecycle: String!
   market: Market!
   exchangeCode: String!
@@ -155,6 +162,7 @@ type BrokerOrderCandidateInspectionType {
 
 type WatchStockType {
   id: ID!
+  broker: Broker!
   market: Market!
   exchangeCode: String!
   stockCode: String!
@@ -285,6 +293,7 @@ type WatchStockExecutionPreviewResultType {
 
 type TradeRecordType {
   id: ID!
+  broker: Broker!
   market: Market!
   exchangeCode: String!
   stockCode: String!
@@ -307,6 +316,7 @@ type TradeRecordType {
 
 type PositionType {
   id: ID!
+  broker: Broker!
   market: Market!
   exchangeCode: String!
   stockCode: String!
@@ -657,7 +667,7 @@ type Query {
   strategyAllocations(input: StrategyAllocationsFilterInput!): [StrategyAllocationType!]!
   marketRegime(input: MarketRegimeFilterInput!): MarketRegimeType!
   brokerOrderRecoveryItems: [BrokerOrderRecoveryItemType!]!
-  currentBrokerContextPreview: BrokerContextPreviewType!
+  currentBrokerContextPreview(broker: Broker!): BrokerContextPreviewType!
   watchStocks(input: WatchStocksFilterInput): [WatchStockType!]!
   watchStock(id: ID!): WatchStockType
   watchStockExecutionLogs(watchStockId: String!, limit: Float): [WatchStockExecutionLogType!]!
@@ -701,6 +711,7 @@ input WatchStocksFilterInput {
 }
 
 input TradeFilterInput {
+  broker: Broker
   market: Market
   side: Side
   stockCode: String
@@ -812,6 +823,7 @@ input MatchExistingBrokerOrderInput {
 }
 
 input CreateWatchStockInput {
+  broker: Broker! = KIS
   market: Market!
   exchangeCode: String!
   stockCode: String!
@@ -825,6 +837,7 @@ input CreateWatchStockInput {
 }
 
 input UpdateWatchStockInput {
+  broker: Broker
   exchangeCode: String
   stockName: String
   isActive: Boolean
@@ -838,6 +851,7 @@ input UpdateWatchStockInput {
 }
 
 input ManualSellInput {
+  broker: Broker!
   stockCode: String!
   market: String!
   exchangeCode: String!

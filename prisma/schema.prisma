@@ -9,6 +9,7 @@ datasource db {
 
 model TradeRecord {
   id                         String                      @id @default(uuid())
+  broker                     Broker                      @default(KIS)
   market                     Market
   exchangeCode               String                      @map("exchange_code")
   stockCode                  String                      @map("stock_code")
@@ -48,6 +49,7 @@ model TradeRecord {
 
 model Position {
   id            String   @id @default(uuid())
+  broker        Broker   @default(KIS)
   market        Market
   exchangeCode  String   @map("exchange_code")
   stockCode     String   @map("stock_code")
@@ -61,11 +63,13 @@ model Position {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@unique([market, exchangeCode, stockCode])
+  @@unique([broker, market, exchangeCode, stockCode])
   @@map("positions")
 }
 
 model WatchStock {
   id               String                   @id @default(uuid())
+  broker           Broker                   @default(KIS)
   market           Market
   exchangeCode     String                   @map("exchange_code")
   stockCode        String                   @map("stock_code")
@@ -83,6 +87,7 @@ model WatchStock {
   executionLogs    WatchStockExecutionLog[]
 
   @@unique([market, exchangeCode, stockCode])
+  @@unique([broker, market, exchangeCode, stockCode])
   @@map("watch_stocks")
 }
 
@@ -109,6 +114,7 @@ model WatchStockExecutionLog {
 
 model RiskSnapshot {
   id             String   @id @default(uuid())
+  broker         Broker   @default(KIS)
   market         Market
   snapshotDate   String   @map("snapshot_date")
   portfolioValue Decimal  @map("portfolio_value") @db.Decimal(16, 4)
@@ -122,11 +128,13 @@ model RiskSnapshot {
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@unique([market, snapshotDate])
+  @@unique([broker, market, snapshotDate])
   @@map("risk_snapshots")
 }
 
 model StrategyAllocation {
   id             String   @id @default(uuid())
+  broker         Broker   @default(KIS)
   market         Market
   strategyName   String   @map("strategy_name")
   allocationRate Decimal  @map("allocation_rate") @db.Decimal(4, 3)
@@ -135,6 +143,7 @@ model StrategyAllocation {
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([market, strategyName])
+  @@unique([broker, market, strategyName])
   @@map("strategy_allocations")
 }
 
@@ -385,6 +394,11 @@ model HistoricalDailyPrice {
   @@unique([market, exchangeCode, stockCode, date])
   @@index([stockCode, date])
   @@map("historical_daily_prices")
+}
+
+enum Broker {
+  KIS
+  TOSS
 }
 
 enum Market {

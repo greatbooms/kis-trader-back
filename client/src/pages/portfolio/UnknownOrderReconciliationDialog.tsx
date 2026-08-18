@@ -10,8 +10,8 @@ import type {
 } from './types'
 
 const TITLES: Record<BrokerOrderRecoveryDialogMode, string> = {
-  ASSIGN_CONTEXT: '현재 KIS 계좌 연결',
-  CANDIDATES: 'KIS 주문 후보 확인',
+  ASSIGN_CONTEXT: '현재 증권사 계좌 연결',
+  CANDIDATES: '증권사 주문 후보 확인',
   LINK_CANDIDATE: '이 주문 연결',
   MATCH_EXISTING: '기존 기록과 동일 주문으로 확정',
   NOT_SUBMITTED: '미주문 확정',
@@ -73,7 +73,8 @@ export function UnknownOrderReconciliationDialog({
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="font-medium">이 기록에는 주문 당시 broker 계좌 정보가 없습니다.</p>
               <p className="mt-2">
-                현재 환경: <strong>{state.contextPreview?.environment ?? '-'}</strong>
+                증권사: <strong>{state.contextPreview?.broker ?? '-'}</strong>
+                {' · '}현재 환경: <strong>{state.contextPreview?.environment ?? '-'}</strong>
                 {' · '}계좌: <strong>{state.contextPreview?.maskedAccount ?? '-'}</strong>
               </p>
               <p className="mt-2 text-xs">
@@ -92,20 +93,20 @@ export function UnknownOrderReconciliationDialog({
 
           {mode === 'LINK_CANDIDATE' && candidate ? (
             <CandidateIdentity candidate={candidate}>
-              이 KIS 주문을 현재 불명 주문 기록에 연결합니다. 연결 후 일반 주문 동기화가 체결 상태를 확정합니다.
+              이 증권사 주문을 현재 불명 주문 기록에 연결합니다. 연결 후 일반 주문 동기화가 체결 상태를 확정합니다.
             </CandidateIdentity>
           ) : null}
 
           {mode === 'MATCH_EXISTING' && candidate ? (
             <CandidateIdentity candidate={candidate}>
-              이 KIS 주문은 기존 TradeRecord <strong>{candidate.existingTradeRecordId}</strong>와
+              이 증권사 주문은 기존 TradeRecord <strong>{candidate.existingTradeRecordId}</strong>와
               동일한 주문으로 표시됩니다. 현재 불명 기록에는 주문번호를 연결하지 않고 FAILED로 종료합니다.
             </CandidateIdentity>
           ) : null}
 
           {mode === 'NOT_SUBMITTED' ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-              완전한 KIS 주문 이력을 다시 조회해 후보가 0건일 때만 처리됩니다. 후보가 새로 발견되면 서버가 확정을 거부합니다.
+              완전한 증권사 주문 이력을 다시 조회해 후보가 0건일 때만 처리됩니다. 후보가 새로 발견되면 서버가 확정을 거부합니다.
             </div>
           ) : null}
 
@@ -115,7 +116,7 @@ export function UnknownOrderReconciliationDialog({
                 <>
                   <p className="font-medium text-amber-700">원주문이 아직 미체결 목록에 있습니다.</p>
                   <p className="mt-2 text-muted-foreground">
-                    취소 요청이 접수되지 않았다고 확정하려면 KIS 앱의 미체결 주문을 다시 확인하세요.
+                    취소 요청이 접수되지 않았다고 확정하려면 증권사 앱의 미체결 주문을 다시 확인하세요.
                   </p>
                   <Button
                     type="button"
@@ -152,7 +153,7 @@ export function UnknownOrderReconciliationDialog({
                 className="mt-0.5 h-4 w-4"
               />
               <span>
-                KIS 주문/미체결 이력과 표시된 TradeRecord 정보를 확인했으며, 이 작업이 주문을 다시 제출하지 않는 복구 처리임을 이해했습니다.
+                증권사 주문/미체결 이력과 표시된 TradeRecord 정보를 확인했으며, 이 작업이 주문을 다시 제출하지 않는 복구 처리임을 이해했습니다.
               </span>
             </label>
           ) : null}
@@ -224,7 +225,7 @@ function CandidateList({
   if (candidates.length === 0) {
     return (
       <div className="rounded-lg border border-border p-4 text-sm">
-        <p className="font-medium">일치하는 KIS 주문 후보가 없습니다.</p>
+        <p className="font-medium">일치하는 증권사 주문 후보가 없습니다.</p>
         <p className="mt-1 text-muted-foreground">확정 시점에 서버가 전체 이력을 다시 조회합니다.</p>
         <Button type="button" variant="outline" className="mt-4" onClick={onRequestNotSubmitted}>
           미주문 확정으로 이동

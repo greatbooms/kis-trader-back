@@ -76,11 +76,11 @@ export function UnknownOrderReconciliationCard() {
   const openItem = async (item: BrokerOrderRecoveryItem) => {
     if (!item.brokerContextAssigned) {
       await run(async () => {
-        const result = await getContextPreview()
+        const result = await getContextPreview({ variables: { broker: item.broker } })
         const contextPreview = result.data?.currentBrokerContextPreview
-        if (!contextPreview) throw new Error('현재 KIS 계좌 정보를 확인할 수 없습니다.')
+        if (!contextPreview) throw new Error(`현재 ${item.broker} 계좌 정보를 확인할 수 없습니다.`)
         setDialog({ mode: 'ASSIGN_CONTEXT', item, contextPreview })
-      }, '현재 KIS 계좌 정보를 확인하지 못했습니다.')
+      }, `현재 ${item.broker} 계좌 정보를 확인하지 못했습니다.`)
       return
     }
 
@@ -105,13 +105,13 @@ export function UnknownOrderReconciliationCard() {
         awaitRefetchQueries: true,
       })
       const inspection = result.data?.inspectBrokerOrderCandidates
-      if (!inspection) throw new Error('KIS 주문 후보 조회 결과가 없습니다.')
+      if (!inspection) throw new Error(`${item.broker} 주문 후보 조회 결과가 없습니다.`)
       setDialog({
         mode: 'CANDIDATES',
         item: inspection.recoveryItem,
         candidates: inspection.candidates,
       })
-    }, 'KIS 주문 후보를 확인하지 못했습니다.')
+    }, `${item.broker} 주문 후보를 확인하지 못했습니다.`)
   }
 
   const selectCandidate = (candidate: BrokerOrderRecoveryCandidate) => {
@@ -135,7 +135,7 @@ export function UnknownOrderReconciliationCard() {
       switch (dialog.mode) {
         case 'ASSIGN_CONTEXT':
           if (!dialog.contextPreview) {
-            throw new Error('확인한 KIS 계좌 정보가 없습니다.')
+            throw new Error('확인한 증권사 계좌 정보가 없습니다.')
           }
           await assignContext({
             variables: {
@@ -219,7 +219,7 @@ export function UnknownOrderReconciliationCard() {
             {items.length > 0 ? <Badge variant="warning">{items.length}건</Badge> : null}
           </div>
           <p className="text-sm text-muted-foreground">
-            KIS 응답이 불명확했던 주문입니다. 상태를 확인하기 전에는 같은 주문이나 취소를 다시 제출하지 마세요.
+            증권사 응답이 불명확했던 주문입니다. 상태를 확인하기 전에는 같은 주문이나 취소를 다시 제출하지 마세요.
           </p>
         </CardHeader>
         <CardContent>
@@ -245,6 +245,7 @@ export function UnknownOrderReconciliationCard() {
                         <Badge variant="danger">
                           {item.lifecycle === 'CANCELLATION' ? '취소 결과 불명' : '주문 제출 결과 불명'}
                         </Badge>
+                        <Badge variant="outline">{item.broker}</Badge>
                         <span className="font-medium">{item.stockName}</span>
                         <span className="text-xs text-muted-foreground">{item.stockCode} · {item.exchangeCode}</span>
                       </div>
@@ -265,7 +266,7 @@ export function UnknownOrderReconciliationCard() {
                         ? '현재 계좌 연결'
                         : item.lifecycle === 'CANCELLATION'
                           ? '취소 상태 조회'
-                          : 'KIS 주문 조회'}
+                          : `${item.broker} 주문 조회`}
                     </Button>
                   </div>
                 )
@@ -308,6 +309,6 @@ export function UnknownOrderReconciliationCard() {
 function requireCandidate(
   candidate?: BrokerOrderRecoveryCandidate,
 ): BrokerOrderRecoveryCandidate {
-  if (!candidate) throw new Error('선택한 KIS 주문 후보가 없습니다.')
+  if (!candidate) throw new Error('선택한 증권사 주문 후보가 없습니다.')
   return candidate
 }

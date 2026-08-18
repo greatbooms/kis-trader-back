@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { BrokerOrderActionChannel } from '@prisma/client';
+import { Broker, BrokerOrderActionChannel } from '@prisma/client';
 import { TradingBrokerOrderRecoveryService } from './trading-broker-order-recovery.service';
 import { TradingSlackActorAuthorizationService } from './trading-slack-actor-authorization.service';
 import { TradingSlackRecoveryPresentationService } from './trading-slack-recovery-presentation.service';
@@ -147,7 +147,7 @@ export class TradingSlackRecoveryActionsService implements OnModuleInit {
       );
       switch (action) {
         case 'ASSIGN_CONTEXT': {
-          const preview = this.recoveryService.getCurrentContextPreview();
+          const preview = this.recoveryService.getCurrentContextPreview(payload.broker);
           await this.presentation.openContextAssignmentModal(
             triggerId,
             { ...payload, contextToken: preview.contextToken },
@@ -234,10 +234,10 @@ export class TradingSlackRecoveryActionsService implements OnModuleInit {
         payload.origin ?? null,
         actor,
         item,
-        this.resolutionLabel(action),
+        this.resolutionLabel(action, payload.broker),
       );
     } catch (error) {
-      this.logger.warn(`Slack recovery mutation failed: ${this.errorMessage(error)}`);
+      this.logger.warn(`[${payload.broker} RECOVERY] Slack recovery mutation failed: ${this.errorMessage(error)}`);
       await this.presentation.presentFailure(
         payload.origin ?? null,
         actor,
@@ -298,12 +298,16 @@ export class TradingSlackRecoveryActionsService implements OnModuleInit {
       200,
     );
     const origin = this.parseOrigin(parsed.origin);
+    if (parsed.broker !== Broker.KIS && parsed.broker !== Broker.TOSS) {
+      throw new Error('Invalid broker');
+    }
     const contextToken = parsed.contextToken === undefined
       ? undefined
       : this.requiredString(parsed.contextToken, 'Broker context token', 200);
     return {
       v: 1,
       tradeRecordId,
+      broker: parsed.broker,
       ...(contextToken ? { contextToken } : {}),
       ...(origin ? { origin } : {}),
     };
@@ -406,10 +410,10 @@ export class TradingSlackRecoveryActionsService implements OnModuleInit {
     };
   }
 
-  private resolutionLabel(action: SlackRecoveryModalAction): string {
+  private resolutionLabel(action: SlackRecoveryModalAction, broker: Broker): string {
     switch (action) {
       case 'ASSIGN_CONTEXT': return '현재 계좌 컨텍스트 지정 완료';
-      case 'LINK_CANDIDATE': return 'KIS 주문 연결 완료';
+      case 'LINK_CANDIDATE': return `${broker} 주문 연결 완료`;
       case 'NOT_SUBMITTED': return '미주문 확정 완료';
       case 'MATCH_EXISTING': return '기존 기록과 동일 확정 완료';
       case 'CANCELLATION_NOT_ACCEPTED': return '취소 미접수 확정 완료';

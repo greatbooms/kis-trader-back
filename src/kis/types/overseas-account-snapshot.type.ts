@@ -1,9 +1,1 @@
-import type {
-  BalanceItem,
-  OverseasCashBalance,
-} from './kis-api.types';
-
-export interface OverseasAccountSnapshot {
-  balance: BalanceItem[];
-  cashBalances: OverseasCashBalance[];
-}
+export type { OverseasAccountSnapshot } from '../../common/types/broker-io.type';

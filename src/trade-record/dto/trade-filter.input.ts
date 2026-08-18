@@ -1,8 +1,11 @@
 import { InputType, Field, Int } from '@nestjs/graphql';
-import { Market, Side } from '@prisma/client';
+import { Broker, Market, Side } from '@prisma/client';
 
 @InputType()
 export class TradeFilterInput {
+  @Field(() => Broker, { nullable: true })
+  broker?: Broker;
+
   @Field(() => Market, { nullable: true })
   market?: Market;
 

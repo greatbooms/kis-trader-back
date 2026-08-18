@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Broker } from '@prisma/client';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { DailyPrice, StockPriceResult } from '../kis/types/kis-api.types';
@@ -511,6 +512,7 @@ export class ScreeningAnalyzer {
     return {
       watchStock: {
         id: `screening:${candidate.exchangeCode}:${candidate.stockCode}`,
+        broker: Broker.KIS,
         market: candidate.market,
         exchangeCode: candidate.exchangeCode,
         stockCode: candidate.stockCode,

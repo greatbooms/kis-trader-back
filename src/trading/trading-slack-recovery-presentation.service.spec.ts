@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerOrderActionChannel,
   CancellationAttemptStatus,
   Market,
@@ -35,6 +36,7 @@ const recoveryItem = (
   overrides: Partial<BrokerOrderRecoveryItem> = {},
 ): BrokerOrderRecoveryItem => ({
     tradeRecordId: 'trade-1',
+    broker: Broker.KIS,
     lifecycle: 'SUBMISSION',
     market: Market.OVERSEAS,
     exchangeCode: 'NASD',
@@ -91,6 +93,7 @@ const recoveryItem = (
     async (lifecycle, brokerContextAssigned, actionId) => {
       const origin = await service.sendUnknownAlert({
         tradeRecordId: 'trade-safe',
+        broker: Broker.KIS,
         lifecycle,
         market: Market.OVERSEAS,
         exchangeCode: 'NASD',
@@ -110,6 +113,7 @@ const recoveryItem = (
       expect(payload.channel).toBe('#recovery');
       expect(serialized).toContain('trade-safe');
       expect(serialized).toContain('TQQQ');
+      expect(serialized).toContain('[KIS TQQQ]');
       expect(serialized).toContain('3');
       expect(serialized).toContain('75.25');
       expect(serialized).toContain('다시 제출하지 마세요');
@@ -148,6 +152,7 @@ const recoveryItem = (
     slackService.getConfiguredApp.mockReturnValue(null);
     await expect(service.sendUnknownAlert({
       tradeRecordId: 'trade-1',
+      broker: Broker.KIS,
       lifecycle: 'SUBMISSION',
       market: Market.DOMESTIC,
       exchangeCode: 'KRX',
@@ -165,6 +170,7 @@ const recoveryItem = (
     postMessage.mockResolvedValue({ ok: true });
     await expect(service.sendUnknownAlert({
       tradeRecordId: 'trade-2',
+      broker: Broker.KIS,
       lifecycle: 'SUBMISSION',
       market: Market.DOMESTIC,
       exchangeCode: 'KRX',
@@ -428,7 +434,7 @@ const recoveryItem = (
 
   it.each([
     ['LIST', '확인 필요 주문 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.'],
-    ['INSPECTION', 'KIS 조회 결과를 확인하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.'],
+    ['INSPECTION', '브로커 조회 결과를 확인하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.'],
     ['MODAL', 'Slack 확인 창을 열지 못했습니다. 다시 시도하거나 웹 포트폴리오를 사용하세요.'],
     ['MUTATION', '복구 작업을 확정하지 못했습니다. 웹 포트폴리오에서 현재 상태를 확인하세요.'],
   ] as const)(

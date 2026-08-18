@@ -47,6 +47,7 @@ export class TradingBrokerOrderResolutionService {
     const exactRows = await this.prisma.tradeRecord.findMany({
       where: {
         id: { not: request.tradeRecordId },
+        broker: request.broker,
         brokerEnvironment: request.brokerEnvironment,
         brokerAccountHash: request.brokerAccountHash,
         market: request.market,
@@ -69,6 +70,7 @@ export class TradingBrokerOrderResolutionService {
     const legacyRows = await this.prisma.tradeRecord.findMany({
       where: {
         id: { not: request.tradeRecordId },
+        broker: request.broker,
         market: request.market,
         createdAt: {
           gte: new Date(minDay - KST_OFFSET_MS),
@@ -153,9 +155,10 @@ export class TradingBrokerOrderResolutionService {
 
     const matchRequest = this.toMatchRequest(record);
     const candidates = await this.matcher.findSubmissionCandidates(matchRequest);
-    const currentContext = this.brokerContextService.getCurrentContext();
+    const currentContext = this.brokerContextService.getCurrentContext(record.broker);
     if (
-      record.brokerEnvironment !== currentContext.environment
+      record.broker !== currentContext.broker
+      || record.brokerEnvironment !== currentContext.environment
       || record.brokerAccountHash !== currentContext.accountHash
     ) {
       throw new Error(
@@ -171,7 +174,7 @@ export class TradingBrokerOrderResolutionService {
     ));
     if (!selected) {
       throw new Error(
-        `[RECOVERY ${identity.tradeRecordId}] Selected broker order is no longer present in complete KIS history`,
+        `[RECOVERY ${identity.tradeRecordId}] Selected broker order is no longer present in complete ${record.broker} history`,
       );
     }
     if (selected.existingTradeRecordId) {
@@ -187,6 +190,7 @@ export class TradingBrokerOrderResolutionService {
         const claimed = await tx.tradeRecord.updateMany({
           where: {
             id: identity.tradeRecordId,
+            broker: record.broker,
             status: OrderStatus.SUBMISSION_UNKNOWN,
             brokerEnvironment: record.brokerEnvironment,
             brokerAccountHash: record.brokerAccountHash,
@@ -298,7 +302,7 @@ export class TradingBrokerOrderResolutionService {
     ));
     if (!selected) {
       throw new Error(
-        `[RECOVERY ${identity.tradeRecordId}] Selected broker order is no longer present in complete KIS history`,
+        `[RECOVERY ${identity.tradeRecordId}] Selected broker order is no longer present in complete ${record.broker} history`,
       );
     }
     if (
@@ -323,6 +327,7 @@ export class TradingBrokerOrderResolutionService {
   private toMatchRequest(record: BrokerOrderRecoveryRecord): BrokerOrderMatchRequest {
     return {
       tradeRecordId: record.id,
+      broker: record.broker,
       market: record.market,
       exchangeCode: record.exchangeCode,
       stockCode: record.stockCode,
@@ -387,9 +392,10 @@ export class TradingBrokerOrderResolutionService {
     record: BrokerOrderRecoveryRecord,
     operation: string,
   ): void {
-    const currentContext = this.brokerContextService.getCurrentContext();
+    const currentContext = this.brokerContextService.getCurrentContext(record.broker);
     if (
-      record.brokerEnvironment !== currentContext.environment
+      record.broker !== currentContext.broker
+      || record.brokerEnvironment !== currentContext.environment
       || record.brokerAccountHash !== currentContext.accountHash
     ) {
       throw new Error(
@@ -426,6 +432,7 @@ export class TradingBrokerOrderResolutionService {
       const claimed = await tx.tradeRecord.updateMany({
         where: {
           id: record.id,
+          broker: record.broker,
           status: OrderStatus.SUBMISSION_UNKNOWN,
           brokerEnvironment: record.brokerEnvironment,
           brokerAccountHash: record.brokerAccountHash,
@@ -493,6 +500,7 @@ export class TradingBrokerOrderResolutionService {
     try {
       const watchStock = await this.prisma.watchStock.findFirst({
         where: {
+          broker: record.broker,
           market: record.market,
           exchangeCode: record.exchangeCode,
           stockCode: record.stockCode,
@@ -512,10 +520,10 @@ export class TradingBrokerOrderResolutionService {
           strategyName: watchStock.strategyName ?? record.strategyName,
           eventType: WatchStockExecutionEventType.ORDER_RECONCILIATION,
           message: action === BrokerOrderAction.BROKER_ORDER_LINKED
-            ? '불명 주문을 KIS 주문 기록에 연결'
+            ? `불명 주문을 ${record.broker} 주문 기록에 연결`
             : action === BrokerOrderAction.CONFIRMED_NOT_SUBMITTED
-              ? 'KIS 주문 이력 재조회 후 미주문으로 확정'
-              : 'KIS 주문을 기존 거래 기록과 동일한 주문으로 확정',
+              ? `${record.broker} 주문 이력 재조회 후 미주문으로 확정`
+              : `${record.broker} 주문을 기존 거래 기록과 동일한 주문으로 확정`,
           details: candidate
             ? {
                 action,
@@ -529,7 +537,7 @@ export class TradingBrokerOrderResolutionService {
       });
     } catch (error) {
       this.logger.warn(
-        `[RECOVERY ${record.id}] WatchStock recovery mirror failed: ${this.errorMessage(error)}`,
+        `[${record.broker} ${record.stockCode}] WatchStock recovery mirror failed (${record.id}): ${this.errorMessage(error)}`,
       );
     }
   }

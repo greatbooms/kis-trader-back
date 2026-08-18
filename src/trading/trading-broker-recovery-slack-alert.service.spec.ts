@@ -1,4 +1,5 @@
 import {
+  Broker,
   CancellationAttemptStatus,
   OrderStatus,
 } from '@prisma/client';
@@ -7,6 +8,7 @@ import { TradingBrokerRecoverySlackAlertService } from './trading-broker-recover
 describe('TradingBrokerRecoverySlackAlertService', () => {
   const submissionRecord = {
     id: 'trade-submission-unknown',
+    broker: Broker.KIS,
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',
@@ -64,6 +66,7 @@ describe('TradingBrokerRecoverySlackAlertService', () => {
     });
     expect(presentation.sendUnknownAlert).toHaveBeenCalledWith({
       tradeRecordId: 'trade-submission-unknown',
+      broker: Broker.KIS,
       lifecycle: 'SUBMISSION',
       market: 'OVERSEAS',
       exchangeCode: 'NASD',

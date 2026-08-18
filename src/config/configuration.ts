@@ -8,6 +8,11 @@ export default () => ({
     env: (process.env.KIS_ENV || 'paper') as 'paper' | 'prod',
     debugRawBalance: process.env.KIS_DEBUG_RAW_BALANCE === 'true',
   },
+  toss: {
+    clientId: process.env.TOSS_CLIENT_ID || '',
+    clientSecret: process.env.TOSS_CLIENT_SECRET || '',
+    accountNo: process.env.TOSS_ACCOUNT_NO || '',
+  },
   openDart: {
     apiKey: process.env.OPENDART_API_KEY || '',
   },
@@ -19,6 +24,16 @@ export default () => ({
   },
   trading: {
     enabled: process.env.TRADING_ENABLED?.trim().toLowerCase() === 'true',
+    brokers: {
+      kis: {
+        enabled: process.env.TRADING_BROKER_KIS_ENABLED === undefined
+          ? true
+          : process.env.TRADING_BROKER_KIS_ENABLED.trim().toLowerCase() === 'true',
+      },
+      toss: {
+        enabled: process.env.TRADING_BROKER_TOSS_ENABLED?.trim().toLowerCase() === 'true',
+      },
+    },
   },
   auth: {
     adminUsername: process.env.ADMIN_USERNAME || 'admin',

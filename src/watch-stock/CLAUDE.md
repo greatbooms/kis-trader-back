@@ -16,6 +16,7 @@
 
 ## 주의사항 / 비자명한 규칙
 - **글로벌 상한**: 활성 종목 총 30개 (`MAX_TOTAL_ACTIVE_WATCH_STOCKS`). create 시 `checkGlobalLimit` — 운영 안정성·KIS rate limit 고려한 hard cap
+- **broker가 WatchStock identity의 일부**: GraphQL create는 broker 생략 시 기존 호환을 위해 `KIS`가 기본이고, 동일 종목도 broker가 다르면 각각 등록할 수 있다. 등록 후 broker 변경은 상태 이월을 막기 위해 삭제 후 재등록만 허용한다. cycle/V4 시딩 등 Position 조회는 항상 WatchStock의 `(broker, market, exchangeCode, stockCode)` 전체 키를 사용한다.
 - **수동 트리거 흐름**: `triggerWatchStockNow` resolver → `TradingOrchestrator.triggerWatchStockNow` → orchestrator 내부에서 단일 watchStock에 대해 전략 평가 + 주문. `WatchStockService`가 직접 trading 로직 실행하지 않음 (모듈 책임 분리)
 - **"오늘 실행 미리보기"(`previewWatchStockExecution`)는 순수 조회**: `TradingOrchestrator.previewWatchStockExecution`이 `strategy.evaluateStock()`를 직접 호출해 결과를 그대로 반환한다 — `TradingService.executePerStockStrategy`를 거치지 않으므로 주문 제출/실행 로그/strategyParams 영속화가 전혀 없다. `trading.enabled`/시장 개장 여부와 무관하게 항상 호출 가능(KIS 시세·매수가능금액 GET과 멱등적 포지션 동기화만 수행)
 - **이월 금액(`accumulatedQuota`)**: infinite-buy 전략에서 매수 안 된 일별 quota를 이월 누적. `resetWatchStockCarry` mutation으로 초기화 가능. 내부 로직은 `TradingOrderReconciliationService`/`TradingService.handleStrategySignalFill`이 갱신

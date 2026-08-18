@@ -1,4 +1,5 @@
 import { DailyDcaStrategy } from './daily-dca.strategy';
+import { Broker } from '@prisma/client';
 import {
   StockStrategyContext,
   WatchStockConfig,
@@ -17,6 +18,7 @@ describe('DailyDcaStrategy', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-dca-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

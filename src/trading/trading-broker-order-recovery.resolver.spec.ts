@@ -1,5 +1,5 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
-import { BrokerOrderActionChannel } from '@prisma/client';
+import { Broker, BrokerOrderActionChannel } from '@prisma/client';
 import { GqlAuthGuard } from '../auth/auth.guard';
 import { TradingBrokerOrderRecoveryResolver } from './trading-broker-order-recovery.resolver';
 
@@ -18,6 +18,7 @@ describe('TradingBrokerOrderRecoveryResolver', () => {
     const recovery = {
       listRecoveryItems: jest.fn().mockResolvedValue([]),
       getCurrentContextPreview: jest.fn().mockReturnValue({
+        broker: Broker.KIS,
         environment: 'PROD',
         maskedAccount: '****5678-01',
         contextToken: 'opaque-context-token',
@@ -56,12 +57,13 @@ describe('TradingBrokerOrderRecoveryResolver', () => {
   it('exposes current masked context only through the explicit preview query', () => {
     const { resolver, recovery } = build();
 
-    expect(resolver.getCurrentContextPreview()).toEqual({
+    expect(resolver.getCurrentContextPreview(Broker.KIS)).toEqual({
+      broker: Broker.KIS,
       environment: 'PROD',
       maskedAccount: '****5678-01',
       contextToken: 'opaque-context-token',
     });
-    expect(recovery.getCurrentContextPreview).toHaveBeenCalledTimes(1);
+    expect(recovery.getCurrentContextPreview).toHaveBeenCalledWith(Broker.KIS);
     expect(recovery.listRecoveryItems).not.toHaveBeenCalled();
   });
 

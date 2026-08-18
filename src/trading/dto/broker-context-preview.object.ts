@@ -1,8 +1,11 @@
 import { Field, ObjectType } from '@nestjs/graphql';
-import { BrokerEnvironment } from '@prisma/client';
+import { Broker, BrokerEnvironment } from '@prisma/client';
 
 @ObjectType()
 export class BrokerContextPreviewType {
+  @Field(() => Broker)
+  broker: Broker;
+
   @Field(() => BrokerEnvironment)
   environment: BrokerEnvironment;
 

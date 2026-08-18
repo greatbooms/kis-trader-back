@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   Market,
+  Broker,
   OrderStatus,
   OrderType,
   Prisma,
@@ -40,17 +41,32 @@ export class TradingOrderExecutionService {
     details?: Record<string, unknown>,
   ): Promise<boolean> {
     if (!this.liveSwitch.isEnabled()) return false;
+    const broker = signal.broker;
+    if (!broker) {
+      this.logger.warn(`[UNKNOWN ${signal.stockCode}] Broker is required before automatic order admission`);
+      return false;
+    }
+    if (!this.orderSubmission.isActive(broker)) {
+      this.logger.warn(`[${broker} ${signal.stockCode}] Broker is inactive before admission`);
+      return false;
+    }
 
-    const context = this.brokerContext.getCurrentContext();
+    const context = this.brokerContext.getCurrentContext(broker);
+    if (context.broker !== broker) {
+      this.logger.warn(`[${broker} ${signal.stockCode}] Broker context identity mismatch before admission`);
+      return false;
+    }
     let canonicalSignal = signal;
     const record = await this.orderGuard.admit(
       {
+        broker,
         market: signal.market,
         exchangeCode: signal.exchangeCode,
         stockCode: signal.stockCode,
         side: signal.side,
       },
       (tx, normalizedKey = {
+        broker,
         market: signal.market,
         exchangeCode: signal.exchangeCode,
         stockCode: signal.stockCode,
@@ -59,6 +75,7 @@ export class TradingOrderExecutionService {
         canonicalSignal = { ...signal, ...normalizedKey };
         return tx.tradeRecord.create({
           data: {
+            broker,
             market: normalizedKey.market as Market,
             exchangeCode: normalizedKey.exchangeCode,
             stockCode: normalizedKey.stockCode,
@@ -85,27 +102,31 @@ export class TradingOrderExecutionService {
       await this.markInfiniteBuySecondTargetAttempted(signal, strategyName, ctx);
     } catch (error) {
       this.logger.warn(
-        `[${signal.stockCode}] Failed to persist second-target attempted state: ${this.errorMessage(error)}`,
+        `[${broker} ${signal.stockCode}] Failed to persist second-target attempted state: ${this.errorMessage(error)}`,
       );
       await this.cancelPreSubmit(record.id, '2차 익절 시도 상태 저장 실패로 주문 취소');
       return false;
     }
 
     try {
-      await this.positionRefresh.refresh(signal.market);
+      await this.positionRefresh.refresh(broker, signal.market);
     } catch (error) {
-      this.logger.warn(`[${signal.stockCode}] Position refresh failed before automatic order`);
+      this.logger.warn(`[${broker} ${signal.stockCode}] Position refresh failed before automatic order`);
       await this.cancelPreSubmit(record.id, '포지션 동기화 실패로 주문 취소');
       return false;
     }
 
     if (!this.isCurrentBrokerContext(context)) {
-      await this.cancelPreSubmit(record.id, 'KIS 계좌 변경으로 주문 취소');
+      await this.cancelPreSubmit(record.id, '브로커 컨텍스트 변경으로 주문 취소');
       return false;
     }
 
     if (!this.liveSwitch.isEnabled()) {
       await this.cancelPreSubmit(record.id, '실거래 비활성화로 주문 취소');
+      return false;
+    }
+    if (!this.orderSubmission.isActive(broker)) {
+      await this.cancelPreSubmit(record.id, '브로커 비활성화로 주문 취소');
       return false;
     }
 
@@ -131,7 +152,7 @@ export class TradingOrderExecutionService {
         data: {
           status: OrderStatus.CANCELLED,
           submissionStartedAt: null,
-          brokerMessage: 'KIS 계좌 변경으로 주문 취소',
+          brokerMessage: '브로커 컨텍스트 변경으로 주문 취소',
         },
       });
       return false;
@@ -152,13 +173,28 @@ export class TradingOrderExecutionService {
       });
       return false;
     }
+    if (!this.orderSubmission.isActive(broker)) {
+      await this.prisma.tradeRecord.updateMany({
+        where: {
+          id: record.id,
+          status: OrderStatus.SUBMITTING,
+          submissionStartedAt,
+        },
+        data: {
+          status: OrderStatus.CANCELLED,
+          submissionStartedAt: null,
+          brokerMessage: '브로커 비활성화로 주문 취소',
+        },
+      });
+      return false;
+    }
 
     let result: OrderResult;
     try {
       result = await this.orderSubmission.submit(signal);
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${signal.stockCode}] Automatic order result is unknown: ${message}`);
+      this.logger.warn(`[${broker} ${signal.stockCode}] Automatic order result is unknown: ${message}`);
       await this.recoveryService.markSubmissionUnknown(record.id, message);
       await this.logOrderOutcome(record.id, signal, ctx, {
         outcome: 'UNKNOWN',
@@ -206,9 +242,10 @@ export class TradingOrderExecutionService {
       return false;
     }
 
-    const persisted = await this.persistAccepted(record.id, result, signal.stockCode);
+    const persisted = await this.persistAccepted(record.id, result, broker, signal.stockCode);
     if (!persisted) {
       await this.recoveryService.warnAcceptedOrderPersistenceFailure({
+        broker: signal.broker!,
         market: signal.market,
         stockCode: signal.stockCode,
         tradeRecordId: record.id,
@@ -271,7 +308,7 @@ export class TradingOrderExecutionService {
       });
     } catch (error) {
       this.logger.warn(
-        `[${signal.stockCode}] Failed to write admitted-order mirror: ${this.errorMessage(error)}`,
+        `[${signal.broker ?? 'UNKNOWN'} ${signal.stockCode}] Failed to write admitted-order mirror: ${this.errorMessage(error)}`,
       );
     }
   }
@@ -353,7 +390,7 @@ export class TradingOrderExecutionService {
         },
       });
     } catch {
-      this.logger.warn(`[${signal.stockCode}] Failed to write broker order outcome audit`);
+      this.logger.warn(`[${signal.broker ?? 'UNKNOWN'} ${signal.stockCode}] Failed to write broker order outcome audit`);
     }
   }
 
@@ -364,6 +401,7 @@ export class TradingOrderExecutionService {
   private async persistAccepted(
     tradeRecordId: string,
     result: OrderResult,
+    broker: Broker,
     stockCode: string,
   ): Promise<boolean> {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -385,7 +423,7 @@ export class TradingOrderExecutionService {
         return persisted.count > 0;
       } catch (error) {
         this.logger.warn(
-          `[${stockCode}] Accepted order DB persistence failed (${attempt}/3, order ${result.orderNo || 'unknown'}): ${this.errorMessage(error)}`,
+          `[${broker} ${stockCode}] Accepted order DB persistence failed (${attempt}/3, order ${result.orderNo || 'unknown'}): ${this.errorMessage(error)}`,
         );
       }
     }
@@ -418,12 +456,13 @@ export class TradingOrderExecutionService {
 
   private isCurrentBrokerContext(expected: BrokerContext): boolean {
     try {
-      const current = this.brokerContext.getCurrentContext();
-      return current.environment === expected.environment
+      const current = this.brokerContext.getCurrentContext(expected.broker);
+      return current.broker === expected.broker
+        && current.environment === expected.environment
         && current.accountHash === expected.accountHash;
     } catch (error) {
       this.logger.warn(
-        `Failed to verify broker context before order submission: ${this.errorMessage(error)}`,
+        `[${expected.broker} BROKER_CONTEXT] Failed to verify broker context before order submission: ${this.errorMessage(error)}`,
       );
       return false;
     }

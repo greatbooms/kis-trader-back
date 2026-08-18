@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
-import { Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
+import { Broker, Market, Prisma, WatchStockExecutionEventType } from '@prisma/client';
 import { InfiniteBuyStrategyParams, InfiniteBuyV4Params } from '../trading/types';
 import { DEFAULT_STAR_BASE_PCT_BY_STOCK } from '../trading/strategy/infinite-buy-v4.strategy';
 import { ConvertWatchStockToV4Seed } from './types';
@@ -55,6 +55,7 @@ export class WatchStockService {
 
   async findCurrentCycleMap(items: Array<{
     id: string;
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -76,12 +77,14 @@ export class WatchStockService {
     const positions = await this.prisma.position.findMany({
       where: {
         OR: cycleBasedItems.map((item) => ({
+          broker: item.broker,
           market: item.market,
           exchangeCode: item.exchangeCode,
           stockCode: item.stockCode,
         })),
       },
       select: {
+        broker: true,
         market: true,
         exchangeCode: true,
         stockCode: true,
@@ -92,7 +95,7 @@ export class WatchStockService {
     const investedByKey = new Map<string, number>();
     for (const position of positions) {
       investedByKey.set(
-        `${position.market}:${position.exchangeCode}:${position.stockCode}`,
+        `${position.broker}:${position.market}:${position.exchangeCode}:${position.stockCode}`,
         Number(position.totalInvested ?? 0),
       );
     }
@@ -103,7 +106,7 @@ export class WatchStockService {
         continue;
       }
 
-      const key = `${item.market}:${item.exchangeCode}:${item.stockCode}`;
+      const key = `${item.broker}:${item.market}:${item.exchangeCode}:${item.stockCode}`;
       const totalInvested = investedByKey.get(key) ?? 0;
       cycleById.set(item.id, this.calculateCurrentCycle(item, totalInvested));
     }
@@ -184,9 +187,15 @@ export class WatchStockService {
     });
   }
 
-  private async ensureNotExists(market: Market, exchangeCode: string, stockCode: string): Promise<void> {
+  private async ensureNotExists(
+    broker: Broker,
+    market: Market,
+    exchangeCode: string,
+    stockCode: string,
+  ): Promise<void> {
     const existing = await this.prisma.watchStock.findFirst({
       where: {
+        broker,
         market,
         exchangeCode,
         stockCode,
@@ -241,6 +250,7 @@ export class WatchStockService {
 
   private async buildInfiniteBuyRebasedUpdate(
     current: {
+      broker: Broker;
       market: Market;
       exchangeCode: string;
       stockCode: string;
@@ -284,7 +294,8 @@ export class WatchStockService {
 
     const position = await this.prisma.position.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: current.broker,
           market: current.market,
           exchangeCode: current.exchangeCode,
           stockCode: current.stockCode,
@@ -326,6 +337,7 @@ export class WatchStockService {
   }
 
   async create(data: {
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
@@ -338,11 +350,12 @@ export class WatchStockService {
     maxPortfolioRate?: number;
     strategyParams?: Record<string, any>;
   }) {
-    await this.ensureNotExists(data.market, data.exchangeCode, data.stockCode);
+    await this.ensureNotExists(data.broker, data.market, data.exchangeCode, data.stockCode);
     await this.checkGlobalLimit();
     try {
       return await this.prisma.watchStock.create({
         data: {
+          broker: data.broker,
           market: data.market,
           exchangeCode: data.exchangeCode,
           stockCode: data.stockCode,
@@ -367,6 +380,7 @@ export class WatchStockService {
   async update(
     id: string,
     data: {
+      broker?: Broker;
       exchangeCode?: string;
       stockName?: string;
       isActive?: boolean;
@@ -382,6 +396,7 @@ export class WatchStockService {
     const current = await this.prisma.watchStock.findUnique({
       where: { id },
       select: {
+        broker: true,
         market: true,
         exchangeCode: true,
         stockCode: true,
@@ -394,6 +409,12 @@ export class WatchStockService {
 
     if (!current) {
       throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+    }
+
+    if (data.broker !== undefined && data.broker !== current.broker) {
+      throw new BadRequestException(
+        '브로커는 수정할 수 없습니다. 기존 관심종목을 삭제한 뒤 새 브로커로 다시 등록하세요.',
+      );
     }
 
     const updateData: any = {};
@@ -522,7 +543,8 @@ export class WatchStockService {
 
     const position = await this.prisma.position.findUnique({
       where: {
-        market_exchangeCode_stockCode: {
+        broker_market_exchangeCode_stockCode: {
+          broker: watchStock.broker,
           market: watchStock.market,
           exchangeCode: watchStock.exchangeCode,
           stockCode: watchStock.stockCode,
@@ -567,6 +589,14 @@ export class WatchStockService {
       const fresh = await tx.watchStock.findUnique({ where: { id: watchStockId } });
       if (!fresh) {
         throw new BadRequestException('관심종목을 찾을 수 없습니다.');
+      }
+      if (
+        fresh.broker !== watchStock.broker ||
+        fresh.market !== watchStock.market ||
+        fresh.exchangeCode !== watchStock.exchangeCode ||
+        fresh.stockCode !== watchStock.stockCode
+      ) {
+        throw new BadRequestException('전환 도중 관심종목 식별자가 변경되어 중단합니다. 다시 확인 후 시도하세요.');
       }
       if (fresh.strategyName !== 'infinite-buy') {
         throw new BadRequestException('전환 도중 전략이 변경되어 중단합니다. 다시 확인 후 시도하세요.');

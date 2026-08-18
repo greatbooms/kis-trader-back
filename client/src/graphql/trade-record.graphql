@@ -1,6 +1,7 @@
 query GetTrades($input: TradeFilterInput) {
   trades(input: $input) {
     id
+    broker
     market
     exchangeCode
     stockCode
@@ -25,6 +26,7 @@ query GetTrades($input: TradeFilterInput) {
 query GetTrade($id: ID!) {
   trade(id: $id) {
     id
+    broker
     market
     exchangeCode
     stockCode
@@ -49,6 +51,7 @@ query GetTrade($id: ID!) {
 query GetPositions($input: PositionsFilterInput) {
   positions(input: $input) {
     id
+    broker
     market
     exchangeCode
     stockCode

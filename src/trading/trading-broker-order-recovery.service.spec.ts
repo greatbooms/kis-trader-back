@@ -1,4 +1,5 @@
 import {
+  Broker,
   BrokerOrderAction,
   BrokerOrderActionChannel,
   CancellationAttemptStatus,
@@ -16,6 +17,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
           findMany: jest.fn().mockResolvedValue([
             {
               id: 'trade-submission-unknown',
+              broker: Broker.TOSS,
               market: 'OVERSEAS',
               exchangeCode: 'NASD',
               stockCode: 'TQQQ',
@@ -44,6 +46,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
             },
             {
               id: 'trade-cancellation-unknown',
+              broker: Broker.KIS,
               market: 'DOMESTIC',
               exchangeCode: 'KRX',
               stockCode: '005930',
@@ -105,6 +108,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
         ],
         select: expect.objectContaining({
           id: true,
+          broker: true,
           brokerEnvironment: true,
           brokerAccountHash: true,
         }),
@@ -113,6 +117,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       expect(result).toEqual([
         expect.objectContaining({
           tradeRecordId: 'trade-submission-unknown',
+          broker: Broker.TOSS,
           lifecycle: 'SUBMISSION',
           price: 75.25,
           status: OrderStatus.SUBMISSION_UNKNOWN,
@@ -124,6 +129,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
         }),
         expect.objectContaining({
           tradeRecordId: 'trade-cancellation-unknown',
+          broker: Broker.KIS,
           lifecycle: 'CANCELLATION',
           price: 70000,
           status: OrderStatus.PARTIAL,
@@ -145,6 +151,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
           findMany: jest.fn().mockResolvedValue([
             {
               id: 'legacy-malformed-context',
+              broker: Broker.KIS,
               market: 'OVERSEAS',
               exchangeCode: 'NASD',
               stockCode: 'SOXL',
@@ -193,6 +200,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       await expect(service.listRecoveryItems()).resolves.toEqual([
         expect.objectContaining({
           tradeRecordId: 'legacy-malformed-context',
+          broker: Broker.KIS,
           brokerContextAssigned: false,
           currentBrokerEnvironment: null,
           maskedCurrentAccount: null,
@@ -204,10 +212,19 @@ describe('TradingBrokerOrderRecoveryService', () => {
   });
 
   describe('assignCurrentContext', () => {
-    it('rejects a context token from a different preview before starting a transaction', async () => {
-      const prisma = { $transaction: jest.fn() };
+    it('derives broker from the target and rejects a token from a different preview before mutation', async () => {
+      const tx = {
+        tradeRecord: {
+          findUnique: jest.fn().mockResolvedValue({ broker: Broker.KIS }),
+          updateMany: jest.fn(),
+        },
+      };
+      const prisma = {
+        $transaction: jest.fn().mockImplementation((work) => work(tx)),
+      };
       const brokerContext = {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PROD',
           accountHash: 'current-account-hash',
           maskedAccount: '****5678-01',
@@ -229,12 +246,14 @@ describe('TradingBrokerOrderRecoveryService', () => {
         { channel: 'WEB', actor: 'web:eric' },
       )).rejects.toThrow(/preview.*context changed/i);
 
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(brokerContext.getCurrentContext).toHaveBeenCalledWith(Broker.KIS);
+      expect(tx.tradeRecord.updateMany).not.toHaveBeenCalled();
     });
 
     it('atomically assigns the current legacy context and writes a safe audit row', async () => {
       const unresolvedRecord = {
         id: 'legacy-unknown',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -275,6 +294,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       };
       const brokerContext = {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PROD',
           accountHash: 'current-account-hash',
           maskedAccount: '****5678-01',
@@ -302,6 +322,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       expect(tx.tradeRecord.updateMany).toHaveBeenCalledWith({
         where: {
           id: 'legacy-unknown',
+          broker: Broker.KIS,
           brokerEnvironment: null,
           brokerAccountHash: null,
           OR: [
@@ -336,7 +357,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       const tx = {
         tradeRecord: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-          findUnique: jest.fn(),
+          findUnique: jest.fn().mockResolvedValueOnce({ broker: Broker.KIS }),
         },
         brokerOrderActionAuditLog: {
           create: jest.fn(),
@@ -347,6 +368,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       };
       const brokerContext = {
         getCurrentContext: jest.fn().mockReturnValue({
+          broker: Broker.KIS,
           environment: 'PAPER',
           accountHash: 'paper-account-hash',
           maskedAccount: '****1111-01',
@@ -369,7 +391,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
       )).rejects.toThrow(/context assignment.*state changed/i);
 
       expect(tx.brokerOrderActionAuditLog.create).not.toHaveBeenCalled();
-      expect(tx.tradeRecord.findUnique).not.toHaveBeenCalled();
+      expect(tx.tradeRecord.findUnique).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1086,11 +1108,12 @@ describe('TradingBrokerOrderRecoveryService', () => {
       {} as never,
     );
 
-    await expect(service.claimCancellation('trade-1')).resolves.toBe(true);
+    await expect(service.claimCancellation('trade-1', Broker.KIS)).resolves.toBe(true);
 
     expect(prisma.tradeRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'trade-1',
+        broker: Broker.KIS,
         status: { in: [OrderStatus.PENDING, OrderStatus.PARTIAL] },
         orderNo: { not: null },
         OR: [
@@ -1140,12 +1163,13 @@ describe('TradingBrokerOrderRecoveryService', () => {
     );
 
     await expect(
-      service.markCancellationUnknown('trade-cancel', 'network timeout'),
+      service.markCancellationUnknown('trade-cancel', Broker.KIS, 'network timeout'),
     ).resolves.toBe(true);
 
     expect(tx.tradeRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'trade-cancel',
+        broker: Broker.KIS,
         cancellationStatus: CancellationAttemptStatus.SUBMITTING,
       },
       data: {
@@ -1188,7 +1212,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
     );
 
     await expect(
-      service.markCancellationUnknown('cancel-loser', 'network timeout'),
+      service.markCancellationUnknown('cancel-loser', Broker.KIS, 'network timeout'),
     ).resolves.toBe(false);
 
     expect(tx.brokerOrderActionAuditLog.create).not.toHaveBeenCalled();
@@ -1199,8 +1223,8 @@ describe('TradingBrokerOrderRecoveryService', () => {
     const prisma = {
       tradeRecord: {
         findMany: jest.fn().mockResolvedValue([
-          { id: 'cancel-stale-1' },
-          { id: 'cancel-stale-2' },
+          { id: 'cancel-stale-1', broker: Broker.KIS },
+          { id: 'cancel-stale-2', broker: Broker.TOSS },
         ]),
       },
     };
@@ -1221,18 +1245,20 @@ describe('TradingBrokerOrderRecoveryService', () => {
 
     expect(prisma.tradeRecord.findMany).toHaveBeenCalledWith({
       where: { cancellationStatus: CancellationAttemptStatus.SUBMITTING },
-      select: { id: true },
+      select: { id: true, broker: true },
     });
     expect(markUnknown).toHaveBeenCalledTimes(2);
     expect(markUnknown).toHaveBeenNthCalledWith(
       1,
       'cancel-stale-1',
+      Broker.KIS,
       'Cold-start takeover of unfinished cancellation',
       false,
     );
     expect(markUnknown).toHaveBeenNthCalledWith(
       2,
       'cancel-stale-2',
+      Broker.TOSS,
       'Cold-start takeover of unfinished cancellation',
       false,
     );
@@ -1368,6 +1394,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
     );
 
     await expect(service.warnAcceptedOrderPersistenceFailure({
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       stockCode: '005930',
       tradeRecordId: 'trade-db-failure',
@@ -1375,6 +1402,7 @@ describe('TradingBrokerOrderRecoveryService', () => {
     })).resolves.toBeUndefined();
 
     expect(slack.sendBrokerOrderPersistenceWarning).toHaveBeenCalledWith({
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       stockCode: '005930',
       tradeRecordId: 'trade-db-failure',

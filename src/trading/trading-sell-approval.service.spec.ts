@@ -1,4 +1,5 @@
 import { TradingSellApprovalService } from './trading-sell-approval.service';
+import { Broker } from '@prisma/client';
 import { TradingSignal } from './types';
 
 describe('TradingSellApprovalService', () => {
@@ -9,6 +10,7 @@ describe('TradingSellApprovalService', () => {
     overrides: Partial<TradingSignal> = {},
   ): TradingSignal {
     return {
+      broker: Broker.KIS,
       market: 'OVERSEAS',
       exchangeCode: 'NASD',
       stockCode: 'TQQQ',
@@ -188,6 +190,7 @@ describe('TradingSellApprovalService', () => {
 
     expect(orderGuard.admit).toHaveBeenCalledWith(
       {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -276,11 +279,13 @@ describe('TradingSellApprovalService', () => {
         stockCode: 'TQQQ',
         status: 'PENDING',
         expiresAt: { lte: expect.any(Date) },
+        tradeRecord: { broker: Broker.KIS },
       },
       select: { id: true, tradeRecordId: true },
     });
     expect(orderGuard.admit).toHaveBeenCalledWith(
       {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -373,6 +378,7 @@ describe('TradingSellApprovalService', () => {
 
     expect(orderGuard.admit).toHaveBeenCalledWith(
       {
+        broker: Broker.KIS,
         market: 'DOMESTIC',
         exchangeCode: 'KRX',
         stockCode: '005930',
@@ -457,6 +463,7 @@ describe('TradingSellApprovalService', () => {
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
         status: 'PENDING',
+        tradeRecord: { broker: Broker.KIS },
       },
       orderBy: { requestedAt: 'desc' },
     });
@@ -517,6 +524,7 @@ describe('TradingSellApprovalService', () => {
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
         status: 'PENDING',
+        tradeRecord: { broker: Broker.KIS },
       },
       orderBy: { requestedAt: 'desc' },
     });
@@ -569,6 +577,7 @@ describe('TradingSellApprovalService', () => {
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
         status: 'PENDING',
+        tradeRecord: { broker: Broker.KIS },
       },
       orderBy: { requestedAt: 'desc' },
     });
@@ -753,6 +762,7 @@ describe('TradingSellApprovalService', () => {
         {
           watchStock: {
             id: 'watch-1',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -915,6 +925,7 @@ describe('TradingSellApprovalService', () => {
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
           notifiedAt: { gt: new Date('2026-07-13T09:00:00.000Z') },
+          tradeRecord: { broker: Broker.KIS },
         },
         orderBy: { notifiedAt: 'desc' },
         select: { id: true },
@@ -1110,6 +1121,7 @@ describe('TradingSellApprovalService', () => {
         {
           watchStock: {
             id: 'watch-undelivered',
+            broker: Broker.KIS,
             market: 'OVERSEAS',
             exchangeCode: 'NASD',
             stockCode: 'TQQQ',
@@ -1147,7 +1159,7 @@ describe('TradingSellApprovalService', () => {
     expect(executionLog.message).toContain('CANCELLED');
     expect(executionLog.message).not.toMatch(/대기|등록/);
     expect(loggerWarn).toHaveBeenCalledWith(
-      '[TQQQ] Sell approval delivery failed: approval EXPIRED, trade CANCELLED',
+      '[KIS TQQQ] Sell approval delivery failed: approval EXPIRED, trade CANCELLED',
     );
     expect(loggerLog).not.toHaveBeenCalledWith(expect.stringMatching(/registered|waiting/i));
   });

@@ -1,8 +1,3 @@
-import type {
-  BrokerOrderCandidate,
-  BrokerOrderRejectionState,
-} from './broker-order-candidate.type';
-
 /** KIS API 공통 응답 */
 export interface KisApiResponse<T = any> {
   rt_cd: string; // '0' = 성공
@@ -166,21 +161,6 @@ export interface OverseasForeignMarginItem {
   itgr_ord_psbl_amt?: string;
 }
 
-/** 해외 통화별 현금/증거금 요약 */
-export interface OverseasCashBalance {
-  currencyCode: string;
-  currencyName?: string;
-  amount: number;
-  withdrawableAmount?: number;
-  orderableAmount?: number;
-  generalOrderableAmount?: number;
-  integratedOrderableAmount?: number;
-  pendingBuyAmount?: number;
-  pendingSellAmount?: number;
-  receivableAmount?: number;
-  marginAmount?: number;
-}
-
 /** 통합 시세 결과 */
 export interface StockPriceResult {
   stockCode: string;
@@ -228,21 +208,6 @@ export interface StockPriceResult {
   krwPrice?: number; // 원환산 당일가격 — 해외만
 }
 
-/** 주문 결과 */
-export type { OrderResult } from './order-result.type';
-
-/** 잔고 항목 (통합) */
-export interface BalanceItem {
-  stockCode: string;
-  stockName: string;
-  quantity: number;
-  avgPrice: number;
-  currentPrice: number;
-  profitLoss: number;
-  profitRate: number;
-  exchangeCode?: string;
-}
-
 /** 일별 시세 */
 export interface DailyPrice {
   date: string; // YYYYMMDD
@@ -281,22 +246,12 @@ export interface HolidayItem {
   countryCode?: string;
 }
 
-/** 미체결 주문 */
-export interface UnfilledOrder {
-  orderNo: string;
-  stockCode: string;
-  side: 'BUY' | 'SELL';
-  quantity: number;
-  price: number;
-  exchangeCode?: string;
-}
-
-/** 주문 체결/미체결 상태 (브로커 조회 기준) */
-export interface BrokerOrderStatus
-  extends Omit<BrokerOrderCandidate, 'rejectionState'> {
-  /** 신규 KIS 조회는 항상 채우며, 기존 내부 fixture 호환을 위해 optional로 둔다. */
-  rejectionState?: BrokerOrderRejectionState;
-}
-
 /** 해외 주문 구분 (00=지정가, 32=장전시간외, 33=장후시간외, 34=LOC) */
 export type OverseasOrderDivision = '00' | '32' | '33' | '34';
+export type {
+  BalanceItem,
+  BrokerOrderStatus,
+  OrderResult,
+  OverseasCashBalance,
+  UnfilledOrder,
+} from '../../common/types/broker-io.type';

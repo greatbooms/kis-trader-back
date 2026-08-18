@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma.service';
 import { SlackService } from '../notification/slack.service';
 import { TradingBrokerContextService } from './trading-broker-context.service';
 import { TradingOrderFailureNotificationService } from './trading-order-failure-notification.service';
+import { Broker } from '@prisma/client';
 
 describe('TradingOrderReconciliationService', () => {
   let service: TradingOrderReconciliationService;
@@ -50,11 +51,12 @@ describe('TradingOrderReconciliationService', () => {
   };
 
   const mockBrokerContext = {
-    getCurrentContext: jest.fn().mockReturnValue({
+    getCurrentContext: jest.fn((broker: Broker) => ({
+      broker,
       environment: 'PROD',
       accountHash: 'current-account-hash',
       maskedAccount: '****5678-01',
-    }),
+    })),
   };
 
   beforeEach(async () => {
@@ -87,10 +89,11 @@ describe('TradingOrderReconciliationService', () => {
     it('loads only open orders bound to the current broker context', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
 
-      const result = await service.reconcileOpenOrders('OVERSEAS', [], [], []);
+      const result = await service.reconcileOpenOrders(Broker.KIS, 'OVERSEAS', [], [], []);
 
       expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith({
         where: {
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           status: { in: ['PENDING', 'PARTIAL'] },
           orderNo: { not: null },
@@ -136,7 +139,7 @@ describe('TradingOrderReconciliationService', () => {
       });
       mockPrisma.watchStock.findUnique.mockResolvedValue(null);
 
-      await service.reconcileOpenOrders('DOMESTIC', [], [], [
+      await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], [
         {
           orderNo: 'cancelled-order',
           orderDate: '20260713',
@@ -205,6 +208,7 @@ describe('TradingOrderReconciliationService', () => {
       ]);
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
         [],
         [{
@@ -253,7 +257,7 @@ describe('TradingOrderReconciliationService', () => {
         },
       ]);
 
-      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+      await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], []);
 
       expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -285,7 +289,7 @@ describe('TradingOrderReconciliationService', () => {
         },
       ]);
 
-      await service.reconcileOpenOrders('OVERSEAS', [], [], [
+      await service.reconcileOpenOrders(Broker.KIS, 'OVERSEAS', [], [], [
         {
           orderNo: 'shared-order-no',
           orderDate: '20260713',
@@ -324,7 +328,7 @@ describe('TradingOrderReconciliationService', () => {
         },
       ]);
 
-      await service.reconcileOpenOrders('OVERSEAS', [], [
+      await service.reconcileOpenOrders(Broker.KIS, 'OVERSEAS', [], [
         {
           orderNo: 'shared-unfilled-no',
           exchangeCode: 'NYSE',
@@ -373,7 +377,7 @@ describe('TradingOrderReconciliationService', () => {
           },
         ]);
 
-        await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+        await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], []);
 
         expect(mockPrisma.tradeRecord.update).not.toHaveBeenCalled();
         expect(mockPrisma.tradeRecord.updateMany).not.toHaveBeenCalled();
@@ -403,7 +407,7 @@ describe('TradingOrderReconciliationService', () => {
       ]);
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+      await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], []);
 
       expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
         where: {
@@ -448,8 +452,9 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 2 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 2 }],
         [],
         [{
           orderNo: 'race-broker-order',
@@ -532,8 +537,9 @@ describe('TradingOrderReconciliationService', () => {
       });
 
       const result = await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 10 }],
         [],
         [
           {
@@ -660,8 +666,9 @@ describe('TradingOrderReconciliationService', () => {
       ]);
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 69 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 69 }],
         [],
         [
           {
@@ -762,8 +769,9 @@ describe('TradingOrderReconciliationService', () => {
       });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 37 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 37 }],
         [],
         [
           {
@@ -790,8 +798,9 @@ describe('TradingOrderReconciliationService', () => {
       );
     });
 
-    it('restores an approved sell signal from the approval row when submission log is unavailable', async () => {
+    it('canonicalizes an approved reconstructed signal to the record broker for strategy fill and Slack', async () => {
       const approvedSignal = {
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -804,6 +813,7 @@ describe('TradingOrderReconciliationService', () => {
       };
       const filledRecord = {
         id: 'trade-approved-sell',
+        broker: Broker.TOSS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -824,6 +834,7 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.tradeRecord.findUnique.mockResolvedValue(filledRecord);
       mockPrisma.watchStock.findUnique.mockResolvedValue({
         id: 'watch-approved-sell',
+        broker: Broker.TOSS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -835,8 +846,9 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.position.findFirst.mockResolvedValue(null);
 
       await service.reconcileOpenOrders(
+        Broker.TOSS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 8 }],
+        [{ broker: Broker.TOSS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 8 }],
         [],
         [{
           orderNo: 'approved-order',
@@ -853,7 +865,7 @@ describe('TradingOrderReconciliationService', () => {
       expect(mockTradingService.handleStrategySignalFill).toHaveBeenCalledWith(
         'infinite-buy',
         'watch-approved-sell',
-        approvedSignal,
+        { ...approvedSignal, broker: Broker.TOSS },
         10,
         filledRecord.createdAt,
         82,
@@ -861,6 +873,7 @@ describe('TradingOrderReconciliationService', () => {
       expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(
         expect.objectContaining({
           signal: expect.objectContaining({
+            broker: Broker.TOSS,
             stockCode: 'TQQQ',
             side: 'SELL',
             quantity: 2,
@@ -917,8 +930,9 @@ describe('TradingOrderReconciliationService', () => {
       });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 0 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 0 }],
         [],
         [],
       );
@@ -985,8 +999,9 @@ describe('TradingOrderReconciliationService', () => {
       });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 4 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 4 }],
         [],
         [
           {
@@ -1066,8 +1081,9 @@ describe('TradingOrderReconciliationService', () => {
         });
 
         await service.reconcileOpenOrders(
+          Broker.KIS,
           'DOMESTIC',
-          [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+          [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
           [],
           [{
             orderNo: 'partial-rejected-order',
@@ -1138,8 +1154,9 @@ describe('TradingOrderReconciliationService', () => {
       (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 1 }],
         [],
         [{
           orderNo: 'stale-rejected-order',
@@ -1235,8 +1252,10 @@ describe('TradingOrderReconciliationService', () => {
       mockSlackService.isEnabled.mockReturnValue(false);
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
         [{
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -1297,7 +1316,7 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.tradeRecord.findUnique.mockResolvedValue(null);
       mockSlackService.isEnabled.mockReturnValue(false);
 
-      await service.reconcileOpenOrders('OVERSEAS', [], [], [{
+      await service.reconcileOpenOrders(Broker.KIS, 'OVERSEAS', [], [], [{
         orderNo: 'existing-terminal-partial-order',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -1363,8 +1382,9 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({ id: 'ws-1' });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'DOMESTIC',
-        [{ market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 4 }],
+        [{ broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: '005930', quantity: 4 }],
         [],
         [],
       );
@@ -1406,7 +1426,7 @@ describe('TradingOrderReconciliationService', () => {
       ]);
       mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.reconcileOpenOrders('DOMESTIC', [], [], []);
+      await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], []);
 
       expect(mockPrisma.tradeRecord.updateMany).toHaveBeenCalledWith({
         where: {
@@ -1463,6 +1483,7 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.watchStock.findUnique.mockResolvedValue({ id: 'ws-1' });
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
         [],
         [],
@@ -1553,8 +1574,9 @@ describe('TradingOrderReconciliationService', () => {
       setupFailedBuyReconcile();
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [
           {
@@ -1594,8 +1616,9 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.tradeRecord.findUnique.mockRejectedValueOnce(new Error('strategy recovery read failed'));
 
       await expect(service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [{
           orderNo: '0030301568',
@@ -1622,8 +1645,9 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.watchStockExecutionLog.create.mockRejectedValueOnce(new Error('audit log write failed'));
 
       await expect(service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [{
           orderNo: '0030301568',
@@ -1649,8 +1673,9 @@ describe('TradingOrderReconciliationService', () => {
       setupFailedBuyReconcile();
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [
           {
@@ -1727,8 +1752,9 @@ describe('TradingOrderReconciliationService', () => {
       (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [
           {
@@ -1799,8 +1825,9 @@ describe('TradingOrderReconciliationService', () => {
       (mockPrisma.watchStock as any).update = jest.fn().mockResolvedValue({});
 
       await service.reconcileOpenOrders(
+        Broker.KIS,
         'OVERSEAS',
-        [{ market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NAS', stockCode: 'TQQQ', quantity: 6 }],
         [],
         [
           {

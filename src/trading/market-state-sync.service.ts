@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Market, OrderStatus } from '@prisma/client';
+import { Broker, Market, OrderStatus } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { PrismaService } from '../prisma.service';
 import { HolidayItem, UnfilledOrder } from '../kis/types/kis-api.types';
 import { EXCHANGE_CODE_MAP, MarketHours, getMarketHours } from '../kis/types/kis-config.types';
-import { PositionQuantitySnapshot } from './types';
+import { BrokerScopedUnfilledOrder, PortfolioSyncOptions, PositionQuantitySnapshot } from './types';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 import { OrderSyncService } from './order-sync.service';
 import { TradingOrderCancellationService } from './trading-order-cancellation.service';
@@ -35,6 +36,7 @@ export class MarketStateSyncService {
     private orderSyncService: OrderSyncService,
     private kisDomestic: KisDomesticService,
     private kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private prisma: PrismaService,
     private configService: ConfigService,
     private readonly orderCancellationService: TradingOrderCancellationService,
@@ -113,12 +115,30 @@ export class MarketStateSyncService {
     );
   }
 
-  async syncMarketPortfolioOnly(market: 'DOMESTIC' | 'OVERSEAS'): Promise<void> {
-    const balance = market === 'DOMESTIC'
-      ? await this.kisDomestic.getBalance()
-      : await this.kisOverseas.getBalance();
+  async syncMarketPortfolioOnly(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    options: PortfolioSyncOptions = {},
+  ): Promise<void> {
+    const ports = this.registry.getActive();
+    if (options.failOnAnyError && ports.length === 0) {
+      throw new Error('No active brokers available for strict portfolio sync');
+    }
+    const failures: unknown[] = [];
 
-    await this.positionSyncService.syncPositions(market, balance);
+    for (const port of ports) {
+      try {
+        const balance = await port.getBalance(market as Market);
+        await this.positionSyncService.syncPositions(port.broker, market, balance);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`[${port.broker} ${market}] Portfolio sync failed: ${reason}`);
+        failures.push(error);
+      }
+    }
+
+    if ((options.failOnAnyError || ports.length === 1) && failures.length > 0) {
+      throw failures[0];
+    }
   }
 
   async hasPortfolioState(market: 'DOMESTIC' | 'OVERSEAS'): Promise<boolean> {
@@ -159,48 +179,44 @@ export class MarketStateSyncService {
 
   // ========== 미체결 주문 조회/취소 ==========
 
-  async getUnfilledOrders(market: 'DOMESTIC' | 'OVERSEAS'): Promise<UnfilledOrder[]> {
-    return this.orderSyncService.getMarketUnfilledOrders(market);
+  async getUnfilledOrders(
+    market: 'DOMESTIC' | 'OVERSEAS',
+    broker?: Broker,
+  ): Promise<BrokerScopedUnfilledOrder[]> {
+    return this.orderSyncService.getMarketUnfilledOrders(market, broker);
   }
 
   async cancelUnfilledOrders(
     marketType: 'DOMESTIC' | 'OVERSEAS',
-    orders: UnfilledOrder[],
+    orders: BrokerScopedUnfilledOrder[],
   ): Promise<void> {
-    try {
-      if (marketType === 'OVERSEAS') {
-        let cancelledCount = 0;
-        for (const order of orders) {
-          this.logger.log(`Cancelling overseas unfilled order: ${order.stockCode} #${order.orderNo}`);
-          const accepted = await this.orderCancellationService.cancelUnfilledOrder(
-            'OVERSEAS',
-            order,
-          );
-          if (accepted) {
-            cancelledCount += 1;
-          }
+    let cancelledCount = 0;
+    for (const order of orders) {
+      try {
+        this.logger.log(
+          `[${order.broker} ${order.stockCode}] Cancelling ${marketType.toLowerCase()} unfilled order #${order.orderNo}`,
+        );
+        const accepted = await this.orderCancellationService.cancelUnfilledOrder(
+          order.broker,
+          marketType,
+          order,
+        );
+        if (accepted) {
+          cancelledCount += 1;
         }
-        if (cancelledCount > 0) {
-          this.logger.log(`Cancelled ${cancelledCount} overseas unfilled orders`);
-        }
-      } else {
-        let cancelledCount = 0;
-        for (const order of orders) {
-          this.logger.log(`Cancelling domestic unfilled order: ${order.stockCode} #${order.orderNo}`);
-          const accepted = await this.orderCancellationService.cancelUnfilledOrder(
-            'DOMESTIC',
-            order,
-          );
-          if (accepted) {
-            cancelledCount += 1;
-          }
-        }
-        if (cancelledCount > 0) {
-          this.logger.log(`Cancelled ${cancelledCount} domestic unfilled orders`);
-        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `[${order.broker} ${order.stockCode}] ${marketType} automatic cancellation failed for #${order.orderNo}: ${reason}`,
+        );
       }
-    } catch (e) {
-      this.logger.error(`Failed to cancel unfilled orders (${marketType}): ${e.message}`);
+    }
+
+    if (cancelledCount > 0) {
+      const brokers = Array.from(new Set(orders.map((order) => order.broker))).join(',');
+      this.logger.log(
+        `[${brokers} ${marketType}] Cancelled ${cancelledCount} unfilled orders`,
+      );
     }
   }
 
@@ -388,12 +404,14 @@ export class MarketStateSyncService {
   }
 
   private toPositionSnapshot(position: {
+    broker: Broker;
     market: Market;
     exchangeCode: string;
     stockCode: string;
     quantity: number;
   }): PositionQuantitySnapshot {
     return {
+      broker: position.broker,
       market: position.market as 'DOMESTIC' | 'OVERSEAS',
       exchangeCode: position.exchangeCode,
       stockCode: position.stockCode,

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { Broker, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { OrderAdmissionKey } from './types/order-admission-key.type';
 
@@ -52,6 +52,7 @@ export class TradingOrderGuardService {
   private normalizeKey(key: OrderAdmissionKey): OrderAdmissionKey {
     if (
       !key ||
+      (key.broker !== Broker.KIS && key.broker !== Broker.TOSS) ||
       (key.market !== 'DOMESTIC' && key.market !== 'OVERSEAS') ||
       (key.side !== 'BUY' && key.side !== 'SELL')
     ) {
@@ -61,6 +62,7 @@ export class TradingOrderGuardService {
     const configuredExchange = this.normalizeComponent(key.exchangeCode);
     const stockCode = this.normalizeComponent(key.stockCode);
     return {
+      broker: key.broker,
       market: key.market,
       exchangeCode: key.market === 'DOMESTIC' ? 'KRX' : configuredExchange,
       stockCode,
@@ -79,7 +81,7 @@ export class TradingOrderGuardService {
   }
 
   private buildCanonicalKey(key: OrderAdmissionKey): string {
-    return [key.market, key.exchangeCode, key.stockCode, key.side]
+    return [key.broker, key.market, key.exchangeCode, key.stockCode, key.side]
       .map((component) => `${component.length}:${component}`)
       .join('|');
   }

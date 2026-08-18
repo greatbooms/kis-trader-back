@@ -1,4 +1,5 @@
 import { GridMeanReversionStrategy } from './grid-mean-reversion.strategy';
+import { Broker } from '@prisma/client';
 import { StockStrategyContext, WatchStockConfig, MarketCondition, StockIndicators } from '../types';
 import { StockPriceResult } from '../../kis/types/kis-api.types';
 
@@ -16,6 +17,7 @@ describe('GridMeanReversionStrategy — Realistic Trace', () => {
   function createContext(overrides: Partial<StockStrategyContext> = {}): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-grid-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

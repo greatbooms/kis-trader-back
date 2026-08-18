@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { KisDomesticService } from '../kis/kis-domestic.service';
-import { KisOverseasService } from '../kis/kis-overseas.service';
-import { BalanceItem } from '../kis/types/kis-api.types';
+import { Broker, Market } from '@prisma/client';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
+import { BalanceItem } from '../common/types';
 import { TradingPositionSyncService } from './trading-position-sync.service';
 
 @Injectable()
@@ -9,22 +9,19 @@ export class TradingPositionRefreshService {
   private readonly logger = new Logger(TradingPositionRefreshService.name);
 
   constructor(
-    private readonly kisDomestic: KisDomesticService,
-    private readonly kisOverseas: KisOverseasService,
+    private readonly registry: BrokerPortRegistry,
     private readonly positionSyncService: TradingPositionSyncService,
   ) {}
 
-  async refresh(market: 'DOMESTIC' | 'OVERSEAS'): Promise<BalanceItem[]> {
+  async refresh(broker: Broker, market: 'DOMESTIC' | 'OVERSEAS'): Promise<BalanceItem[]> {
     try {
-      const snapshot = market === 'DOMESTIC'
-        ? await this.kisDomestic.getBalance()
-        : await this.kisOverseas.getBalance();
+      const snapshot = await this.registry.get(broker).getBalance(market as Market);
 
-      await this.positionSyncService.syncPositions(market, snapshot);
+      await this.positionSyncService.syncPositions(broker, market, snapshot);
       return snapshot;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Failed to refresh ${market} positions: ${message}`);
+      this.logger.warn(`[${broker} ${market}] Failed to refresh positions: ${message}`);
       throw error;
     }
   }

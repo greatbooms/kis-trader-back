@@ -1,11 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BrokerPortRegistry } from '../broker/broker-port.registry';
 import { TradeRecordService } from './trade-record.service';
 import { PrismaService } from '../prisma.service';
 import { KisDomesticService } from '../kis/kis-domestic.service';
 import { KisOverseasService } from '../kis/kis-overseas.service';
 import { ConfigService } from '@nestjs/config';
+import { Broker } from '@prisma/client';
 import { MarketAnalysisService } from '../trading/market-analysis.service';
 import { TradingAccountCashSyncService } from '../trading/trading-account-cash-sync.service';
+import { TradingPositionSyncService } from '../trading/trading-position-sync.service';
 
 describe('TradeRecordService', () => {
   let service: TradeRecordService;
@@ -51,6 +54,17 @@ describe('TradeRecordService', () => {
     getUnfilledOrders: jest.fn(),
     getOrderExecutions: jest.fn(),
   };
+  const mockRegistry = {
+    get: jest.fn().mockReturnValue({
+      broker: Broker.KIS,
+      getBalance: jest.fn((market) => market === 'DOMESTIC'
+        ? mockKisDomestic.getBalance()
+        : mockKisOverseas.getBalance()),
+      getDomesticBuyableAmount: jest.fn(() => mockKisDomestic.getBuyableAmount()),
+      getOverseasAccountSnapshot: jest.fn(() => mockKisOverseas.getAccountSnapshot()),
+    }),
+    getActive: jest.fn(),
+  };
 
   const mockConfigService = {
     get: jest.fn((key: string) => {
@@ -73,7 +87,9 @@ describe('TradeRecordService', () => {
 
   const mockAccountCashSync = {
     replaceCache: jest.fn(),
+    getCache: jest.fn(),
   };
+  const mockPositionSync = { syncPositions: jest.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -82,13 +98,16 @@ describe('TradeRecordService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: KisDomesticService, useValue: mockKisDomestic },
         { provide: KisOverseasService, useValue: mockKisOverseas },
+        { provide: BrokerPortRegistry, useValue: mockRegistry },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: MarketAnalysisService, useValue: mockMarketAnalysis },
         { provide: TradingAccountCashSyncService, useValue: mockAccountCashSync },
+        { provide: TradingPositionSyncService, useValue: mockPositionSync },
       ],
     }).compile();
 
     service = module.get<TradeRecordService>(TradeRecordService);
+    mockRegistry.getActive.mockReturnValue([mockRegistry.get(Broker.KIS)]);
   });
 
   afterEach(() => {
@@ -129,6 +148,28 @@ describe('TradeRecordService', () => {
       expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { side: 'BUY' },
+        }),
+      );
+    });
+
+    it('filters same-symbol trade history by broker', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+
+      await service.findAll({
+        broker: Broker.TOSS,
+        market: 'OVERSEAS',
+        stockCode: 'TQQQ',
+        exchangeCode: 'NASD',
+      } as any);
+
+      expect(mockPrisma.tradeRecord.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            broker: Broker.TOSS,
+            market: 'OVERSEAS',
+            stockCode: 'TQQQ',
+            exchangeCode: 'NASD',
+          },
         }),
       );
     });
@@ -232,14 +273,12 @@ describe('TradeRecordService', () => {
         { cashBalance: '700000' },
       ]);
       mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
-      mockPrisma.appSetting.findUnique.mockResolvedValue({
-        value: {
+      mockAccountCashSync.getCache.mockResolvedValue({
           cashBalances: [
-            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 700000, withdrawableAmount: 700000 },
-            { market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1200.5 },
+            { broker: Broker.KIS, market: 'DOMESTIC', currencyCode: 'KRW', amount: 700000, withdrawableAmount: 700000 },
+            { broker: Broker.TOSS, market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1200.5 },
           ],
           lastSyncedAt: '2026-04-09T14:30:00.000Z',
-        },
       });
 
       const result = await service.getAccountSummary();
@@ -247,6 +286,45 @@ describe('TradeRecordService', () => {
       expect(result.cashBalances).toHaveLength(2);
       expect(result.lastSyncedAt).toBe('2026-04-09T14:30:00.000Z');
       expect(result.totalAssets).toBe(1750000);
+    });
+
+    it('falls back to the latest cash snapshot for every broker and market', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.riskSnapshot.findMany.mockResolvedValue([
+        { cashBalance: '100' },
+        { cashBalance: '200' },
+        { cashBalance: '300' },
+        { cashBalance: '400' },
+      ]);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+      mockAccountCashSync.getCache.mockResolvedValue(null);
+
+      const result = await service.getAccountSummary();
+
+      expect(mockPrisma.riskSnapshot.findMany).toHaveBeenCalledWith({
+        orderBy: { createdAt: 'desc' },
+        distinct: ['broker', 'market'],
+      });
+      expect(result.cashBalance).toBe(1000);
+    });
+
+    it('calculates realized PnL within the full broker instrument tuple', async () => {
+      const at = (day: number) => new Date(`2026-04-${String(day).padStart(2, '0')}T00:00:00.000Z`);
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.riskSnapshot.findMany.mockResolvedValue([]);
+      mockAccountCashSync.getCache.mockResolvedValue(null);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        { broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', side: 'BUY', status: 'FILLED', createdAt: at(1), price: 100, executedPrice: 100, quantity: 10, executedQty: 10 },
+        { broker: Broker.TOSS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', side: 'BUY', status: 'FILLED', createdAt: at(2), price: 200, executedPrice: 200, quantity: 10, executedQty: 10 },
+        { broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'AMEX', stockCode: 'TQQQ', side: 'BUY', status: 'FILLED', createdAt: at(3), price: 300, executedPrice: 300, quantity: 10, executedQty: 10 },
+        { broker: Broker.KIS, market: 'DOMESTIC', exchangeCode: 'KRX', stockCode: 'TQQQ', side: 'BUY', status: 'FILLED', createdAt: at(4), price: 400, executedPrice: 400, quantity: 10, executedQty: 10 },
+        { broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', side: 'SELL', status: 'FILLED', createdAt: at(5), price: 120, executedPrice: 120, quantity: 5, executedQty: 5 },
+        { broker: Broker.TOSS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', side: 'SELL', status: 'FILLED', createdAt: at(6), price: 220, executedPrice: 220, quantity: 5, executedQty: 5 },
+      ]);
+
+      const result = await service.getAccountSummary();
+
+      expect(result.realizedPnL).toBe(200);
     });
   });
 
@@ -263,27 +341,45 @@ describe('TradeRecordService', () => {
       mockPrisma.position.findMany.mockResolvedValue([]);
       mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
       mockPrisma.riskSnapshot.findMany.mockResolvedValue([]);
-      mockPrisma.appSetting.findUnique.mockResolvedValue({
-        value: {
+      mockAccountCashSync.getCache.mockResolvedValue({
           cashBalances: [
-            { market: 'DOMESTIC', currencyCode: 'KRW', amount: 500000, withdrawableAmount: 500000 },
-            { market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1000.25 },
+            { broker: Broker.KIS, market: 'DOMESTIC', currencyCode: 'KRW', amount: 500000, withdrawableAmount: 500000 },
+            { broker: Broker.KIS, market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5, withdrawableAmount: 1000.25 },
           ],
           lastSyncedAt: '2026-04-09T15:00:00.000Z',
-        },
       });
 
       const result = await service.refreshAccountState();
 
       expect(result.success).toBe(true);
-      expect(mockAccountCashSync.replaceCache).toHaveBeenCalledWith([
+      expect(mockAccountCashSync.replaceCache).toHaveBeenCalledWith(Broker.KIS, [
         expect.objectContaining({ market: 'DOMESTIC', currencyCode: 'KRW', amount: 500000 }),
         expect.objectContaining({ market: 'OVERSEAS', currencyCode: 'USD', amount: 1200.5 }),
-      ]);
+      ], ['DOMESTIC', 'OVERSEAS']);
+      expect(mockPositionSync.syncPositions).toHaveBeenCalledWith(Broker.KIS, 'DOMESTIC', []);
+      expect(mockPositionSync.syncPositions).toHaveBeenCalledWith(Broker.KIS, 'OVERSEAS', []);
       expect(result.accountSummary.cashBalances).toEqual([
         expect.objectContaining({ currencyCode: 'KRW', amount: 500000 }),
         expect.objectContaining({ currencyCode: 'USD', amount: 1200.5 }),
       ]);
+    });
+
+    it('preserves a failed market cache while replacing each successful authoritative market', async () => {
+      mockKisDomestic.getBalance.mockResolvedValue([]);
+      mockKisDomestic.getBuyableAmount.mockResolvedValue({ cashAvailable: 500000 });
+      mockKisOverseas.getAccountSnapshot.mockRejectedValue(new Error('overseas unavailable'));
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([]);
+      mockPrisma.riskSnapshot.findMany.mockResolvedValue([]);
+      mockAccountCashSync.getCache.mockResolvedValue(null);
+
+      await service.refreshAccountState();
+
+      expect(mockAccountCashSync.replaceCache).toHaveBeenCalledWith(
+        Broker.KIS,
+        [expect.objectContaining({ market: 'DOMESTIC', amount: 500000 })],
+        ['DOMESTIC'],
+      );
     });
   });
 

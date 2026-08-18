@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApprovalStatus,
+  Broker,
   Market,
   OrderStatus,
   Prisma,
@@ -142,6 +143,7 @@ export class TradingSellApprovalWorkflowService {
         if (
           action === 'APPROVE'
           && !this.matchesCurrentBrokerContext(
+            approval.tradeRecord.broker,
             approval.tradeRecord.brokerEnvironment,
             approval.tradeRecord.brokerAccountHash,
             approval.stockCode,
@@ -166,6 +168,20 @@ export class TradingSellApprovalWorkflowService {
             claimed: false,
             submitted: false,
             reason: 'TRADING_DISABLED',
+          };
+        }
+        if (
+          action === 'APPROVE'
+          && !this.orderSubmission.isActive(approval.tradeRecord.broker)
+        ) {
+          return {
+            approvalId,
+            approvalStatus: approval.status,
+            tradeRecordId: approval.tradeRecordId,
+            tradeStatus: approval.tradeRecord.status,
+            claimed: false,
+            submitted: false,
+            reason: 'BROKER_DISABLED',
           };
         }
 
@@ -228,6 +244,7 @@ export class TradingSellApprovalWorkflowService {
     }
 
     if (!this.matchesCurrentBrokerContext(
+      approval.tradeRecord.broker,
       approval.tradeRecord.brokerEnvironment,
       approval.tradeRecord.brokerAccountHash,
       approval.stockCode,
@@ -235,16 +252,25 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelForBrokerContextMismatch(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
+        approval.stockCode,
+      );
+    }
+    if (!this.orderSubmission.isActive(approval.tradeRecord.broker)) {
+      return this.cancelForBrokerDisabled(
+        claimedResult,
+        approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
       );
     }
 
     let holdings;
     try {
-      holdings = await this.positionRefresh.refresh(approval.market);
+      holdings = await this.positionRefresh.refresh(approval.tradeRecord.broker, approval.market);
     } catch (error) {
       const message = `Position refresh failed: ${this.errorMessage(error)}`;
-      this.logger.warn(`[${approval.stockCode}] ${message}`);
+      this.logger.warn(`[${approval.tradeRecord.broker} ${approval.stockCode}] ${message}`);
       const cancelled = await this.cancelPreSubmit(approval.tradeRecordId, message);
       if (!cancelled) {
         return this.resolveStateChangedResult(
@@ -270,7 +296,7 @@ export class TradingSellApprovalWorkflowService {
     ));
     const heldQuantity = Math.floor(Number(holding?.quantity || 0));
     if (heldQuantity <= 0) {
-      this.logger.warn(`[${approval.stockCode}] Approved sell cancelled: no matching holding`);
+      this.logger.warn(`[${approval.tradeRecord.broker} ${approval.stockCode}] Approved sell cancelled: no matching holding`);
       const cancelled = await this.cancelPreSubmit(
         approval.tradeRecordId,
         'No matching broker holding',
@@ -291,7 +317,7 @@ export class TradingSellApprovalWorkflowService {
     }
 
     if (!this.liveSwitch.isEnabled()) {
-      this.logger.warn(`[${approval.stockCode}] Approved sell cancelled: live trading disabled`);
+      this.logger.warn(`[${approval.tradeRecord.broker} ${approval.stockCode}] Approved sell cancelled: live trading disabled`);
       const cancelled = await this.cancelPreSubmit(
         approval.tradeRecordId,
         'Live trading disabled before submission',
@@ -328,7 +354,7 @@ export class TradingSellApprovalWorkflowService {
       });
     } catch (error) {
       this.logger.warn(
-        `[${approval.stockCode}] Failed to persist clamped approval signal: ${this.errorMessage(error)}`,
+        `[${approval.tradeRecord.broker} ${approval.stockCode}] Failed to persist clamped approval signal: ${this.errorMessage(error)}`,
       );
       return this.cancelForSignalPersistenceFailure(
         claimedResult,
@@ -338,7 +364,7 @@ export class TradingSellApprovalWorkflowService {
     }
     if (signalPersistence.count !== 1) {
       this.logger.warn(
-        `[${approval.stockCode}] Clamped approval signal persistence CAS missed`,
+        `[${approval.tradeRecord.broker} ${approval.stockCode}] Clamped approval signal persistence CAS missed`,
       );
       return this.cancelForSignalPersistenceFailure(
         claimedResult,
@@ -348,6 +374,7 @@ export class TradingSellApprovalWorkflowService {
     }
 
     if (!this.matchesCurrentBrokerContext(
+      approval.tradeRecord.broker,
       approval.tradeRecord.brokerEnvironment,
       approval.tradeRecord.brokerAccountHash,
       approval.stockCode,
@@ -355,6 +382,15 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelForBrokerContextMismatch(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
+        approval.stockCode,
+      );
+    }
+    if (!this.orderSubmission.isActive(approval.tradeRecord.broker)) {
+      return this.cancelForBrokerDisabled(
+        claimedResult,
+        approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
       );
     }
@@ -377,6 +413,7 @@ export class TradingSellApprovalWorkflowService {
     }
 
     if (!this.matchesCurrentBrokerContext(
+      approval.tradeRecord.broker,
       approval.tradeRecord.brokerEnvironment,
       approval.tradeRecord.brokerAccountHash,
       approval.stockCode,
@@ -384,6 +421,7 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelClaimedBeforePost(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
         submissionStartedAt,
         'Broker context changed after submission claim',
@@ -394,10 +432,22 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelClaimedBeforePost(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
         submissionStartedAt,
         'Live trading disabled after submission claim',
         'TRADING_DISABLED',
+      );
+    }
+    if (!this.orderSubmission.isActive(approval.tradeRecord.broker)) {
+      return this.cancelClaimedBeforePost(
+        claimedResult,
+        approval.tradeRecordId,
+        approval.tradeRecord.broker,
+        approval.stockCode,
+        submissionStartedAt,
+        'Broker disabled after submission claim',
+        'BROKER_DISABLED',
       );
     }
 
@@ -406,6 +456,7 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelClaimedBeforePost(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
         submissionStartedAt,
         'Live trading disabled after submission claim',
@@ -413,6 +464,7 @@ export class TradingSellApprovalWorkflowService {
       );
     }
     if (!this.matchesCurrentBrokerContext(
+      approval.tradeRecord.broker,
       approval.tradeRecord.brokerEnvironment,
       approval.tradeRecord.brokerAccountHash,
       approval.stockCode,
@@ -420,10 +472,22 @@ export class TradingSellApprovalWorkflowService {
       return this.cancelClaimedBeforePost(
         claimedResult,
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.stockCode,
         submissionStartedAt,
         'Broker context changed after submission claim',
         'BROKER_CONTEXT_MISMATCH',
+      );
+    }
+    if (!this.orderSubmission.isActive(approval.tradeRecord.broker)) {
+      return this.cancelClaimedBeforePost(
+        claimedResult,
+        approval.tradeRecordId,
+        approval.tradeRecord.broker,
+        approval.stockCode,
+        submissionStartedAt,
+        'Broker disabled after submission claim',
+        'BROKER_DISABLED',
       );
     }
 
@@ -431,6 +495,7 @@ export class TradingSellApprovalWorkflowService {
     try {
       orderResult = await this.orderSubmission.submit({
         ...signal,
+        broker: approval.tradeRecord.broker,
         market: approval.market,
         exchangeCode: approval.exchangeCode,
         stockCode: approval.stockCode,
@@ -440,7 +505,7 @@ export class TradingSellApprovalWorkflowService {
       });
     } catch (error) {
       const message = this.errorMessage(error);
-      this.logger.warn(`[${approval.stockCode}] Approved sell submission outcome unknown: ${message}`);
+      this.logger.warn(`[${approval.tradeRecord.broker} ${approval.stockCode}] Approved sell submission outcome unknown: ${message}`);
       const markedUnknown = await this.recoveryService.markSubmissionUnknown(
         approval.tradeRecordId,
         message,
@@ -464,6 +529,7 @@ export class TradingSellApprovalWorkflowService {
     if (orderResult.outcome === 'ACCEPTED' && this.hasCompleteOrderIdentity(orderResult)) {
       const persisted = await this.persistAccepted(
         approval.tradeRecordId,
+        approval.tradeRecord.broker,
         approval.market,
         approval.stockCode,
         orderResult,
@@ -532,11 +598,11 @@ export class TradingSellApprovalWorkflowService {
   ): Promise<SellApprovalWorkflowResult> {
     const persisted = await this.prisma.tradeRecord.findUnique({
       where: { id: tradeRecordId },
-      select: { status: true },
+      select: { broker: true, status: true },
     });
     const tradeStatus = persisted?.status ?? current.tradeStatus;
     this.logger.warn(
-      `[${stockCode}] Trade state changed before workflow persistence: ${tradeStatus || 'UNKNOWN'}`,
+      `[${persisted?.broker ?? 'UNKNOWN'} ${stockCode}] Trade state changed before workflow persistence: ${tradeStatus || 'UNKNOWN'}`,
     );
     return {
       ...current,
@@ -548,6 +614,7 @@ export class TradingSellApprovalWorkflowService {
 
   private async persistAccepted(
     tradeRecordId: string,
+    broker: Broker,
     market: Market,
     stockCode: string,
     result: OrderResult,
@@ -570,15 +637,16 @@ export class TradingSellApprovalWorkflowService {
         });
         if (persisted.count === 1) return true;
         this.logger.warn(
-          `[${stockCode}] Accepted order DB persistence CAS missed (${attempt}/3)`,
+          `[${broker} ${stockCode}] Accepted order DB persistence CAS missed (${attempt}/3)`,
         );
       } catch (error) {
         this.logger.warn(
-          `[${stockCode}] Accepted order DB persistence failed (${attempt}/3): ${this.errorMessage(error)}`,
+          `[${broker} ${stockCode}] Accepted order DB persistence failed (${attempt}/3): ${this.errorMessage(error)}`,
         );
       }
     }
     await this.recoveryService.warnAcceptedOrderPersistenceFailure({
+      broker,
       market,
       stockCode,
       tradeRecordId,
@@ -622,9 +690,10 @@ export class TradingSellApprovalWorkflowService {
   private async cancelForBrokerContextMismatch(
     current: SellApprovalWorkflowResult,
     tradeRecordId: string,
+    broker: Broker,
     stockCode: string,
   ): Promise<SellApprovalWorkflowResult> {
-    this.logger.warn(`[${stockCode}] Approved sell cancelled: broker context mismatch`);
+    this.logger.warn(`[${broker} ${stockCode}] Approved sell cancelled: broker context mismatch`);
     const cancelled = await this.cancelPreSubmit(
       tradeRecordId,
       'Broker context changed before submission',
@@ -640,15 +709,38 @@ export class TradingSellApprovalWorkflowService {
     };
   }
 
+  private async cancelForBrokerDisabled(
+    current: SellApprovalWorkflowResult,
+    tradeRecordId: string,
+    broker: Broker,
+    stockCode: string,
+  ): Promise<SellApprovalWorkflowResult> {
+    this.logger.warn(`[${broker} ${stockCode}] Approved sell cancelled: broker disabled`);
+    const cancelled = await this.cancelPreSubmit(
+      tradeRecordId,
+      'Broker disabled before submission',
+    );
+    if (!cancelled) {
+      return this.resolveStateChangedResult(current, tradeRecordId, stockCode, false);
+    }
+    return {
+      ...current,
+      tradeStatus: OrderStatus.CANCELLED,
+      submitted: false,
+      reason: 'BROKER_DISABLED',
+    };
+  }
+
   private async cancelClaimedBeforePost(
     current: SellApprovalWorkflowResult,
     tradeRecordId: string,
+    broker: Broker,
     stockCode: string,
     submissionStartedAt: Date,
     brokerMessage: string,
-    reason: 'BROKER_CONTEXT_MISMATCH' | 'TRADING_DISABLED',
+    reason: 'BROKER_CONTEXT_MISMATCH' | 'TRADING_DISABLED' | 'BROKER_DISABLED',
   ): Promise<SellApprovalWorkflowResult> {
-    this.logger.warn(`[${stockCode}] Approved sell cancelled: ${brokerMessage}`);
+    this.logger.warn(`[${broker} ${stockCode}] Approved sell cancelled: ${brokerMessage}`);
     const cancelled = await this.prisma.tradeRecord.updateMany({
       where: {
         id: tradeRecordId,
@@ -673,14 +765,15 @@ export class TradingSellApprovalWorkflowService {
   }
 
   private matchesCurrentBrokerContext(
-    environment: Parameters<TradingBrokerContextService['matchesCurrentContext']>[0],
-    accountHash: Parameters<TradingBrokerContextService['matchesCurrentContext']>[1],
+    broker: Broker,
+    environment: Parameters<TradingBrokerContextService['matchesCurrentContext']>[1],
+    accountHash: Parameters<TradingBrokerContextService['matchesCurrentContext']>[2],
     stockCode: string,
   ): boolean {
     try {
-      return this.brokerContext.matchesCurrentContext(environment, accountHash);
+      return this.brokerContext.matchesCurrentContext(broker, environment, accountHash);
     } catch {
-      this.logger.warn(`[${stockCode}] Broker context validation failed`);
+      this.logger.warn(`[${broker} ${stockCode}] Broker context validation failed`);
       return false;
     }
   }
@@ -715,7 +808,8 @@ export class TradingSellApprovalWorkflowService {
     try {
       const watchStock = await this.prisma.watchStock.findUnique({
         where: {
-          market_exchangeCode_stockCode: {
+          broker_market_exchangeCode_stockCode: {
+            broker: record.broker,
             market: record.market,
             exchangeCode: record.exchangeCode,
             stockCode: record.stockCode,
@@ -748,7 +842,7 @@ export class TradingSellApprovalWorkflowService {
       });
     } catch (error) {
       this.logger.warn(
-        `[${record.stockCode}] Approved submission mirror failed: ${this.errorMessage(error)}`,
+        `[${record.broker} ${record.stockCode}] Approved submission mirror failed: ${this.errorMessage(error)}`,
       );
     }
   }

@@ -22,7 +22,11 @@ export interface StockStrategyContext {
   fundamentals?: StockFundamentals;
   buyableAmount: number;
   buyableMeta?: {
-    source: 'KIS_DOMESTIC_BUYABLE_AMOUNT' | 'KIS_OVERSEAS_INQUIRE_PSAMOUNT';
+    source:
+      | 'KIS_DOMESTIC_BUYABLE_AMOUNT'
+      | 'KIS_OVERSEAS_INQUIRE_PSAMOUNT'
+      | 'TOSS_DOMESTIC_BUYABLE_AMOUNT'
+      | 'TOSS_OVERSEAS_BUYABLE_AMOUNT';
     maxQuantity?: number;
     priceUsed?: number;
   };

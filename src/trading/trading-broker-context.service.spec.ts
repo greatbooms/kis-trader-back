@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Broker, BrokerEnvironment } from '@prisma/client';
 import { createHash } from 'crypto';
 import { TradingBrokerContextService } from './trading-broker-context.service';
 
@@ -9,8 +10,88 @@ describe('TradingBrokerContextService', () => {
       get: jest.fn((key: string) => values[key]),
     } as unknown as ConfigService;
 
-    return new TradingBrokerContextService(configService);
+    const toss = {
+      getBrokerContext: jest.fn().mockReturnValue({
+        broker: Broker.TOSS,
+        environment: BrokerEnvironment.PROD,
+        accountHash: 'authoritative-toss-account-hash',
+      }),
+    };
+
+    return new (TradingBrokerContextService as any)(
+      configService,
+      toss,
+    ) as TradingBrokerContextService;
   };
+
+  it('resolves TOSS from its authoritative broker service and includes broker in the tuple', () => {
+    const configService = {
+      get: jest.fn((key: string) => key === 'toss.accountNo' ? 'account-seq' : undefined),
+    } as unknown as ConfigService;
+    const toss = {
+      getBrokerContext: jest.fn().mockReturnValue({
+        broker: Broker.TOSS,
+        environment: BrokerEnvironment.PROD,
+        accountHash: 'authoritative-toss-account-hash',
+      }),
+    };
+    const service = new (TradingBrokerContextService as any)(
+      configService,
+      toss,
+    ) as TradingBrokerContextService;
+
+    expect((service.getCurrentContext as any)(Broker.TOSS)).toEqual({
+      broker: Broker.TOSS,
+      environment: BrokerEnvironment.PROD,
+      accountHash: 'authoritative-toss-account-hash',
+      maskedAccount: '****-seq',
+    });
+    expect(toss.getBrokerContext).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the authoritative TOSS broker context is unavailable', () => {
+    const configService = {
+      get: jest.fn((key: string) => key === 'toss.accountNo' ? 'account-seq' : undefined),
+    } as unknown as ConfigService;
+    const toss = {
+      getBrokerContext: jest.fn(() => {
+        throw new Error('TOSS session unavailable');
+      }),
+    };
+    const service = new (TradingBrokerContextService as any)(
+      configService,
+      toss,
+    ) as TradingBrokerContextService;
+
+    expect(() => service.getCurrentContext(Broker.TOSS)).toThrow(
+      'TOSS session unavailable',
+    );
+  });
+
+  it('preserves config-derived KIS context without consulting TOSS when TOSS is disabled by default', () => {
+    const values: Record<string, unknown> = {
+      'trading.brokers.toss.enabled': false,
+      'kis.accountNo': '12345678',
+      'kis.prodCode': '01',
+      'kis.env': 'paper',
+    };
+    const configService = {
+      get: jest.fn((key: string) => values[key]),
+    } as unknown as ConfigService;
+    const toss = { getBrokerContext: jest.fn() };
+    const service = new (TradingBrokerContextService as any)(
+      configService,
+      toss,
+    ) as TradingBrokerContextService;
+
+    expect(service.getCurrentContext(Broker.KIS)).toEqual({
+      broker: Broker.KIS,
+      environment: BrokerEnvironment.PAPER,
+      accountHash: createHash('sha256').update('1234567801').digest('hex'),
+      maskedAccount: '****5678-01',
+    });
+    expect(toss.getBrokerContext).not.toHaveBeenCalled();
+  });
 
   it('hashes the effective eight-digit CANO and configured product code', () => {
     const service = buildService({
@@ -19,7 +100,8 @@ describe('TradingBrokerContextService', () => {
       'kis.env': 'paper',
     });
 
-    expect(service.getCurrentContext()).toEqual({
+    expect(service.getCurrentContext(Broker.KIS)).toEqual({
+      broker: Broker.KIS,
       environment: 'PAPER',
       accountHash: createHash('sha256').update('1234567801').digest('hex'),
       maskedAccount: '****5678-01',
@@ -33,7 +115,8 @@ describe('TradingBrokerContextService', () => {
       'kis.env': 'prod',
     });
 
-    expect(service.getCurrentContext()).toEqual({
+    expect(service.getCurrentContext(Broker.KIS)).toEqual({
+      broker: Broker.KIS,
       environment: 'PROD',
       accountHash: createHash('sha256').update('1234567899').digest('hex'),
       maskedAccount: '****5678-99',
@@ -47,7 +130,7 @@ describe('TradingBrokerContextService', () => {
       'kis.env': 'prod',
     });
 
-    expect(service.getCurrentContext().accountHash).toBe(
+    expect(service.getCurrentContext(Broker.KIS).accountHash).toBe(
       createHash('sha256').update('1234567899').digest('hex'),
     );
   });
@@ -58,8 +141,8 @@ describe('TradingBrokerContextService', () => {
       'kis.env': 'paper',
     };
 
-    const first = buildService({ ...base, 'kis.prodCode': '01' }).getCurrentContext();
-    const second = buildService({ ...base, 'kis.prodCode': '02' }).getCurrentContext();
+    const first = buildService({ ...base, 'kis.prodCode': '01' }).getCurrentContext(Broker.KIS);
+    const second = buildService({ ...base, 'kis.prodCode': '02' }).getCurrentContext(Broker.KIS);
 
     expect(first.accountHash).not.toBe(second.accountHash);
     expect(first.maskedAccount).toBe('****5678-01');
@@ -72,8 +155,8 @@ describe('TradingBrokerContextService', () => {
       'kis.prodCode': '01',
     };
 
-    const paper = buildService({ ...base, 'kis.env': 'paper' }).getCurrentContext();
-    const prod = buildService({ ...base, 'kis.env': 'prod' }).getCurrentContext();
+    const paper = buildService({ ...base, 'kis.env': 'paper' }).getCurrentContext(Broker.KIS);
+    const prod = buildService({ ...base, 'kis.env': 'prod' }).getCurrentContext(Broker.KIS);
 
     expect(paper).toEqual({ ...prod, environment: 'PAPER' });
     expect(prod.environment).toBe('PROD');
@@ -85,13 +168,13 @@ describe('TradingBrokerContextService', () => {
       'kis.prodCode': '01',
       'kis.env': 'prod',
     });
-    const current = service.getCurrentContext();
+    const current = service.getCurrentContext(Broker.KIS);
 
-    expect(service.matchesCurrentContext('PROD', current.accountHash)).toBe(true);
-    expect(service.matchesCurrentContext('PAPER', current.accountHash)).toBe(false);
-    expect(service.matchesCurrentContext('PROD', 'different-account-hash')).toBe(false);
-    expect(service.matchesCurrentContext(null, current.accountHash)).toBe(false);
-    expect(service.matchesCurrentContext('PROD', null)).toBe(false);
+    expect(service.matchesCurrentContext(Broker.KIS, 'PROD', current.accountHash)).toBe(true);
+    expect(service.matchesCurrentContext(Broker.KIS, 'PAPER', current.accountHash)).toBe(false);
+    expect(service.matchesCurrentContext(Broker.KIS, 'PROD', 'different-account-hash')).toBe(false);
+    expect(service.matchesCurrentContext(Broker.KIS, null, current.accountHash)).toBe(false);
+    expect(service.matchesCurrentContext(Broker.KIS, 'PROD', null)).toBe(false);
   });
 
   it('creates an opaque binding token that matches only the captured broker context', () => {
@@ -101,7 +184,7 @@ describe('TradingBrokerContextService', () => {
       'kis.env': 'prod',
       'auth.jwtSecret': 'test-only-context-binding-secret',
     });
-    const current = service.getCurrentContext();
+    const current = service.getCurrentContext(Broker.KIS);
 
     const token = service.createContextBindingToken(current);
 
@@ -114,6 +197,10 @@ describe('TradingBrokerContextService', () => {
     )).toBe(false);
     expect(service.matchesContextBindingToken(
       { ...current, accountHash: 'different-account-hash' },
+      token,
+    )).toBe(false);
+    expect(service.matchesContextBindingToken(
+      { ...current, broker: Broker.TOSS },
       token,
     )).toBe(false);
     expect(service.matchesContextBindingToken(current, 'malformed')).toBe(false);
@@ -135,7 +222,7 @@ describe('TradingBrokerContextService', () => {
       'kis.env': environment,
     });
 
-    expect(() => service.getCurrentContext()).toThrow('Invalid KIS broker configuration');
+    expect(() => service.getCurrentContext(Broker.KIS)).toThrow('Invalid KIS broker configuration');
   });
 
   it('never exposes the raw account through returns, errors, or log arguments', () => {
@@ -149,7 +236,7 @@ describe('TradingBrokerContextService', () => {
         'kis.accountNo': rawAccount,
         'kis.prodCode': '99',
         'kis.env': 'prod',
-      }).getCurrentContext();
+      }).getCurrentContext(Broker.KIS);
 
       expect(JSON.stringify(validContext)).not.toContain(rawAccount);
 
@@ -160,7 +247,7 @@ describe('TradingBrokerContextService', () => {
       });
       let thrown: unknown;
       try {
-        invalidService.getCurrentContext();
+        invalidService.getCurrentContext(Broker.KIS);
       } catch (error) {
         thrown = error;
       }

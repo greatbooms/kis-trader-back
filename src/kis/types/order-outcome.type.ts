@@ -1,1 +1,1 @@
-export type OrderOutcome = 'ACCEPTED' | 'REJECTED' | 'UNKNOWN';
+export type { OrderOutcome } from '../../common/types/broker-io.type';

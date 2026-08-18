@@ -10,25 +10,36 @@ describe('TradingBrokerOrderMatcherService', () => {
   const overseas = {
     getOrderExecutions: jest.fn(),
   };
+  const port = {
+    getOrderExecutions: jest.fn((market, startDate, endDate) => market === 'DOMESTIC'
+      ? domestic.getOrderExecutions(startDate, endDate)
+      : overseas.getOrderExecutions(startDate, endDate)),
+  };
+  const registry = { get: jest.fn() };
 
   let service: TradingBrokerOrderMatcherService;
 
   beforeEach(() => {
     jest.resetAllMocks();
+    port.getOrderExecutions.mockImplementation((market, startDate, endDate) => market === 'DOMESTIC'
+      ? domestic.getOrderExecutions(startDate, endDate)
+      : overseas.getOrderExecutions(startDate, endDate));
+    registry.get.mockReturnValue(port);
     brokerContext.getCurrentContext.mockReturnValue({
+      broker: 'KIS',
       environment: 'PROD',
       accountHash: 'current-hash',
       maskedAccount: '****5678-01',
     });
     service = new TradingBrokerOrderMatcherService(
       brokerContext as never,
-      domestic as never,
-      overseas as never,
+      registry as never,
     );
   });
 
   const request = (overrides: Record<string, unknown> = {}) => ({
     tradeRecordId: 'trade-unknown',
+    broker: 'KIS',
     market: 'OVERSEAS',
     exchangeCode: 'NASD',
     stockCode: 'TQQQ',
@@ -72,6 +83,28 @@ describe('TradingBrokerOrderMatcherService', () => {
     expect(domestic.getOrderExecutions).not.toHaveBeenCalled();
     expect(overseas.getOrderExecutions).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['KIS', 'TOSS'],
+    ['TOSS', 'KIS'],
+  ])(
+    'blocks a %s recovery record when the resolved context belongs to %s',
+    async (recordBroker, currentBroker) => {
+      brokerContext.getCurrentContext.mockReturnValue({
+        broker: currentBroker,
+        environment: 'PROD',
+        accountHash: 'current-hash',
+        maskedAccount: '****1234',
+      });
+
+      await expect(service.findSubmissionCandidates(request({
+        broker: recordBroker,
+      }) as never)).rejects.toThrow(/does not match current.*context/i);
+
+      expect(brokerContext.getCurrentContext).toHaveBeenCalledWith(recordBroker);
+      expect(registry.get).not.toHaveBeenCalled();
+    },
+  );
 
   it('queries the full KST date window and returns only exact, de-duplicated domestic matches', async () => {
     domestic.getOrderExecutions.mockResolvedValue([

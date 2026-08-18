@@ -1,4 +1,5 @@
 import { MomentumBreakoutStrategy } from './momentum-breakout.strategy';
+import { Broker } from '@prisma/client';
 import {
   StockStrategyContext,
   WatchStockConfig,
@@ -40,6 +41,7 @@ describe('MomentumBreakoutStrategy (당일청산 변동성 돌파)', () => {
   ): StockStrategyContext {
     const defaultWatchStock: WatchStockConfig = {
       id: 'ws-1',
+      broker: Broker.KIS,
       market: 'DOMESTIC',
       exchangeCode: 'KRX',
       stockCode: '005930',

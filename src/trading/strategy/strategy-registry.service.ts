@@ -9,7 +9,7 @@ import { ConservativeStrategy } from './conservative.strategy';
 import { TrendFollowingStrategy } from './trend-following.strategy';
 import { ValueFactorStrategy } from './value-factor.strategy';
 import { DailyDcaStrategy } from './daily-dca.strategy';
-import { Market, Prisma } from '@prisma/client';
+import { Broker, Market, Prisma } from '@prisma/client';
 
 @Injectable()
 export class StrategyRegistryService {
@@ -76,7 +76,8 @@ export class StrategyRegistryService {
 
     return this.prisma.strategyAllocation.upsert({
       where: {
-        market_strategyName: {
+        broker_market_strategyName: {
+          broker: Broker.KIS,
           market: market as Market,
           strategyName,
         },

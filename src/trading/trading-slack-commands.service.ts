@@ -244,7 +244,7 @@ export class TradingSlackCommandsService implements OnModuleInit {
         text = ':no_entry: 실전 거래가 비활성 상태여서 주문을 제출하지 않았습니다.';
         break;
       case 'BROKER_CONTEXT_MISMATCH':
-        text = ':no_entry: 승인 요청의 KIS 계좌가 현재 계좌와 일치하지 않아 주문을 제출하지 않았습니다.';
+        text = ':no_entry: 승인 요청의 브로커 계좌가 현재 계좌와 일치하지 않아 주문을 제출하지 않았습니다.';
         break;
       case 'REFRESH_FAILED':
         text = ':x: 포지션 새로고침 실패로 주문을 제출하지 않았습니다.';
@@ -257,13 +257,13 @@ export class TradingSlackCommandsService implements OnModuleInit {
         text = ':information_source: 주문 상태가 이미 변경되어 추가 제출하지 않았습니다.';
         break;
       case 'BROKER_REJECTED':
-        text = ':x: KIS가 주문을 거절했습니다.';
+        text = ':x: 브로커가 주문을 거절했습니다.';
         break;
       case 'BROKER_UNKNOWN':
-        text = ':warning: KIS 주문 결과를 확인해야 합니다. 추가 주문은 제출하지 마세요.';
+        text = ':warning: 브로커 주문 결과를 확인해야 합니다. 추가 주문은 제출하지 마세요.';
         break;
       case 'ACCEPTED_PERSISTENCE_PENDING':
-        text = ':warning: KIS 주문은 접수됐지만 DB 저장 확인이 필요합니다.';
+        text = ':warning: 브로커 주문은 접수됐지만 DB 저장 확인이 필요합니다.';
         break;
     }
     if (text) {
@@ -280,6 +280,7 @@ export class TradingSlackCommandsService implements OnModuleInit {
     });
 
     return positions.map((p) => ({
+      broker: p.broker,
       stockCode: p.stockCode,
       stockName: p.stockName,
       exchangeCode: p.exchangeCode,
@@ -294,18 +295,31 @@ export class TradingSlackCommandsService implements OnModuleInit {
   }
 
   private async getStockDetail(stockCode: string) {
-    const position = await this.prisma.position.findFirst({
+    const positions = await this.prisma.position.findMany({
       where: { stockCode },
+      take: 2,
     });
 
-    if (!position) return null;
+    if (positions.length === 0) return null;
+    if (positions.length > 1) {
+      throw new Error('동일 종목이 여러 브로커에 있어 종목코드만으로 식별할 수 없습니다.');
+    }
+    const position = positions[0];
 
-    const watchStock = await this.prisma.watchStock.findFirst({
-      where: { stockCode, isActive: true },
+    const watchStock = await this.prisma.watchStock.findUnique({
+      where: {
+        broker_market_exchangeCode_stockCode: {
+          broker: position.broker,
+          market: position.market,
+          exchangeCode: position.exchangeCode,
+          stockCode: position.stockCode,
+        },
+      },
     });
 
     return {
       position: {
+        broker: position.broker,
         stockCode: position.stockCode,
         stockName: position.stockName,
         exchangeCode: position.exchangeCode,
@@ -317,7 +331,7 @@ export class TradingSlackCommandsService implements OnModuleInit {
         profitRate: Number(position.profitRate),
         totalInvested: Number(position.totalInvested),
       } as PositionInfo,
-      watchStock: watchStock
+      watchStock: watchStock?.isActive
         ? {
             quota: watchStock.quota ? Number(watchStock.quota) : undefined,
             cycle: watchStock.cycle,

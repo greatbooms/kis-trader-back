@@ -1,6 +1,7 @@
 query GetWatchStocks($input: WatchStocksFilterInput) {
   watchStocks(input: $input) {
     id
+    broker
     market
     exchangeCode
     stockCode
@@ -23,6 +24,7 @@ query GetWatchStocks($input: WatchStocksFilterInput) {
 query GetWatchStock($id: ID!) {
   watchStock(id: $id) {
     id
+    broker
     market
     exchangeCode
     stockCode
@@ -62,6 +64,7 @@ query GetWatchStockExecutionLogs($watchStockId: String!, $limit: Float) {
 mutation CreateWatchStock($input: CreateWatchStockInput!) {
   createWatchStock(input: $input) {
     id
+    broker
     market
     exchangeCode
     stockCode
@@ -82,6 +85,7 @@ mutation CreateWatchStock($input: CreateWatchStockInput!) {
 mutation UpdateWatchStock($id: ID!, $input: UpdateWatchStockInput!) {
   updateWatchStock(id: $id, input: $input) {
     id
+    broker
     market
     exchangeCode
     stockCode
