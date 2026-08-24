@@ -54,7 +54,11 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
         })),
       )
     : null
-  const brokerCashSummaries = scopedSummary
+  // broker 미확인 잔액이 하나라도 섞이면 소계를 아예 표시하지 않는다(fail closed).
+  // 그 금액은 위 국가별 총액에는 계속 포함되므로, 일부만 집계한 소계를 완전한 내역처럼
+  // 보여주면 어느 증권사 돈인지 오인시킨다. 현재 캐시 read 경로는 broker를 항상 채우므로
+  // 이 가드는 실제로는 걸리지 않는다.
+  const brokerCashSummaries = scopedSummary && scopedSummary.countryCashBalances.every((balance) => balance.broker)
     ? Array.from(scopedSummary.countryCashBalances.reduce((totals, balance) => {
         if (balance.broker) {
           totals.set(balance.broker, (totals.get(balance.broker) ?? 0) + getDisplayCashAmount(balance))
