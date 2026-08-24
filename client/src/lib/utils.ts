@@ -50,12 +50,14 @@ export function formatPercent(value: number): string {
 }
 
 export function formatDate(date: string | Date): string {
+  // hourCycle 미지정 시 ko-KR은 12시간제라 00:30이 '오전 12:30'으로 찍혀 정오와 혼동된다.
   return new Intl.DateTimeFormat('ko-KR', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
   }).format(new Date(date))
 }
 

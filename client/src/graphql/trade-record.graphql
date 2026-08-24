@@ -12,6 +12,7 @@ query GetTrades($input: TradeFilterInput) {
     price
     executedPrice
     executedQty
+    executedAt
     orderNo
     status
     cancellationStatus
@@ -37,6 +38,7 @@ query GetTrade($id: ID!) {
     price
     executedPrice
     executedQty
+    executedAt
     orderNo
     status
     cancellationStatus

@@ -304,6 +304,9 @@ type TradeRecordType {
   price: Float!
   executedPrice: Float
   executedQty: Int
+
+  """체결 확인 시각. 브로커 체결 시각이 아니라 동기화가 체결을 관측한 시각."""
+  executedAt: DateTime
   orderNo: String
   status: OrderStatus!
   strategyName: String

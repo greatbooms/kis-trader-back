@@ -192,6 +192,8 @@ describe('TradingBrokerCancellationRecoveryService', () => {
       },
     });
     expect(tx.tradeRecord.updateMany.mock.calls[0][0].data).not.toHaveProperty('reason');
+    // 신규 체결이 없으면 체결 시각을 남기지 않는다
+    expect(tx.tradeRecord.updateMany.mock.calls[0][0].data).not.toHaveProperty('executedAt');
     expect(tx.brokerOrderActionAuditLog.create).toHaveBeenCalledWith({
       data: {
         tradeRecordId: 'trade-cancel-unknown',
@@ -233,6 +235,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
         orderNo: null,
         executedQty: 2,
         executedPrice: 70_100,
+        executedAt: expect.any(Date),
         cancellationStatus: CancellationAttemptStatus.RESOLVED,
       }),
     );
@@ -255,6 +258,7 @@ describe('TradingBrokerCancellationRecoveryService', () => {
         status: OrderStatus.FILLED,
         executedQty: 4,
         executedPrice: 70_050,
+        executedAt: expect.any(Date),
         cancellationStatus: CancellationAttemptStatus.RESOLVED,
       }),
     );

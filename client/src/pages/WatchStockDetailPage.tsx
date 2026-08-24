@@ -23,6 +23,7 @@ import type { ConvertWatchStockToInfiniteBuyV4Mutation, PreviewWatchStockExecuti
 import { EXCHANGE_LABELS } from '@/lib/market-constants'
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
+import { TradeTimestamps } from '@/components/TradeTimestamps'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import { STRATEGY_META, DEFAULT_STRATEGY_META } from '@/pages/watchlist/strategy-meta'
 import type { InfiniteBuyV4Status } from '@/pages/types'
@@ -924,7 +925,7 @@ export function WatchStockDetailPage() {
                   return (
                     <div key={trade.id} className="rounded-lg border border-border p-4 space-y-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
+                        <TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} />
                         <div className="flex gap-2">
                           <Badge variant="outline">{trade.broker}</Badge>
                           <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
@@ -976,7 +977,7 @@ export function WatchStockDetailPage() {
                   <TableBody>
                     {actualTrades.map((trade) => (
                       <TableRow key={trade.id}>
-                        <TableCell className="align-top whitespace-nowrap pr-3">{formatDate(trade.createdAt)}</TableCell>
+                        <TableCell className="align-top whitespace-nowrap pr-3"><TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} /></TableCell>
                         <TableCell className="align-top whitespace-nowrap pr-3">
                           <div className="flex flex-col gap-1">
                             <Badge variant="outline">{trade.broker}</Badge>
