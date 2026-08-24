@@ -20,6 +20,11 @@ export interface TradeAlertContext {
   signal: TradingSignal;
   result: OrderResult;
   position?: PositionInfo;
+  crossBrokerPosition?: {
+    totalQuantity: number;
+    totalValue: number;
+    brokers: Array<{ broker: Broker; quantity: number; value: number }>;
+  };
   execution?: {
     quantity: number;
     price?: number;

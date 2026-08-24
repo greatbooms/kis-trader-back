@@ -177,8 +177,140 @@ describe('SlackService', () => {
 
     expect(text).toContain('*주문 당시 T:* 17.6 / 40 (44.0%)');
     expect(text).toContain('*체결 후 T:* 18.2 / 40 (45.5%)');
-    expect(text).toContain('[KIS TQQQ]');
+    expect(text).toContain('한국투자 · TQQQ');
+    expect(text).toContain('*현재 보유 현황 (한국투자)*');
+    expect(text).not.toContain('*전 증권사 합산:*');
     expect(text).not.toContain('*T값:* 17.6 / 40');
+  });
+
+  it('체결 알림은 두 증권사 보유가 있을 때만 전 증권사 합산을 표시한다', () => {
+    const blocks = service.formatTradeAlert({
+      signal: {
+        broker: Broker.KIS,
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 75,
+        reason: '매수',
+        orderDivision: '00',
+      },
+      result: { outcome: 'ACCEPTED', success: true, orderNo: '1', message: '체결 완료' },
+      position: {
+        broker: Broker.KIS,
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        exchangeCode: 'NASD',
+        market: 'OVERSEAS',
+        quantity: 26,
+        avgPrice: 100,
+        currentPrice: 120,
+        totalInvested: 2600,
+        profitRate: 20,
+        profitLoss: 520,
+      },
+      crossBrokerPosition: {
+        totalQuantity: 36,
+        totalValue: 4341.6,
+        brokers: [
+          { broker: Broker.KIS, quantity: 26, value: 3120 },
+          { broker: Broker.TOSS, quantity: 10, value: 1221.6 },
+        ],
+      },
+    });
+
+    const text = blocks.map((block: any) => block.text?.text ?? '').join('\n');
+    expect(text).toContain('*전 증권사 합산:* 36주 · $4,341.60 (한국투자 26 / 토스 10)');
+  });
+
+  it('단일 브로커 일일요약에는 증권사 소계를 표시하지 않는다', () => {
+    const position = {
+      broker: Broker.KIS,
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      stockName: 'TQQQ',
+      quantity: 10,
+      avgPrice: 100,
+      currentPrice: 90,
+      profitLoss: -100,
+      profitRate: -10,
+      totalInvested: 1000,
+    };
+    const text = service.formatDailySummary({
+      positions: [position],
+      todayBuyCount: 0,
+      todaySellCount: 0,
+      skipCount: 0,
+      skipReasons: [],
+      totalInvested: 1000,
+      totalEvaluation: 900,
+      totalPnl: -100,
+      totalPnlRate: -10,
+      marketSummaries: [{
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        label: '미국',
+        positions: [position],
+        totalInvested: 1000,
+        totalEvaluation: 900,
+        totalPnl: -100,
+        totalPnlRate: -10,
+      }],
+    }).map((block: any) => block.text?.text ?? '').join('\n');
+
+    expect(text).not.toContain('*증권사별:*');
+  });
+
+  it('두 브로커 일일요약에는 한글 증권사 소계를 표시한다', () => {
+    const kisPosition = {
+      broker: Broker.KIS,
+      market: 'OVERSEAS',
+      exchangeCode: 'NASD',
+      stockCode: 'TQQQ',
+      stockName: 'TQQQ',
+      quantity: 30,
+      avgPrice: 100,
+      currentPrice: 90,
+      profitLoss: -300,
+      profitRate: -10,
+      totalInvested: 3000,
+    };
+    const tossPosition = {
+      ...kisPosition,
+      broker: Broker.TOSS,
+      stockCode: 'SOXL',
+      quantity: 10,
+      profitLoss: -100,
+      totalInvested: 1000,
+    };
+    const positions = [kisPosition, tossPosition];
+    const text = service.formatDailySummary({
+      positions,
+      todayBuyCount: 0,
+      todaySellCount: 0,
+      skipCount: 0,
+      skipReasons: [],
+      totalInvested: 4000,
+      totalEvaluation: 3600,
+      totalPnl: -400,
+      totalPnlRate: -10,
+      marketSummaries: [{
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        label: '미국',
+        positions,
+        totalInvested: 4000,
+        totalEvaluation: 3600,
+        totalPnl: -400,
+        totalPnlRate: -10,
+      }],
+    }).map((block: any) => block.text?.text ?? '').join('\n');
+
+    expect(text).toContain('*증권사별:*');
+    expect(text).toContain('한국투자 투자 $3,000.00 / 평가 $2,700.00 (-10.0%)');
+    expect(text).toContain('토스 투자 $1,000.00 / 평가 $900.00 (-10.0%)');
   });
 
   it('매도 승인 요청에는 지금 매도 시 예상 손익을 표시한다', async () => {
@@ -209,7 +341,7 @@ describe('SlackService', () => {
     const payloadJson = JSON.stringify(payload);
 
     expect(text).toContain('매도 승인 요청');
-    expect(text).toContain('[TOSS TQQQ]');
+    expect(text).toContain('[토스 TQQQ]');
     expect(text).toContain('*지금 매도 시 예상 손익:* +$80.00 (+10.00%)');
     expect(text).toContain('*승인 사유:* Take profit 1: T=20.5, target +8.0%');
     expect(payloadJson).toContain('승인 버튼은 전송 시점부터 10분간 유효');
@@ -220,7 +352,7 @@ describe('SlackService', () => {
   it.each([
     ['APPROVED_ACCEPTED', '승인됨 - 주문 접수'],
     ['APPROVED_NOT_SUBMITTED', '승인됨 - 주문 미실행'],
-    ['APPROVED_REJECTED', '승인됨 - TOSS 거절'],
+    ['APPROVED_REJECTED', '승인됨 - 토스 거절'],
     ['APPROVED_UNKNOWN', '승인됨 - 결과 확인 필요'],
     ['REJECTED', '거절됨 - 스킵'],
     ['EXPIRED', '미응답 - 주문 미실행'],
@@ -231,7 +363,7 @@ describe('SlackService', () => {
     expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({
       channel: 'C123',
       ts: '123.45',
-      text: `매도 승인 ${label} | [TOSS TQQQ]`,
+      text: `매도 승인 ${label} | [토스 TQQQ]`,
     }));
   });
 
@@ -250,7 +382,7 @@ describe('SlackService', () => {
     expect(text).toContain('브로커 주문 접수 후 로컬 저장 실패');
     expect(text).toContain('OVERSEAS');
     expect(text).toContain('TQQQ');
-    expect(text).toContain('[TOSS TQQQ]');
+    expect(text).toContain('[토스 TQQQ]');
     expect(text).toContain('trade-safe-id');
     expect(text).toContain('broker-safe-order');
     expect(JSON.stringify(payload)).not.toContain('account');
@@ -280,10 +412,10 @@ describe('SlackService', () => {
 
     const payload = postMessage.mock.calls[0][0];
     const text = payload.blocks.map((block: any) => block.text?.text ?? '').join('\n');
-    expect(payload.text).toContain('KIS 해외');
+    expect(payload.text).toContain('한국투자 해외');
     expect(text).toContain('표시 전용');
     expect(text).toContain('NASD:TQQQ');
-    expect(text).toContain('KIS $120.00 + TOSS $183.00');
+    expect(text).toContain('한국투자 $120.00 + 토스 $183.00');
     expect(text).not.toContain('크로스 브로커 매수 차단');
   });
 
@@ -319,7 +451,7 @@ describe('SlackService', () => {
 
     expect(text).toContain('표시 전용');
     expect(text).toContain('SEHK:0700 총 HK$2,400.00');
-    expect(text).toContain('KIS HK$1,000.00 + TOSS HK$1,400.00');
+    expect(text).toContain('한국투자 HK$1,000.00 + 토스 HK$1,400.00');
     expect(text).not.toContain('매수 차단');
   });
 
@@ -343,7 +475,7 @@ describe('SlackService', () => {
       ...service.formatStockDetail(position),
     ].map((block: any) => block.text?.text ?? '').join('\n');
 
-    expect(text.match(/\[TOSS 0700\]/g)).toHaveLength(2);
+    expect(text.match(/\[토스 0700\]/g)).toHaveLength(2);
   });
 
   it('shows broker ownership in the strategy-skip block title', () => {
@@ -355,7 +487,7 @@ describe('SlackService', () => {
       details: { regime: 'BEARISH' },
     });
 
-    expect((blocks[0] as any).text.text).toBe(':warning: *전략 스킵 | [TOSS TQQQ]*');
+    expect((blocks[0] as any).text.text).toBe(':warning: *전략 스킵 | [토스 TQQQ]*');
   });
 
   it('자동 주문 실패 알림은 재시도 금지와 안전한 주문 정보만 표시한다', async () => {
@@ -364,7 +496,7 @@ describe('SlackService', () => {
     const payload = postMessage.mock.calls[0][0];
     const serialized = JSON.stringify(payload);
     expect(serialized).toContain('자동 주문 실패');
-    expect(serialized).toContain('[TOSS TQQQ]');
+    expect(serialized).toContain('[토스 TQQQ]');
     expect(serialized).toContain('TQQQ');
     expect(serialized).toContain('BUY');
     expect(serialized).toContain('2주');

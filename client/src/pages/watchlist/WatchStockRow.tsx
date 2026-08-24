@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Trash2, Power } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import { EXCHANGE_LABELS } from '@/lib/market-constants'
+import { brokerLabel, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { parseStrategyParams, formatCycleValue } from './strategy-meta'
 import type { WatchStockRowProps } from './types'
 
@@ -28,7 +28,7 @@ export function WatchStockRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium break-words">{stock.stockName}</span>
             <span className="text-xs text-muted-foreground">{stock.stockCode}</span>
-            <Badge variant="outline">{stock.broker}</Badge>
+            <Badge variant="outline">{brokerLabel(stock.broker)}</Badge>
             <Badge variant={stock.market === 'DOMESTIC' ? 'default' : 'info'}>
               {stock.exchangeCode ? (EXCHANGE_LABELS[stock.exchangeCode] ?? stock.exchangeCode) : (stock.market === 'DOMESTIC' ? '국내' : '해외')}
             </Badge>

@@ -41,4 +41,5 @@
 - **거대 페이지 분해 패턴**: `WatchlistPage`/`PortfolioPage`/`ScreeningPage`는 entry 파일에서 GraphQL hook + 상태만 관리하고, 섹션별 UI(필터, 테이블, 카드, 모달)는 `pages/{name}/` 하위로 분리. 자식 컴포넌트는 명시적 props 받고 stateless에 가깝게 유지하며, 공통 헬퍼/타입은 `{name}-helpers.ts`/`types/{name}.types.ts`로 따로 둔다.
 - **다국가 시장 처리**: 거래소/통화 매핑은 `lib/market-constants.ts`로 통합 — 페이지에서 직접 매핑 테이블을 만들지 말 것 (단, `DashboardPage`처럼 국가→통화 같은 페이지 한정 작은 매핑은 페이지 내 const 허용).
 - **확인 필요 주문 polling**: `UnknownOrderReconciliationCard`의 15초 query는 DB 목록만 조회하고 `fetchPolicy='network-only'`를 유지한다. KIS 조회는 사용자가 명시적으로 후보/취소 상태 조회 mutation을 누를 때만 수행한다. legacy 계좌 배정 전에는 별도 preview query로 환경과 마스킹 계좌만 보여주며 raw 계좌/hash를 클라이언트 타입이나 화면에 추가하지 않는다.
+- 포트폴리오의 증권사별 포지션 소계와 현금성 자산은 국가 탭의 실제 데이터에서 broker를 도출한다. 0이 아닌 데이터가 있는 broker가 2개 이상일 때만 보조 요약을 표시하며 broker 필터 UI는 두지 않는다.
 - **`refetchQueries`는 operation 이름 문자열로** (예: `['GetWatchStocks']`).

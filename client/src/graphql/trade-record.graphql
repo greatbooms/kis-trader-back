@@ -198,6 +198,7 @@ query GetAccountSummary {
     positionCount
     lastSyncedAt
     cashBalances {
+      broker
       market
       currencyCode
       currencyName
@@ -253,6 +254,7 @@ mutation RefreshAccountState {
       positionCount
       lastSyncedAt
       cashBalances {
+        broker
         market
         currencyCode
         currencyName

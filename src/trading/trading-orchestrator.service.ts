@@ -677,7 +677,7 @@ export class TradingOrchestrator {
         totalValue: brokers.reduce((sum, item) => sum + item.value, 0),
         brokers,
       };
-    });
+    }).filter((exposure) => exposure.brokers.length > 1);
   }
 
   async sendDomesticDailySummary(): Promise<void> {

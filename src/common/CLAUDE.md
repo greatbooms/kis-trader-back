@@ -7,6 +7,7 @@
 - `types/` — 여러 모듈이 공유하는 외부 의존 없는 순수 TypeScript 타입
 - `broker-mutation.error.ts` — broker mutation의 명시적 거절과 제출 결과 불명 의미론을 공유하는 기반 에러
 - `utils/broker-account-hash.util.ts` — broker account context용 SHA-256 해시
+- `utils/broker-label.util.ts` — 사용자 표시용 broker enum 한글 라벨
 - `utils/api-data.util.ts` — KIS API 응답에서 숫자/문자 안전 추출 (`pickNumeric`, `pickString`)
 - `utils/consensus.util.ts` — 컨센서스/투자의견 데이터 요약 (`summarizeEstimatePerform`, `summarizeInvestOpinion`)
 - `utils/dividend.util.ts` — 배당 일정/캘린더 요약 (`summarizeDividendSchedule`)
@@ -14,7 +15,7 @@
 이 유틸들은 원래 `src/screening/utils/`에 있었으나 `trading-orchestrator`도 사용하면서 cross-module dependency가 생겨 `common/utils/`로 이전됨.
 
 ## 외부 의존성
-- 없음. 순수 TypeScript 함수만.
+- `@prisma/client` — 표시 전용 `Broker` enum 타입
 
 ## 주의사항
 - **순수 함수/타입만**: NestJS 데코레이터(`@Injectable` 등) 사용 금지. DB/HTTP 호출 금지. 의존성 주입 없음.

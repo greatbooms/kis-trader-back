@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
+import { brokerLabel } from '@/lib/market-constants'
 import type {
   BrokerOrderRecoveryCandidate,
   BrokerOrderRecoveryDialogMode,
@@ -73,7 +74,7 @@ export function UnknownOrderReconciliationDialog({
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="font-medium">이 기록에는 주문 당시 broker 계좌 정보가 없습니다.</p>
               <p className="mt-2">
-                증권사: <strong>{state.contextPreview?.broker ?? '-'}</strong>
+                증권사: <strong>{state.contextPreview?.broker ? brokerLabel(state.contextPreview.broker) : '-'}</strong>
                 {' · '}현재 환경: <strong>{state.contextPreview?.environment ?? '-'}</strong>
                 {' · '}계좌: <strong>{state.contextPreview?.maskedAccount ?? '-'}</strong>
               </p>

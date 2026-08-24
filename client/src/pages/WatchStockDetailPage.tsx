@@ -20,7 +20,7 @@ import {
   usePreviewWatchStockExecutionLazyQuery,
 } from '@/graphql/generated'
 import type { ConvertWatchStockToInfiniteBuyV4Mutation, PreviewWatchStockExecutionQuery } from '@/graphql/generated'
-import { EXCHANGE_LABELS } from '@/lib/market-constants'
+import { brokerLabel, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { TradeTimestamps } from '@/components/TradeTimestamps'
@@ -383,7 +383,7 @@ export function WatchStockDetailPage() {
           <Badge variant={stock.isActive ? 'success' : 'outline'}>
             {stock.isActive ? '활성' : '비활성'}
           </Badge>
-          <Badge variant="outline">{stock.broker}</Badge>
+          <Badge variant="outline">{brokerLabel(stock.broker)}</Badge>
           {stock.strategyName && <Badge variant="info">{stock.strategyName}</Badge>}
           {stock.isActive && stock.strategyName && (
             <Button variant="outline" onClick={handleManualTrigger} disabled={triggering}>
@@ -681,7 +681,7 @@ export function WatchStockDetailPage() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <CardTitle>오늘 실행 미리보기</CardTitle>
-                <Badge variant="outline">{stock.broker}</Badge>
+                <Badge variant="outline">{brokerLabel(stock.broker)}</Badge>
               </div>
               <div className="flex items-end gap-2">
                 <div>
@@ -927,7 +927,7 @@ export function WatchStockDetailPage() {
                       <div className="flex items-start justify-between gap-3">
                         <TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} />
                         <div className="flex gap-2">
-                          <Badge variant="outline">{trade.broker}</Badge>
+                          <Badge variant="outline">{brokerLabel(trade.broker)}</Badge>
                           <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
                             {trade.side === 'BUY' ? '매수' : '매도'}
                           </Badge>
@@ -980,7 +980,7 @@ export function WatchStockDetailPage() {
                         <TableCell className="align-top whitespace-nowrap pr-3"><TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} /></TableCell>
                         <TableCell className="align-top whitespace-nowrap pr-3">
                           <div className="flex flex-col gap-1">
-                            <Badge variant="outline">{trade.broker}</Badge>
+                            <Badge variant="outline">{brokerLabel(trade.broker)}</Badge>
                             <Badge variant={trade.side === 'BUY' ? 'info' : 'danger'}>
                               {trade.side === 'BUY' ? '매수' : '매도'}
                             </Badge>

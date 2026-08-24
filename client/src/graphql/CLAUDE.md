@@ -32,3 +32,4 @@
 - `refetchQueries`로 캐시 무효화할 때는 **operation 이름 문자열**을 사용 (예: `refetchQueries: ['GetScreeningSettings']`). Document 객체를 넘겨도 되지만 문자열 컨벤션을 따른다.
 - `apolloClient`는 `cache-and-network`가 default fetchPolicy(`@/lib/apollo`) — 페이지 진입 시 캐시 즉시 표시 + 백그라운드 재요청 동작이라는 점을 알고 사용.
 - enum은 codegen 설정상 `enumsAsTypes: true`로 string union 타입(`'BUY' | 'SELL'` 등)으로 생성된다 — TypeScript enum이 아니므로 `Side.BUY` 식 접근 불가, 문자열 리터럴로 비교.
+- `GetAccountSummary`와 `RefreshAccountState`의 `cashBalances`는 nullable `broker`를 함께 요청해 증권사별 현금 표시의 데이터 소스로 사용한다.

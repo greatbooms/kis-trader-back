@@ -744,14 +744,29 @@ export class TradingOrderReconciliationService {
       return;
     }
 
-    const position = await this.prisma.position.findFirst({
+    const positions = await this.prisma.position.findMany({
       where: {
-        broker: record.broker,
         market: record.market,
         exchangeCode: record.exchangeCode,
         stockCode: record.stockCode,
       },
     });
+    const position = positions.find((item) => item.broker === record.broker);
+    const heldPositions = positions.filter((item) => item.quantity > 0);
+    const crossBrokerPosition = new Set(heldPositions.map((item) => item.broker)).size > 1
+      ? {
+          totalQuantity: heldPositions.reduce((sum, item) => sum + item.quantity, 0),
+          totalValue: heldPositions.reduce(
+            (sum, item) => sum + item.quantity * Number(item.currentPrice),
+            0,
+          ),
+          brokers: heldPositions.map((item) => ({
+            broker: item.broker,
+            quantity: item.quantity,
+            value: item.quantity * Number(item.currentPrice),
+          })),
+        }
+      : undefined;
 
     const executedPrice = Number(record.executedPrice ?? signal.price ?? record.price);
     const totalExecutedQty = record.executedQty || filledNowQty;
@@ -791,6 +806,7 @@ export class TradingOrderReconciliationService {
             totalInvested: Number(position.totalInvested),
           }
         : undefined,
+      ...(crossBrokerPosition ? { crossBrokerPosition } : {}),
       ...(strategyDetails ? { strategyDetails } : {}),
     });
   }

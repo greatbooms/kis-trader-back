@@ -9,7 +9,7 @@ import {
   useManualSellMutation,
 } from '@/graphql/generated'
 import { formatCurrency, formatPercent, formatNumber } from '@/lib/utils'
-import { EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
+import { brokerLabel, EXCHANGE_LABELS, filterByCountry } from '@/lib/market-constants'
 import { useIsMobile } from './portfolio-helpers'
 import { SectionToggleButton, MetricItem } from './PortfolioCommon'
 import type { PortfolioCardScopeProps } from './types'
@@ -22,6 +22,16 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
   const { data, loading, refetch } = useGetPositionsQuery({ variables: { input: { market } } })
   const allPositions = data?.positions ?? []
   const positions = filterByCountry(allPositions, countryFilter)
+  const positionBrokers = Array.from(new Set(positions.map((position) => position.broker)))
+  const brokerSummaries = positionBrokers.length > 1
+    ? positionBrokers.map((broker) => {
+        const brokerPositions = positions.filter((position) => position.broker === broker)
+        const invested = brokerPositions.reduce((sum, position) => sum + position.totalInvested, 0)
+        const evaluation = brokerPositions.reduce((sum, position) => sum + position.quantity * position.currentPrice, 0)
+        const profitRate = invested > 0 ? (evaluation - invested) / invested : 0
+        return { broker, positions: brokerPositions, invested, profitRate }
+      })
+    : []
   const [sellTarget, setSellTarget] = useState<string | null>(null)
   const [sellQty, setSellQty] = useState<string>('')
   const [sellStep, setSellStep] = useState<'input' | 'confirm'>('input')
@@ -102,6 +112,17 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
             <p className="text-sm text-muted-foreground text-center py-8">보유 포지션이 없습니다</p>
           ) : (
             <>
+              {countryFilter && brokerSummaries.length > 1 ? (
+                <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
+                  {brokerSummaries.map((summary) => (
+                    <span key={summary.broker}>
+                      {brokerLabel(summary.broker)} {summary.positions.length}종목 · 투자{' '}
+                      {formatCurrency(summary.invested, summary.positions[0]?.market, summary.positions[0]?.exchangeCode)}{' '}
+                      ({summary.profitRate >= 0 ? '+' : ''}{(summary.profitRate * 100).toFixed(1)}%)
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="space-y-3 md:hidden">
                 {positions.map((pos) => (
                   <div key={pos.id} className="rounded-lg border border-border p-4 space-y-3">
@@ -109,7 +130,7 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
                       <div>
                         <div className="flex items-center gap-2">
                           <div className="font-medium">{pos.stockName}</div>
-                          <Badge variant="outline">{pos.broker}</Badge>
+                          <Badge variant="outline">{brokerLabel(pos.broker)}</Badge>
                         </div>
                         <div className="text-xs text-muted-foreground">{pos.stockCode}</div>
                       </div>
@@ -205,7 +226,7 @@ export function PositionsCard({ market, countryFilter }: PortfolioCardScopeProps
                           <div className="font-medium truncate">{pos.stockName}</div>
                           <div className="flex items-center gap-1">
                             <div className="text-xs text-muted-foreground truncate">{pos.stockCode}</div>
-                            <Badge variant="outline">{pos.broker}</Badge>
+                            <Badge variant="outline">{brokerLabel(pos.broker)}</Badge>
                           </div>
                         </TableCell>
                         <TableCell className="align-top">

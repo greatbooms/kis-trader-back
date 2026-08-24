@@ -160,6 +160,7 @@ export type CancellationAttemptStatus =
 export type CashBalanceType = {
   __typename?: "CashBalanceType";
   amount: Scalars["Float"]["output"];
+  broker?: Maybe<Broker>;
   currencyCode: Scalars["String"]["output"];
   currencyName?: Maybe<Scalars["String"]["output"]>;
   /** 일반 주문가능금액 */
@@ -1834,6 +1835,7 @@ export type GetAccountSummaryQuery = {
     lastSyncedAt?: string | null;
     cashBalances: Array<{
       __typename?: "CashBalanceType";
+      broker?: Broker | null;
       market: Market;
       currencyCode: string;
       currencyName?: string | null;
@@ -1913,6 +1915,7 @@ export type RefreshAccountStateMutation = {
       lastSyncedAt?: string | null;
       cashBalances: Array<{
         __typename?: "CashBalanceType";
+        broker?: Broker | null;
         market: Market;
         currencyCode: string;
         currencyName?: string | null;
@@ -5199,6 +5202,7 @@ export const GetAccountSummaryDocument = gql`
       positionCount
       lastSyncedAt
       cashBalances {
+        broker
         market
         currencyCode
         currencyName
@@ -5498,6 +5502,7 @@ export const RefreshAccountStateDocument = gql`
         positionCount
         lastSyncedAt
         cashBalances {
+          broker
           market
           currencyCode
           currencyName

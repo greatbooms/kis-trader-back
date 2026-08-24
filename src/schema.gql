@@ -385,6 +385,7 @@ type DashboardSummaryType {
 }
 
 type CashBalanceType {
+  broker: Broker
   market: Market!
   currencyCode: String!
   currencyName: String

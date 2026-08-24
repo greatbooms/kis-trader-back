@@ -18,6 +18,7 @@ Slack 기반 알림 송신. 실거래 체결 알림, 위험 알림, 일일 요�
 - **`slack.enabled=false`이면 송신 메서드는 noop**: `app === null` 가드. 토큰 미설정도 동일
 - `sendOrderFailureAlert`는 자동 전략 주문의 authoritative `FAILED`만 표현한다. 계좌 hash/raw 계좌/token은 받거나 표시하지 않으며 Slack 실패는 거래 상태를 되돌리지 않는다. 사유/브로커 메시지의 KIS `appkey`/`appsecret`은 일반 key-value와 JSON 표기 모두 마스킹한다.
 - **운영 환경에서만 활성화**: `.env.dev`에는 보통 `SLACK_ENABLED=false`. 실거래 알림이 개발환경에서 발송되지 않도록
+- 사용자에게 보이는 broker는 `brokerLabel()`로 표시하되 logger 문자열은 검색 가능한 raw enum을 유지한다. 증권사별 소계·합산은 실제 보유 데이터에 broker가 2개 이상일 때만 표시한다.
 - Trading 흐름의 Slack 호출 게이트웨이: 체결 알림은 `TradingOrderReconciliationService`, 승인 요청/결과 갱신은 `TradingSellApprovalService`/`TradingSellApprovalNotificationService`, 불명 주문 복구 표현은 Trading recovery presentation 서비스가 담당 — 전략(`*.strategy.ts`)에서 `SlackService` 직접 주입 금지 (`src/trading/CLAUDE.md` 참조)
 - 재접속 backoff: 3s → 6s → 12s → 24s → 48s (5회). 모두 실패 시 메시지 드롭, 다음 성공 재접속까지 송신 안 됨
 - ping timeout 클라이언트 15s / 서버 45s — Socket Mode가 끊겨도 빠르게 감지하기 위해 짧게 설정

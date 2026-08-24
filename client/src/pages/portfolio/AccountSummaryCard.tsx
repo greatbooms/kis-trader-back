@@ -9,8 +9,10 @@ import {
   useGetAccountSummaryQuery,
   useGetPositionsQuery,
   useRefreshAccountStateMutation,
+  type Broker,
 } from '@/graphql/generated'
 import { formatCurrencyByCode, formatDate } from '@/lib/utils'
+import { brokerLabel } from '@/lib/market-constants'
 import {
   buildCountryPortfolioSummary,
   getDisplayCashAmount,
@@ -41,6 +43,7 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
         countryFilter,
         positions,
         summary.cashBalances.map((cash) => ({
+          broker: cash.broker,
           market: cash.market,
           currencyCode: cash.currencyCode,
           amount: cash.amount,
@@ -51,6 +54,14 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
         })),
       )
     : null
+  const brokerCashSummaries = scopedSummary
+    ? Array.from(scopedSummary.countryCashBalances.reduce((totals, balance) => {
+        if (balance.broker) {
+          totals.set(balance.broker, (totals.get(balance.broker) ?? 0) + getDisplayCashAmount(balance))
+        }
+        return totals
+      }, new Map<Broker, number>())).filter(([, amount]) => amount !== 0)
+    : []
   const overallDomesticCash = summary?.cashBalances
     .filter((cash) => cash.currencyCode === 'KRW')
     .reduce((sum, cash) => sum + getDisplayCashAmount(cash), 0) ?? 0
@@ -119,7 +130,8 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
       {!collapsed ? (
         <CardContent className="space-y-5">
           {scopedSummary ? (
-            <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-6">
+            <>
+              <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-6">
               <SummaryMetricCard
                 icon={<Wallet className="h-4 w-4 text-muted-foreground" />}
                 label="현금성 자산"
@@ -164,7 +176,15 @@ export function AccountSummaryCard({ countryFilter }: AccountSummaryCardProps) {
                 subValue={`미결제 매도 ${formatCurrencyByCode(scopedSummary.pendingSellAmount, scopedSummary.currencyCode)} / 매수 ${formatCurrencyByCode(scopedSummary.pendingBuyAmount, scopedSummary.currencyCode)}`}
                 tone="default"
               />
-            </div>
+              </div>
+              {brokerCashSummaries.length > 1 ? (
+                <div className="text-sm text-muted-foreground">
+                  증권사별 현금성 자산 — {brokerCashSummaries.map(([broker, amount]) => (
+                    `${brokerLabel(broker)} ${formatCurrencyByCode(amount, scopedSummary.currencyCode)}`
+                  )).join(' · ')}
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-4">
               <SummaryMetricCard

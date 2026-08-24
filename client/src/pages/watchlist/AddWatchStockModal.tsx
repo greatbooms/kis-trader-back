@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
 import { type Broker, type Market, type StockSearchResult } from '@/graphql/generated'
 import { StockSearchInput } from '@/components/StockSearchInput'
-import { COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
+import { brokerLabel, COUNTRY_OPTIONS, EXCHANGE_LABELS } from '@/lib/market-constants'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
 import { STRATEGY_META, DEFAULT_STRATEGY_META } from './strategy-meta'
 import type { AddWatchStockModalProps } from './types'
@@ -113,8 +113,8 @@ export function AddWatchStockModal({ strategies, onSave, onClose }: AddWatchStoc
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">증권사</label>
             <Select value={broker} onChange={(e) => setBroker(e.target.value as Broker)}>
-              <option value="KIS">KIS</option>
-              <option value="TOSS">TOSS</option>
+              <option value="KIS">{brokerLabel('KIS')}</option>
+              <option value="TOSS">{brokerLabel('TOSS')}</option>
             </Select>
           </div>
 

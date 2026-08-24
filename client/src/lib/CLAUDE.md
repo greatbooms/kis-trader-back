@@ -9,7 +9,7 @@
 - `apollo-utils.ts` — `getMutationErrorMessage()` GraphQL 에러 메시지 정규화 (NestJS prefix 제거)
 - `auth.ts` — 모듈 스코프 인증 상태 store (`isAuthenticated`/`setAuthenticated`/`subscribeAuth`/`getAuthSnapshot`). React 외부에서 동기 접근 가능
 - `utils.ts` — `cn()`(twMerge+clsx) 및 포맷터: `formatCurrency`, `formatCurrencyByCode`, `formatNumber`, `formatPercent`, `formatDate`, `formatDateInputInTimeZone`. 거래소→통화/로케일 매핑 포함
-- `market-constants.ts` — `COUNTRY_OPTIONS`(국가/시장/거래소 매핑), `EXCHANGE_LABELS`, 그리고 `exchangeToCountry`/`getCountryByValue`/`filterByCountry`/`countByCountry` 유틸
+- `market-constants.ts` — `COUNTRY_OPTIONS`(국가/시장/거래소 매핑), `EXCHANGE_LABELS`, `BROKER_LABELS`, 그리고 `brokerLabel`/`exchangeToCountry`/`getCountryByValue`/`filterByCountry`/`countByCountry` 유틸
 - `trade-record.ts` — 주문 상태(`OrderStatus`) → 표시 라벨/배지 variant 변환 (`getTradeRecordDisplayInfo`, `canCancelTrade`)
 - `technical-ratings.ts` — 기술 지표 툴팁 사전 + `STRONG_BUY`/`BUY`/.../`STRONG_SELL` 라벨/배지 variant/액션 클래스 매핑
 - `chunk-error-recovery.ts` — Vite 코드 스플리팅 + 새 배포 시 옛 청크가 404 나는 케이스 자동 1회 reload (`isChunkLoadError`, `tryAutoReloadForChunkError`). `main.tsx`의 `vite:preloadError` 핸들러와 `AppErrorBoundary.componentDidCatch`에서 사용

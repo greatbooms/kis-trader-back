@@ -19,6 +19,7 @@ describe('TradingOrderReconciliationService', () => {
     },
     position: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     watchStock: {
       findUnique: jest.fn(),
@@ -60,6 +61,7 @@ describe('TradingOrderReconciliationService', () => {
   };
 
   beforeEach(async () => {
+    mockPrisma.position.findMany.mockResolvedValue([]);
     mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.$transaction.mockImplementation(async (work) => work(mockPrisma));
     mockPrisma.watchStockExecutionLog.findMany.mockImplementation(async () => {
@@ -639,6 +641,7 @@ describe('TradingOrderReconciliationService', () => {
           }),
         }),
       );
+      expect(mockSlackService.sendTradeAlert.mock.calls[0][0]).not.toHaveProperty('crossBrokerPosition');
       expect(mockFailureNotifier.notify).not.toHaveBeenCalled();
       expect(result).toEqual({ hasNewFill: true });
     });
@@ -759,6 +762,7 @@ describe('TradingOrderReconciliationService', () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
           id: 'trade-inf-1',
+          broker: Broker.KIS,
           market: 'OVERSEAS',
           exchangeCode: 'NASD',
           stockCode: 'TQQQ',
@@ -776,6 +780,7 @@ describe('TradingOrderReconciliationService', () => {
       ]);
       mockPrisma.tradeRecord.findUnique.mockResolvedValue({
         id: 'trade-inf-1',
+        broker: Broker.KIS,
         market: 'OVERSEAS',
         exchangeCode: 'NASD',
         stockCode: 'TQQQ',
@@ -809,7 +814,8 @@ describe('TradingOrderReconciliationService', () => {
           reason: 'Buy1: T=11.7, 70%+잔여재배분, 2주 @ 75.12',
         },
       });
-      mockPrisma.position.findFirst.mockResolvedValue({
+      mockPrisma.position.findMany.mockResolvedValue([{
+        broker: Broker.KIS,
         stockCode: 'TQQQ',
         stockName: 'TQQQ',
         exchangeCode: 'NASD',
@@ -820,7 +826,7 @@ describe('TradingOrderReconciliationService', () => {
         profitLoss: -136.01,
         profitRate: -4.66,
         totalInvested: 4560.63,
-      });
+      }]);
 
       await service.reconcileOpenOrders(
         Broker.KIS,
@@ -850,6 +856,104 @@ describe('TradingOrderReconciliationService', () => {
           }),
         }),
       );
+    });
+
+    it('adds the same-symbol cross-broker position only when more than one broker holds it', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([{
+        id: 'trade-cross-broker-position',
+        broker: Broker.KIS,
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 60,
+        executedQty: 0,
+        orderNo: 'cross-broker-order',
+        status: 'PENDING',
+        strategyName: 'daily-dca',
+        createdAt: new Date('2026-08-24T01:00:00Z'),
+      }]);
+      mockPrisma.tradeRecord.findUnique.mockResolvedValue({
+        id: 'trade-cross-broker-position',
+        broker: Broker.KIS,
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        stockName: 'TQQQ',
+        side: 'BUY',
+        quantity: 2,
+        price: 60,
+        executedQty: 2,
+        executedPrice: 60,
+        orderNo: 'cross-broker-order',
+        strategyName: 'daily-dca',
+      });
+      mockPrisma.watchStock.findUnique.mockResolvedValue({ id: 'watch-cross-broker-position' });
+      mockPrisma.watchStockExecutionLog.findFirst.mockResolvedValue({
+        market: 'OVERSEAS',
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        details: { side: 'BUY', quantity: 2, price: 60, orderDivision: '00', reason: '매수' },
+      });
+      mockPrisma.position.findMany.mockResolvedValue([
+        {
+          broker: Broker.KIS,
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          exchangeCode: 'NASD',
+          market: 'OVERSEAS',
+          quantity: 26,
+          avgPrice: 100,
+          currentPrice: 120,
+          profitLoss: 520,
+          profitRate: 20,
+          totalInvested: 2600,
+        },
+        {
+          broker: Broker.TOSS,
+          stockCode: 'TQQQ',
+          stockName: 'TQQQ',
+          exchangeCode: 'NASD',
+          market: 'OVERSEAS',
+          quantity: 10,
+          avgPrice: 110,
+          currentPrice: 122.16,
+          profitLoss: 121.6,
+          profitRate: 11.05,
+          totalInvested: 1100,
+        },
+      ]);
+
+      await service.reconcileOpenOrders(
+        Broker.KIS,
+        'OVERSEAS',
+        [{ broker: Broker.KIS, market: 'OVERSEAS', exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 26 }],
+        [],
+        [{
+          orderNo: 'cross-broker-order',
+          exchangeCode: 'NASD',
+          stockCode: 'TQQQ',
+          side: 'BUY',
+          orderQuantity: 2,
+          filledQuantity: 2,
+          remainingQuantity: 0,
+          filledPrice: 60,
+        }],
+      );
+
+      expect(mockSlackService.sendTradeAlert).toHaveBeenCalledWith(expect.objectContaining({
+        position: expect.objectContaining({ broker: Broker.KIS, quantity: 26 }),
+        crossBrokerPosition: {
+          totalQuantity: 36,
+          totalValue: 4341.6,
+          brokers: [
+            { broker: Broker.KIS, quantity: 26, value: 3120 },
+            { broker: Broker.TOSS, quantity: 10, value: 1221.6 },
+          ],
+        },
+      }));
     });
 
     it('canonicalizes an approved reconstructed signal to the record broker for strategy fill and Slack', async () => {

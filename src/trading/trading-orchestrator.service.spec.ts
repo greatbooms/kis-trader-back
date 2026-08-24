@@ -410,17 +410,31 @@ describe('TradingOrchestrator', () => {
               { broker: Broker.TOSS, value: 183 },
             ],
           },
-          {
-            exchangeCode: 'NYSE',
-            stockCode: 'TQQQ',
-            totalValue: 70,
-            brokers: [{ broker: Broker.TOSS, value: 70 }],
-          },
         ],
       }),
     }));
     expect(mockRiskManagement.evaluateRisk).toHaveBeenCalledTimes(1);
     expect(mockRiskManagement.evaluateRisk).toHaveBeenCalledWith(Broker.KIS, 'OVERSEAS');
+  });
+
+  it('excludes single-broker symbols from cross-broker exposure', async () => {
+    mockPrisma.position.findMany.mockResolvedValue([
+      { broker: Broker.KIS, exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 2, currentPrice: 60 },
+      { broker: Broker.KIS, exchangeCode: 'NYSE', stockCode: 'AAPL', quantity: 1, currentPrice: 200 },
+      { broker: Broker.TOSS, exchangeCode: 'NASD', stockCode: 'TQQQ', quantity: 3, currentPrice: 61 },
+    ]);
+
+    await expect((orchestrator as any).getCrossBrokerExposures('OVERSEAS')).resolves.toEqual([
+      {
+        exchangeCode: 'NASD',
+        stockCode: 'TQQQ',
+        totalValue: 303,
+        brokers: [
+          { broker: Broker.KIS, value: 120 },
+          { broker: Broker.TOSS, value: 183 },
+        ],
+      },
+    ]);
   });
 
   function buildWatchStock(broker: Broker, stockCode: string) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Market } from '@/graphql/generated'
+import type { Broker, Market } from '@/graphql/generated'
 import { COUNTRY_OPTIONS } from '@/lib/market-constants'
 import type { PortfolioPosition } from './types'
 
@@ -39,6 +39,7 @@ export function buildCountryPortfolioSummary(
   countryFilter: string | null,
   positions: PortfolioPosition[],
   cashBalances: Array<{
+    broker?: Broker | null
     market: Market
     currencyCode: string
     currencyName?: string | null

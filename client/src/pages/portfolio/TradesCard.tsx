@@ -12,7 +12,7 @@ import {
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
 import { formatCurrency, formatNumber, formatDateInputInTimeZone } from '@/lib/utils'
 import { TradeTimestamps } from '@/components/TradeTimestamps'
-import { filterByCountry } from '@/lib/market-constants'
+import { brokerLabel, filterByCountry } from '@/lib/market-constants'
 import { useIsMobile } from './portfolio-helpers'
 import { SectionToggleButton, MetricItem } from './PortfolioCommon'
 import type { PortfolioCardScopeProps } from './types'
@@ -147,7 +147,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                         <div>
                           <div className="flex items-center gap-2">
                             <div className="font-medium">{trade.stockName}</div>
-                            <Badge variant="outline">{trade.broker}</Badge>
+                            <Badge variant="outline">{brokerLabel(trade.broker)}</Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
                           <div className="mt-1"><TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} /></div>
@@ -224,7 +224,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                             <div className="font-medium truncate">{trade.stockName}</div>
                             <div className="flex items-center gap-1">
                               <div className="text-xs text-muted-foreground truncate">{trade.stockCode}</div>
-                              <Badge variant="outline">{trade.broker}</Badge>
+                              <Badge variant="outline">{brokerLabel(trade.broker)}</Badge>
                             </div>
                           </TableCell>
                           <TableCell className="align-top py-2">

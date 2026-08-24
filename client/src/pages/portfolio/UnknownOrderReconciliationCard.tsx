@@ -15,6 +15,7 @@ import {
   useLinkBrokerOrderCandidateMutation,
 } from '@/graphql/generated'
 import { getMutationErrorMessage } from '@/lib/apollo-utils'
+import { brokerLabel } from '@/lib/market-constants'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 import { UnknownOrderReconciliationDialog } from './UnknownOrderReconciliationDialog'
 import type {
@@ -78,9 +79,9 @@ export function UnknownOrderReconciliationCard() {
       await run(async () => {
         const result = await getContextPreview({ variables: { broker: item.broker } })
         const contextPreview = result.data?.currentBrokerContextPreview
-        if (!contextPreview) throw new Error(`현재 ${item.broker} 계좌 정보를 확인할 수 없습니다.`)
+        if (!contextPreview) throw new Error(`현재 ${brokerLabel(item.broker)} 계좌 정보를 확인할 수 없습니다.`)
         setDialog({ mode: 'ASSIGN_CONTEXT', item, contextPreview })
-      }, `현재 ${item.broker} 계좌 정보를 확인하지 못했습니다.`)
+      }, `현재 ${brokerLabel(item.broker)} 계좌 정보를 확인하지 못했습니다.`)
       return
     }
 
@@ -105,13 +106,13 @@ export function UnknownOrderReconciliationCard() {
         awaitRefetchQueries: true,
       })
       const inspection = result.data?.inspectBrokerOrderCandidates
-      if (!inspection) throw new Error(`${item.broker} 주문 후보 조회 결과가 없습니다.`)
+      if (!inspection) throw new Error(`${brokerLabel(item.broker)} 주문 후보 조회 결과가 없습니다.`)
       setDialog({
         mode: 'CANDIDATES',
         item: inspection.recoveryItem,
         candidates: inspection.candidates,
       })
-    }, `${item.broker} 주문 후보를 확인하지 못했습니다.`)
+    }, `${brokerLabel(item.broker)} 주문 후보를 확인하지 못했습니다.`)
   }
 
   const selectCandidate = (candidate: BrokerOrderRecoveryCandidate) => {
@@ -245,7 +246,7 @@ export function UnknownOrderReconciliationCard() {
                         <Badge variant="danger">
                           {item.lifecycle === 'CANCELLATION' ? '취소 결과 불명' : '주문 제출 결과 불명'}
                         </Badge>
-                        <Badge variant="outline">{item.broker}</Badge>
+                        <Badge variant="outline">{brokerLabel(item.broker)}</Badge>
                         <span className="font-medium">{item.stockName}</span>
                         <span className="text-xs text-muted-foreground">{item.stockCode} · {item.exchangeCode}</span>
                       </div>
@@ -266,7 +267,7 @@ export function UnknownOrderReconciliationCard() {
                         ? '현재 계좌 연결'
                         : item.lifecycle === 'CANCELLATION'
                           ? '취소 상태 조회'
-                          : `${item.broker} 주문 조회`}
+                          : `${brokerLabel(item.broker)} 주문 조회`}
                     </Button>
                   </div>
                 )

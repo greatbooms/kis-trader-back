@@ -1,8 +1,11 @@
 import { Field, Float, ObjectType } from '@nestjs/graphql';
-import { Market } from '@prisma/client';
+import { Broker, Market } from '@prisma/client';
 
 @ObjectType()
 export class CashBalanceType {
+  @Field(() => Broker, { nullable: true })
+  broker?: Broker;
+
   @Field(() => Market)
   market: Market;
 
