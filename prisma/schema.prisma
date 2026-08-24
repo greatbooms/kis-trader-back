@@ -20,6 +20,8 @@ model TradeRecord {
   price                      Decimal
   executedPrice              Decimal?                    @map("executed_price")
   executedQty                Int?                        @map("executed_qty")
+  /// 마지막 체결을 시스템이 확인한 시각. 브로커 체결 시각이 아니라 동기화 관측 시각(10~15초 오차).
+  executedAt                 DateTime?                   @map("executed_at")
   orderNo                    String?                     @map("order_no")
   status                     OrderStatus
   strategyName               String?                     @map("strategy_name")

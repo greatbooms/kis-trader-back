@@ -7540,6 +7540,14 @@
             "deprecationReason": null
           },
           {
+            "name": "executedAt",
+            "description": "체결 확인 시각. 브로커 체결 시각이 아니라 동기화가 체결을 관측한 시각.",
+            "args": [],
+            "type": { "kind": "SCALAR", "name": "DateTime", "ofType": null },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "executedPrice",
             "description": null,
             "args": [],

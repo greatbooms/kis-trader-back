@@ -81,6 +81,7 @@ export class TradingBrokerCancellationRecoveryService {
           executedPrice: execution.filledPrice
             ?? record.executedPrice
             ?? record.price,
+          ...(executedQty > previousExecutedQty ? { executedAt: resolvedAt } : {}),
           cancellationStatus: CancellationAttemptStatus.RESOLVED,
           cancellationResolvedAt: resolvedAt,
           cancellationResolvedBy: actor,

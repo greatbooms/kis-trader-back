@@ -977,6 +977,8 @@ export type TradeRecordType = {
   cancellationStatus?: Maybe<CancellationAttemptStatus>;
   createdAt: Scalars["DateTime"]["output"];
   exchangeCode: Scalars["String"]["output"];
+  /** 체결 확인 시각. 브로커 체결 시각이 아니라 동기화가 체결을 관측한 시각. */
+  executedAt?: Maybe<Scalars["DateTime"]["output"]>;
   executedPrice?: Maybe<Scalars["Float"]["output"]>;
   executedQty?: Maybe<Scalars["Int"]["output"]>;
   id: Scalars["ID"]["output"];
@@ -1591,6 +1593,7 @@ export type GetTradesQuery = {
     price: number;
     executedPrice?: number | null;
     executedQty?: number | null;
+    executedAt?: any | null;
     orderNo?: string | null;
     status: OrderStatus;
     cancellationStatus?: CancellationAttemptStatus | null;
@@ -1622,6 +1625,7 @@ export type GetTradeQuery = {
     price: number;
     executedPrice?: number | null;
     executedQty?: number | null;
+    executedAt?: any | null;
     orderNo?: string | null;
     status: OrderStatus;
     cancellationStatus?: CancellationAttemptStatus | null;
@@ -4376,6 +4380,7 @@ export const GetTradesDocument = gql`
       price
       executedPrice
       executedQty
+      executedAt
       orderNo
       status
       cancellationStatus
@@ -4488,6 +4493,7 @@ export const GetTradeDocument = gql`
       price
       executedPrice
       executedQty
+      executedAt
       orderNo
       status
       cancellationStatus

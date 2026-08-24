@@ -107,7 +107,7 @@ export class TradingOrderReconciliationService {
         const nextStatus = this.getBrokerOrderStatus(record.quantity, totalExecutedQty, brokerOrder);
         const isTerminalPartial = nextStatus === OrderStatus.PARTIAL
           && brokerOrder.remainingQuantity <= 0;
-        const nextExecutedPrice = brokerOrder.filledPrice ?? record.executedPrice ?? record.price;
+        const nextExecutedPrice = this.resolveExecutedPrice(record, brokerOrder, executedQty);
         const nextReason = this.buildBrokerOrderReason(record.reason, brokerOrder, nextStatus);
 
         if (
@@ -122,12 +122,17 @@ export class TradingOrderReconciliationService {
               status: record.status,
               orderNo: record.orderNo,
               cancellationStatus: record.cancellationStatus ?? null,
+              // 같은 broker 스냅샷을 본 동시 실행(15초 동기화 cron × 일일요약 강제 sync)이
+              // 모두 CAS를 통과해 filledNowQty를 이중 반영하는 것을 막는다.
+              // 정규화한 0이 아니라 raw 값이어야 NULL 행도 매칭된다.
+              executedQty: record.executedQty,
             },
             data: {
               status: nextStatus,
               ...(isTerminalPartial ? { orderNo: null } : {}),
               executedQty: totalExecutedQty,
               executedPrice: nextExecutedPrice,
+              ...(filledNowQty > 0 ? { executedAt: new Date() } : {}),
               reason: nextReason,
             },
           });
@@ -220,9 +225,11 @@ export class TradingOrderReconciliationService {
     if (!brokerOrder || isStillOpen || !record.orderNo) return false;
 
     const previousExecutedQty = record.executedQty || 0;
-    const totalExecutedQty = Math.min(
-      record.quantity,
-      brokerOrder?.filledQuantity ?? previousExecutedQty,
+    // stale 스냅샷이 체결수량을 되돌리면 실체결 주문을 무체결 취소로 확정해버리므로
+    // 메인 경로와 동일하게 이전 누적치 아래로는 내려가지 않게 한다.
+    const totalExecutedQty = Math.max(
+      previousExecutedQty,
+      Math.min(record.quantity, brokerOrder?.filledQuantity ?? previousExecutedQty),
     );
     const filledNowQty = Math.max(0, totalExecutedQty - previousExecutedQty);
     const nextStatus = totalExecutedQty >= record.quantity
@@ -256,7 +263,8 @@ export class TradingOrderReconciliationService {
           ...(brokerOrder
             ? {
               executedQty: totalExecutedQty,
-              executedPrice: brokerOrder.filledPrice ?? record.executedPrice ?? record.price,
+              executedPrice: this.resolveExecutedPrice(record, brokerOrder, previousExecutedQty),
+              ...(filledNowQty > 0 ? { executedAt: new Date() } : {}),
             }
             : {}),
           cancellationStatus: CancellationAttemptStatus.RESOLVED,
@@ -364,6 +372,22 @@ export class TradingOrderReconciliationService {
       return OrderStatus.FILLED;
     }
     return OrderStatus.PARTIAL;
+  }
+
+  /**
+   * 체결 평균가 결정. broker 스냅샷의 체결수량이 이미 확정된 누적치보다 적으면(stale 응답)
+   * 그 평균가는 더 적은 체결분만 반영한 값이므로 채택하지 않고 저장된 값을 유지한다.
+   * 수량만 단조 clamp하고 가격을 덮어쓰면 평단이 오염돼 P/L 집계까지 틀어진다.
+   */
+  private resolveExecutedPrice(
+    record: TradeRecord,
+    brokerOrder: BrokerOrderStatus,
+    previousExecutedQty: number,
+  ): TradeRecord['price'] | number {
+    if (brokerOrder.filledQuantity < previousExecutedQty) {
+      return record.executedPrice ?? record.price;
+    }
+    return brokerOrder.filledPrice ?? record.executedPrice ?? record.price;
   }
 
   private buildBrokerOrderReason(

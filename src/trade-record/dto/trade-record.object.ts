@@ -50,6 +50,12 @@ export class TradeRecordType {
   @Field(() => Int, { nullable: true })
   executedQty?: number;
 
+  @Field({
+    nullable: true,
+    description: '체결 확인 시각. 브로커 체결 시각이 아니라 동기화가 체결을 관측한 시각.',
+  })
+  executedAt?: Date;
+
   @Field({ nullable: true })
   orderNo?: string;
 

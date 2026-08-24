@@ -10,7 +10,8 @@ import {
   type Side,
 } from '@/graphql/generated'
 import { canCancelTrade, getTradeRecordDisplayInfo } from '@/lib/trade-record'
-import { formatCurrency, formatNumber, formatDate, formatDateInputInTimeZone } from '@/lib/utils'
+import { formatCurrency, formatNumber, formatDateInputInTimeZone } from '@/lib/utils'
+import { TradeTimestamps } from '@/components/TradeTimestamps'
 import { filterByCountry } from '@/lib/market-constants'
 import { useIsMobile } from './portfolio-helpers'
 import { SectionToggleButton, MetricItem } from './PortfolioCommon'
@@ -149,7 +150,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                             <Badge variant="outline">{trade.broker}</Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">{trade.stockCode}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{formatDate(trade.createdAt)}</div>
+                          <div className="mt-1"><TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} /></div>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           <Badge variant={trade.side === 'BUY' ? 'danger' : 'info'}>
@@ -184,7 +185,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
               <div className="hidden md:block">
                 <Table className="table-fixed [&_th]:px-2 [&_td]:px-2">
                   <colgroup>
-                    <col className="w-36" /> {/* 일시 */}
+                    <col className="w-44" /> {/* 일시 */}
                     <col className="w-32" /> {/* 종목 */}
                     <col className="w-16" /> {/* 구분 */}
                     <col className="w-16" /> {/* 수량 */}
@@ -218,7 +219,7 @@ export function TradesCard({ market, countryFilter }: PortfolioCardScopeProps) {
                           key={trade.id}
                           className={trade.status === 'FAILED' ? 'bg-red-50/60' : trade.status === 'PARTIAL' ? 'bg-amber-50/40' : undefined}
                         >
-                          <TableCell className="align-top py-2 text-xs whitespace-nowrap">{formatDate(trade.createdAt)}</TableCell>
+                          <TableCell className="align-top py-2"><TradeTimestamps createdAt={trade.createdAt} executedAt={trade.executedAt} /></TableCell>
                           <TableCell className="align-top py-2 min-w-0">
                             <div className="font-medium truncate">{trade.stockName}</div>
                             <div className="flex items-center gap-1">

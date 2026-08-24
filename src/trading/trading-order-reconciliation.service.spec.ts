@@ -184,6 +184,56 @@ describe('TradingOrderReconciliationService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps cumulative fills monotonic when an accepted cancellation snapshot regresses to zero', async () => {
+      mockPrisma.tradeRecord.findMany.mockResolvedValue([
+        {
+          id: 'trade-cancel-stale-fill',
+          market: 'DOMESTIC',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          stockName: 'Samsung',
+          side: 'BUY',
+          quantity: 4,
+          price: 70_000,
+          executedQty: 4,
+          executedPrice: 70_100,
+          orderNo: 'stale-cancel-order',
+          brokerOrderDate: '20260713',
+          status: 'PARTIAL',
+          cancellationStatus: 'ACCEPTED',
+          strategyName: 'daily-dca',
+          reason: 'DCA buy',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      ]);
+      mockPrisma.tradeRecord.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.brokerOrderActionAuditLog.create.mockResolvedValue({ id: 'audit-stale-cancel' });
+
+      await service.reconcileOpenOrders(Broker.KIS, 'DOMESTIC', [], [], [
+        {
+          orderNo: 'stale-cancel-order',
+          orderDate: '20260713',
+          exchangeCode: 'KRX',
+          stockCode: '005930',
+          side: 'BUY',
+          orderQuantity: 4,
+          // stale 스냅샷: 이미 확정된 4주 체결이 2주로 회귀하며 평균가도 낮게 보고
+          filledQuantity: 2,
+          filledPrice: 69_900,
+          remainingQuantity: 0,
+        },
+      ]);
+
+      const data = mockPrisma.tradeRecord.updateMany.mock.calls[0][0].data;
+      expect(data.executedQty).toBe(4);
+      expect(data.status).toBe('FILLED');
+      // 회귀 스냅샷의 평균가는 더 적은 체결분만 반영한 값이라 저장된 평단을 유지한다
+      expect(data.executedPrice).toBe(70_100);
+      // 신규 체결이 아니므로 체결 시각은 갱신하지 않고, 무체결 취소 통지도 하지 않는다
+      expect(data).not.toHaveProperty('executedAt');
+      expect(mockFailureNotifier.notify).not.toHaveBeenCalled();
+    });
+
     it('keeps an accepted cancellation unresolved while the exact order remains unfilled', async () => {
       mockPrisma.tradeRecord.findMany.mockResolvedValue([
         {
@@ -474,11 +524,13 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PENDING',
           orderNo: 'race-broker-order',
           cancellationStatus: null,
+          executedQty: 0,
         },
         data: {
           status: 'FILLED',
           executedQty: 2,
           executedPrice: 70_000,
+          executedAt: expect.any(Date),
           reason: 'DCA buy | 평균체결가 70000',
         },
       });
@@ -561,11 +613,13 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PENDING',
           orderNo: '1001',
           cancellationStatus: null,
+          executedQty: null,
         },
         data: {
           status: 'FILLED',
           executedQty: 10,
           executedPrice: 70000,
+          executedAt: expect.any(Date),
           reason: '평균체결가 70000',
         },
       });
@@ -1023,11 +1077,13 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PENDING',
           orderNo: '1003',
           cancellationStatus: null,
+          executedQty: null,
         },
         data: {
           status: 'PARTIAL',
           executedQty: 4,
           executedPrice: 70500,
+          executedAt: expect.any(Date),
           reason: '부분체결 4/10주, 잔량 6주, 평균체결가 70500',
         },
       });
@@ -1105,11 +1161,14 @@ describe('TradingOrderReconciliationService', () => {
             status: executedQty > 0 ? 'PARTIAL' : 'PENDING',
             orderNo: 'partial-rejected-order',
             cancellationStatus: null,
+            executedQty,
           },
           data: {
             status: 'FAILED',
             executedQty: 1,
             executedPrice: 70_500,
+            // 이전 체결분이 이미 반영된 케이스는 신규 체결이 없어 executedAt을 갱신하지 않는다
+            ...(executedQty > 0 ? {} : { executedAt: expect.any(Date) }),
             reason: 'DCA buy | 브로커 거부: 잔량 거부',
           },
         });
@@ -1178,6 +1237,7 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PARTIAL',
           orderNo: 'stale-rejected-order',
           cancellationStatus: null,
+          executedQty: 1,
         },
         data: {
           status: 'FAILED',
@@ -1280,12 +1340,14 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PENDING',
           orderNo: 'terminal-partial-order',
           cancellationStatus: null,
+          executedQty: 0,
         },
         data: {
           status: 'PARTIAL',
           orderNo: null,
           executedQty: 2,
           executedPrice: 80,
+          executedAt: expect.any(Date),
           reason: 'Take profit | 부분체결 2/5주, 평균체결가 80',
         },
       });
@@ -1333,6 +1395,7 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PARTIAL',
           orderNo: 'existing-terminal-partial-order',
           cancellationStatus: null,
+          executedQty: 2,
         },
         data: {
           status: 'PARTIAL',
@@ -1508,6 +1571,7 @@ describe('TradingOrderReconciliationService', () => {
           status: 'PENDING',
           orderNo: '2006',
           cancellationStatus: null,
+          executedQty: null,
         },
         data: {
           status: 'FAILED',
